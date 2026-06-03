@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{TITLE}}</title>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+  <!-- Shared visual-kit <style> block is injected here by compose.py
+       (extracted from references/visual_kit.md so the composite stays in sync
+       with the canonical kit). -->
+  {{STYLE}}
+</head>
+<body>
+
+{{HEADER}}
+
+{{TAB_BAR}}
+
+{{PANES}}
+
+<footer>{{FOOTER}}</footer>
+
+<!-- Back-to-top floating arrow — fixed bottom-right, scrolls to <header id="top">
+     via the visual-kit scroll-behavior: smooth rule. -->
+<a href="#top" class="back-to-top" aria-label="Back to top" title="Back to top">↑</a>
+
+<!-- Plotly chart scripts extracted verbatim from CVR-RCA's report.html so the
+     charts inside the CVR RCA tab still render in the composite. -->
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    {{CHART_SCRIPTS}}
+  });
+</script>
+
+<!-- Tab framework JS — same behavior as the cvr-rca standalone report
+     (visual_kit.md "Tabbed report structure"). Switches tabs on button click
+     and when an in-page anchor (e.g. a cross-tab ↗ citation) targets an element
+     inside a non-active pane. No-ops gracefully if there's only one tab. -->
+<script>
+  (function () {
+    function activateTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.remove('active'); });
+      document.querySelectorAll('.tab-button').forEach(function (b) {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      var pane = document.getElementById('tab-' + tabId);
+      var btn  = document.querySelector('.tab-button[data-tab="' + tabId + '"]');
+      if (pane) pane.classList.add('active');
+      if (btn)  { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
+      // Charts inside a previously-hidden pane may have rendered at width 0;
+      // force a resize so they reflow to the now-visible container.
+      if (pane && window.Plotly) {
+        pane.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+          try { window.Plotly.Plots.resize(el); } catch (e) { /* ignore */ }
+        });
+      }
+    }
+
+    document.querySelectorAll('.tab-button').forEach(function (btn) {
+      btn.addEventListener('click', function () { activateTab(btn.dataset.tab); });
+    });
+
+    // Cross-tab anchor links — switch to the target's tab first, then scroll.
+    document.addEventListener('click', function (e) {
+      var link = e.target.closest('a[href^="#"]');
+      if (!link) return;
+      var href = link.getAttribute('href');
+      if (!href || href === '#') return;
+      var target = document.getElementById(href.slice(1));
+      if (!target) return;
+      var pane = target.closest('.tab-pane');
+      if (pane && !pane.classList.contains('active')) {
+        e.preventDefault();
+        activateTab(pane.id.replace(/^tab-/, ''));
+        history.pushState(null, '', href);
+        setTimeout(function () {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 50);
+      }
+    });
+
+    // On load: if the URL hash points into a non-default tab, switch to it.
+    if (location.hash) {
+      var t = document.getElementById(location.hash.slice(1));
+      var p = t && t.closest('.tab-pane');
+      if (p && !p.classList.contains('active')) {
+        activateTab(p.id.replace(/^tab-/, ''));
+        setTimeout(function () {
+          t.scrollIntoView({ behavior: 'instant', block: 'start' });
+        }, 50);
+      }
+    }
+  })();
+</script>
+
+</body>
+</html>

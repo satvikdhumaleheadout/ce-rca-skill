@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+scripts/__pycache__/
+*.pyc
+*.pyo
+
+# Temp output from the skill
+/tmp/

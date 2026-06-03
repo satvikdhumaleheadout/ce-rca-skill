@@ -21,12 +21,30 @@ This keeps composition deterministic and the master's job small.
 
 Tabs are emitted in this order, each only if its source artifact exists:
 
-1. **CE Health** ← `ce_health_report.md` (always present — CE Health always runs)
-2. **CVR RCA** ← `cvr_rca_report.html` (present if cvr-rca was dispatched)
-3. **Paid Performance Audit** ← `perf_audit_report.md` (present if perf-audit ran)
-4. *(future tabs append here — one entry in `compose.py`'s `TAB_SPECS`)*
+1. **Summary** ← `summary_report.html` (present if the Step 3 synthesis ran)
+2. **CE Health** ← `ce_health_report.md` (always present — CE Health always runs)
+3. **CVR RCA** ← `cvr_rca_report.html` (present if cvr-rca was dispatched)
+4. **Paid Performance Audit** ← `perf_audit_report.md` (present if perf-audit ran)
+5. *(future tabs append here — one entry in `compose.py`'s `TAB_SPECS`)*
 
-The order matches the C-level mental model: zoom out (is the CE okay?) → zoom in (where's the funnel break?) → zoom further (is paid dragging?).
+The Summary is first because most readers open it first — it's the front page.
+The rest match the C-level mental model: zoom out (is the CE okay?) → zoom in
+(where's the funnel break?) → zoom further (is paid dragging?).
+
+## The Summary tab
+
+The Summary is **our** synthesis (authored by the Step 3 sub-agent per
+`summary_guide.md`), not a verbatim render of an external skill — so it earns the
+full visual-kit chrome: a 6-card vitals row (Revenue / Traffic / CVR / AOV /
+Completion / Take Rate, values from CE Health verbatim), a root-cause callout, a
+cross-reference table (Finding · Source ↗ · Corroborated by ↗ · Implication), and
+per-driver synthesis blocks. It carries `↗` cross-tab links into every other tab.
+
+It is written as a clean HTML **body fragment** (`summary_report.html`), so
+`compose.py` embeds it via the **`html-fragment`** tab type — verbatim, no
+markdown conversion, no body extraction, no chart-script handling (the Summary
+has no charts; it references the tabs' charts via `↗`). It is **pure synthesis**:
+it weaves findings the tabs already reached and never computes new numbers.
 
 ## The CVR-RCA rename step (master's responsibility)
 

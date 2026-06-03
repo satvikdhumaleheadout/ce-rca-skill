@@ -9,6 +9,23 @@
        (extracted from references/visual_kit.md so the composite stays in sync
        with the canonical kit). -->
   {{STYLE}}
+  <!-- Tab-framework CSS. The tab framework is the COMPOSITE's own mechanic, so
+       its CSS lives here rather than in the shared kit. (The canonical
+       visual_kit documents the tab HTML pattern but does not carry the tab CSS
+       in its <style> block — standalone skills inline it when writing tabbed
+       HTML; the composite injects it here.) Without `.tab-pane{display:none}`
+       all panes would stack visibly, so this block is load-bearing. -->
+  <style>
+    .tab-bar { display:flex; gap:4px; position:sticky; top:0; z-index:50;
+      background:#1a1a2e; padding:0 40px; border-bottom:1px solid #2e2d44; flex-wrap:wrap; }
+    .tab-button { font-family:inherit; font-size:13px; font-weight:600; color:#8892a4;
+      background:transparent; border:none; padding:14px 22px; cursor:pointer;
+      border-bottom:3px solid transparent; transition:color .15s, border-color .15s; }
+    .tab-button:hover { color:#c8cfe0; }
+    .tab-button.active { color:#fff; border-bottom-color:#4a7eff; }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+  </style>
 </head>
 <body>
 

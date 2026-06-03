@@ -9,6 +9,7 @@
 > standalone CVR-RCA report. (Same manual-sync policy perf-audit-skill follows
 > for its own copy.)
 
+
 This file is the **report visual kit** — the skill-agnostic primitives any HTML-report-producing skill builds on. CSS, HTML patterns, styling rules, tab framework, ↗ link-to-table affordance, Slack integration patterns, generic anti-patterns.
 
 The skill's own structure file (`report_structure.md` for CVR-RCA, `perf_audit_structure.md` for perf-audit, etc.) describes the section-level layout on top of these primitives. Read this file first, then the structure file for the skill you're writing for.
@@ -167,8 +168,9 @@ Every Section 3 analysis block carries an `id` attribute (see "Anchor ID convent
 - Internal navigation: bare `↗` (one character, no text)
 - Slack source: `Source · date ↗` (name + date as text, arrow as the link)
 - Perf-audit source: `per perf-audit ↗` or `perf-audit named: <event · date> ↗` (see "Tabbed report structure" below for the cross-tab anchor scheme)
+- CE Health source: `per CE Health ↗` or `CE Health: <fact> ↗` (e.g. `CE Health: TGID 7148 RPC −30% ↗`) — links to a `#cehealth-*` anchor in the CE Health tab
 
-All three use the same `.ref-link` CSS class — visually consistent, semantically distinct by context. When the anchor target lives in a non-default tab (e.g., `#perfaudit-paid-deep-dive`), the JS in the template switches tabs before scrolling; same visual experience for the reader.
+All use the same `.ref-link` CSS class — visually consistent, semantically distinct by context. When the anchor target lives in a non-default tab (e.g., `#perfaudit-paid-deep-dive`, `#cehealth-driver-diagnosis-shapley`), the JS in the template switches tabs before scrolling; same visual experience for the reader.
 
 ---
 
@@ -260,10 +262,12 @@ Conversion mapping (markdown syntax → HTML tags, content unchanged):
 
 | Tab | Anchor prefix | Example |
 |---|---|---|
+| Summary (CE-RCA composite only) | `summary-*` | `#summary-root-cause` |
+| CE Health (CE-RCA composite only) | `cehealth-*` | `#cehealth-driver-diagnosis-shapley`, `#cehealth-top-tgids` |
 | CVR-RCA (Section 3 blocks) | `block-*` and `chart-*` (no tab prefix) | `#block-cascade`, `#chart-daily-c2o` |
 | Paid Performance Audit | `perfaudit-*` | `#perfaudit-paid-deep-dive`, `#perfaudit-coverage-matchmaking` |
 
-The slug generator strips a leading "N. " from numbered headings, so `## 5. Coverage + Matchmaking` becomes `id="perfaudit-coverage-matchmaking"`. Stable across re-renders as long as the heading text is unchanged.
+The slug generator strips a leading "N. " from numbered headings, so `## 5. Coverage + Matchmaking` becomes `id="perfaudit-coverage-matchmaking"`. Stable across re-renders as long as the heading text is unchanged. The `summary-*` and `cehealth-*` prefixes apply only inside the CE-RCA umbrella composite (where those tabs exist); a standalone CVR-RCA report has only `block-*`/`chart-*` and `perfaudit-*` tabs.
 
 ### Citation routing — CVR-RCA → perf-audit tab
 
@@ -1074,6 +1078,7 @@ Plotly.newPlot('trend-90day', traces90d, {
 
 | # | Date | Changes |
 |---|------|---------|
+| c006 | 2026-06-03 | Registered two new cross-tab anchor prefixes for the CE-RCA umbrella composite: `summary-*` (the Summary synthesis tab) and `cehealth-*` (the CE Health tab). Citation format split gains a CE Health source form (`per CE Health ↗` / `CE Health: <fact> ↗`). Both prefixes apply only inside the CE-RCA composite where those tabs exist; standalone CVR-RCA reports are unaffected. Paired with cvr-rca SKILL.md c039 (CE Health reconciliation lens at Step 2b). |
 | c001 | 2026-05-28 | Initial version. Skill-agnostic visual primitives extracted from `cvr-rca/references/report_structure.md` (v1.19): shared `<style>` block (CSS for header / container / metric cards / callout / action cards / analysis blocks / verdict lines / tables / shapley flex bar / fixed segment banner / ref-link / tab bar / md-content); Page skeleton; Section label; Metric cards HTML; Root cause callout HTML (Shape A paragraph + Shape B multi-driver bullet); Action card HTML; Analysis block (general pattern); Table with highlight rows; Plotly chart conventions; Anchor ID convention; Styling and language guidelines (rules 1–7); Slack integration & link-to-table styling; Tabbed report structure (full HTML pattern); Anti-patterns. Read by any skill producing an HTML report. |
 | c005 | 2026-05-29 | **Trimmed the "ignore `.html`" defensive language from Perf-audit tab rendering.** Removed the "Source of truth: never `perf_audit_report.html`" paragraph and rewrote the corresponding anti-pattern row to focus on the positive rule (perf-audit content stays in the perf-audit's structure) rather than enumerating the specific `.html` failure mode. The c004 guardrails made sense when perf-audit-skill had been emitting `.html` locally; once perf-audit-skill was rolled back to emitting markdown only, those guardrails became obsolete. Scalable skill instructions describe canonical behavior; one-off defensive negations belong in commit messages and changelog history, not in the live spec. Canonical rule unchanged: Tab 2 reads `perf_audit_report.md` and converts verbatim. Companion change in `SKILL.md` c037. |
 | c004 | 2026-05-29 | **Perf-audit tab rendering rewritten + missing `.md-content` / `.md-table` CSS finally added.** Two related fixes: **(1)** The "Perf-audit tab rendering" subsection is rewritten to enforce verbatim markdown → HTML conversion from `perf_audit_report.md`, with explicit rules against summarization / restructuring / dropping subsections (h3/h4 must survive — `4a. Campaign roster`, `5c. Money on table (sized)`, Appendix sections, Data Sources all preserved). Source of truth pinned: `perf_audit_report.md` only. **`perf_audit_report.html` (if it exists) is ignored** because the perf-audit-skill's own md→html step may restructure content we can't control. Conversion mapping expanded to cover blockquotes, h4, fenced code blocks, and the inline link syntax. New fallback rule: if any markdown construct can't be faithfully converted, embed the raw markdown text inside `<pre class="md-raw">` — better to show raw markdown than paraphrased HTML. **(2)** The c001 entry promised `md-content` styling in the shared `<style>` block but the actual CSS rules were never added during the v1.19 extraction. Adding them now: `.md-content` (h1/h2/h3/h4 hierarchy, paragraph spacing, ul/ol, code, links, hr, blockquote, target highlight) plus `.md-table` (GFM table styling consistent with the rest of the visual kit) plus new `.md-content pre.md-raw` (monospace fallback for the raw-markdown render). Two new Anti-pattern rows codify the rule: "Tab 2 sources from .html or wraps perf-audit content in CVR-RCA chrome" and "Sub-headings dropped during the perf-audit md→HTML conversion". Companion change in `cvr-rca/SKILL.md` c036 (Step 3 Tab framework rewritten to drop the `.html` byte-paste). Driven by CE 3593 RCA where Tab 2 was 31% smaller than the source `.md` due to perf-audit-skill's `.html` restructuring step. |

@@ -65,6 +65,13 @@ def extract_style_block(visual_kit_path: Path) -> str:
 
 TAB_SPECS = [
     {
+        "id": "summary",
+        "label": "Summary",
+        "source": "summary_report.html",
+        "type": "html-fragment",
+        "anchor_prefix": "summary-",
+    },
+    {
         "id": "cehealth",
         "label": "CE Health",
         "source": "ce_health_report.md",
@@ -179,6 +186,11 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
         src_path = run_dir / spec["source"]
         if spec["type"] == "markdown":
             pane_body = render_markdown_tab(src_path, spec["anchor_prefix"])
+        elif spec["type"] == "html-fragment":
+            # Already a clean HTML body fragment (the Summary). Embed verbatim —
+            # no markdown conversion, no extraction, no chart-script handling
+            # (the Summary references the tabs' charts via ↗ links, it has none).
+            pane_body = src_path.read_text(encoding="utf-8")
         elif spec["type"] == "html-extract":
             html = src_path.read_text(encoding="utf-8")
             body, scripts = extract_cvr_rca_tab(html)

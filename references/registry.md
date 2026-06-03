@@ -42,8 +42,30 @@ Before firing any sub-agent, the master writes `<run_dir>/orchestration.json`:
   "orchestrator": "ce-rca",
   "version": "<master VERSION>",
   "fired_by_master": ["perf-audit-skill", "cvr-rca"],
+  "context_lenses": ["ce_health_report.md", "perf_audit_report.md", "slack_context.md"],
   "run_dir": "<absolute path>"
 }
 ```
 
-This is the contract that stops sub-skills from double-firing each other. CVR-RCA, before spawning its own perf-audit sub-agent, checks this file — if `perf-audit-skill` is in `fired_by_master`, it skips its spawn and consumes the master's perf-audit output at its Step 2b reconciliation instead. See `cvr-rca/SKILL.md → "Perf-audit context"` for the consuming side.
+Two fields, two jobs:
+
+- **`fired_by_master`** stops sub-skills double-firing each other. CVR-RCA, before spawning its own perf-audit sub-agent, checks this — if `perf-audit-skill` is listed, it skips its spawn and consumes the master's perf-audit output at Step 2b instead. See `cvr-rca/SKILL.md → "Perf-audit context"`.
+- **`context_lenses`** is the **cross-skill manifest** — the lens artifacts deep dives reconcile against at their synthesis step. Always include `ce_health_report.md` (CE Health ran in Step 0, available to all). CVR-RCA reads this at its Step 2b "Context reconciliation" and folds CE Health + perf-audit + Slack into its funnel findings with the four-pattern model. This is what makes a deep-dive tab cite CE Health (e.g. a TGID's S2C drop corroborated against CE Health's RPC drop for that TGID). See `cvr-rca/SKILL.md → Step 2b → "Context reconciliation"`.
+
+## The Summary synthesis pass (Step 3)
+
+After the deep dives finish, the master fires a **Summary synthesis sub-agent**
+(`references/summary_guide.md`) that reads every finished tab and writes
+`summary_report.html` — the front-page cross-cutting synthesis. This is the
+**peer↔peer weave surface**: individual deep-dive tabs reference *upstream* (CE
+Health) inline, but the full "CVR found X, corroborated by perf Y, links to CE
+Health Z" cross-referencing lives in the Summary, which runs last and sees
+everything. Pure synthesis (no re-query); arbiter upgrade is a TODO.
+
+## TODO — perf-audit cross-skill enrichment (owner hand-off)
+
+perf-audit is owned by another team and is **not modified** by this work. Today
+its tab doesn't cite CE Health or CVR-RCA — the Summary covers those cross-links.
+The deferred enrichment: perf-audit should read the `context_lenses` manifest at
+its own synthesis (mirroring CVR-RCA's Step 2b context layer) and cite CE Health /
+CVR-RCA in its tab. This requires changes in the perf-audit repo by its owner.

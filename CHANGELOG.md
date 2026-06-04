@@ -5,6 +5,30 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v1.1.2] — 2026-06-03 — Composite header completeness: Omni pill + landing-page link
+
+**Summary:** Two header elements were silently missing from composites. **Omni dashboard pill** — Step 0d now adds the `dashboards` array unconditionally (it only needs the CE ID), so every composite header carries the Omni link rather than depending on the orchestrator remembering to add it. **Landing-page link** — CE Health's sidecar doesn't carry the CE's landing-page URL, so it couldn't be filled at Step 0d; new Step 4a back-fills `top_page_url` from CVR-RCA's `summary.json` (the source that does have it) before compose, so the 🔗 link and clickable CE name render whenever CVR-RCA ran. No `compose.py` change — `build_header` already rendered both when present; the gap was meta.json not being populated. Step 4 sub-steps renumbered (4a back-fill → 4b rename → 4c compose → 4d report).
+
+---
+
+## [v1.1.2] — 2026-06-03 — Sentra dashboard link deprecated
+
+**Summary:** Sentra is being retired, so the master no longer adds a Sentra link to the composite report header. Step 0d now populates `meta.json`'s `dashboards` array with the **Omni** link only, and `composition_rules.md` (the header chrome description + the `meta.json` example) drops the Sentra entry. `compose.py` already builds the dashboards row generically from whatever's in `meta.json.dashboards`, so no code change was needed there — removing Sentra from the master's instruction is sufficient. The `visual_kit.md` Page-skeleton doc-comment that named the old "Dashboards row — Omni + Sentra" section is updated to the renamed "Dashboards row". Paired with CVR-RCA v1.26 (c041), which trims Sentra on the standalone side.
+
+### Changes by file
+
+- **`SKILL.md`** (m003) — Step 0d meta.json enrichment: `dashboards` array is Omni-only (was Omni + Sentra).
+- **`references/composition_rules.md`** — header-chrome line and the `meta.json` example drop the Sentra dashboard entry.
+- **`references/visual_kit.md`** — Page-skeleton doc-comment points at the renamed "Dashboards row" section (kept in sync with the canonical cvr-rca copy).
+
+---
+
+## [v1.1.1] — 2026-06-03 — Re-vendor visual_kit (provenance/External-Signals generalisation)
+
+**Summary:** Synced `references/visual_kit.md` from cvr-rca (now at visual_kit c007 / CVR-RCA v1.26). The change generalises the external-context integration section from Slack-only to lens-agnostic and makes the External Signals & Corroboration table the source-agnostic "sources cited" panel — so when a composite's CVR-RCA tab is produced, every external signal it used (Slack, perf-audit, CE Health) is tagged in a table and woven into the narrative. No code change in ce-rca; this is a vendored-doc sync (the VENDORED COPY header is preserved). The compose-time `<style>` extraction is unaffected (the change was prose, not CSS).
+
+---
+
 ## [v1.1.0] — 2026-06-03 — Cross-skill RCA: Summary synthesis tab + context manifest
 
 **Summary:** The tabs now talk to each other. v1.0 composed CE Health, CVR-RCA, and perf-audit into side-by-side tabs that sat next to each other without cross-referencing. v1.1 adds the two pieces that make the umbrella genuinely holistic: (1) a **context manifest** so each deep dive reconciles against the others' findings, and (2) a **Summary tab** that weaves everything into one front-page narrative.

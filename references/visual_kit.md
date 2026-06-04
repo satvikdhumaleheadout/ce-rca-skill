@@ -6,9 +6,7 @@
 > edit this copy independently; divergence breaks the "all reports look the
 > same" guarantee. The `ce-rca` master uses this kit to render the CE Health
 > tab and the composite shell so the umbrella report is visually identical to a
-> standalone CVR-RCA report. (Same manual-sync policy perf-audit-skill follows
-> for its own copy.)
-
+> standalone CVR-RCA report. Last synced: cvr-rca visual_kit c007.
 
 This file is the **report visual kit** — the skill-agnostic primitives any HTML-report-producing skill builds on. CSS, HTML patterns, styling rules, tab framework, ↗ link-to-table affordance, Slack integration patterns, generic anti-patterns.
 
@@ -16,7 +14,7 @@ The skill's own structure file (`report_structure.md` for CVR-RCA, `perf_audit_s
 
 **What lives here:**
 - Styling and language guidelines (rules 1–7)
-- Slack integration & link-to-table styling
+- External context integration & link-to-table styling (lens-agnostic: Slack, perf-audit, CE Health, future siblings)
 - Tabbed report structure (full-width left-anchored tab bar, perf-audit tab rendering, anchor scheme, citation routing, citation phrasings, tab visibility logic)
 - Anti-patterns (visual / HTML)
 - Visual Spec — Shared `<style>` block (CSS for header, container, section-label, metric cards, callout, action cards, analysis block, verdict line, tables, shapley flex bar, fixed segment banner, ref-link, tab bar, md-content)
@@ -77,16 +75,18 @@ When a Section 1 callout answer names multiple drivers, headwinds, or mechanisms
 
 ---
 
-## Slack integration & link-to-table styling
+## External context integration & link-to-table styling
 
-These rules govern how Slack context (collected by the background sub-agent per `SKILL.md → Step 2 → Slack context — fire and forget`) surfaces in the report, and how the reader navigates between findings and supporting evidence.
+These rules govern how **any external lens** — Slack, perf-audit, CE Health, and future sibling skills — surfaces in the report, and how the reader navigates between findings and supporting evidence. Slack is the worked example throughout (it was the first lens), but the three-layer model, the four-pattern classification, and the link-to-table affordance are **lens-agnostic**: a perf-audit SIS verdict or a CE Health Shapley fact surfaces through exactly the same machinery as a Slack thread. The per-lens reconciliation logic lives in `SKILL.md → Step 2b → "Context reconciliation (checks #9–#11)"`; this section is the *styling and surfacing* side.
 
-### Three layers of Slack integration
+**Provenance, in one line:** any external signal you actually use must appear in two places — woven into the narrative at the point of use (Layers 1/2) **and** as one row in the consolidated External Signals table (Layer 3). Used signals are always attributed; unused ones stay out.
+
+### Three layers of external-context integration
 
 **Layer 1 — Narrative weaving (default, low bar).**
 Whenever Slack adds colour, mechanism, or timing detail that sharpens the existing narrative, weave it into the *regular* callout questions and Section 3 verdict subtexts — not only the dedicated Important Context item. So "What drove the improvement?", "What broke?", "What's holding it back?", "When did it begin?", and any analysis block subtext can pull from Slack.
 
-- Citation format inline: `Source · date ↗` — name and date stay visible (signals "this is from Slack"); the arrow is the clickable router to the Market Context block in Section 3 where the full thread link lives.
+- Citation format inline: `Source · date ↗` — name and date stay visible (signals "this is from Slack"); the arrow is the clickable router to the External Signals block in Section 3 where the full thread link lives.
 - **One citation per concept.** If the same Slack thread is the source for three sentences in a paragraph, cite it once at the most natural anchor — don't re-cite the same source line after line.
 - When the Slack timeframe matches the report's pre/post, light attribution is sufficient — no need to keep flagging the source after the first attribution in the paragraph.
 
@@ -101,7 +101,7 @@ The bar is high — most RCAs will not have one. Four "decision-changing" tests:
 3. Does it contradict the obvious interpretation of the metric?
 4. Does it introduce a metric or timeframe not in the report's primary comparison?
 
-If none apply, the signal lives only in the Section 3 Market Context block — do not clutter Section 1.
+If none apply, the signal lives only in the Section 3 External Signals block — do not clutter Section 1.
 
 q-label format: `Important context — [short category]`. Category tag is Claude's choice; examples: "different timeframe", "operational change", "market signal", "supplier issue". Position: after the primary narrative items in the callout (third or fourth slot).
 
@@ -109,19 +109,19 @@ Important Context applies to **both** CVR-declined and CVR-improved cases:
 - **Decline example:** a CVR drop where Slack/WBR shows the entire market is down 30% reframes the urgency — the action is no longer "fix our funnel" but "we are outperforming the market."
 - **Improvement example:** a CVR gain where YoY GBV is −20% reframes a celebration into "we are converting better within a shrunken pool."
 
-**Layer 3 — Market Context analysis block in Section 3 (conditional).**
-A dedicated `.analysis-block` rendered only when Slack returned at least one signal of pattern B (mechanism explanation) or C (reframing context). Pure routine corroborations (pattern A) of findings the data already proved do not require this block — those live as parenthetical citations after verdict subtexts only. See "Market context & operational signals block" in the Section 3 spec below for the full HTML pattern.
+**Layer 3 — External Signals & Corroboration block in Section 3 (the provenance table).**
+A dedicated `.analysis-block` (id `block-market-context`) — the report's "sources cited" panel. It renders whenever **any** external lens contributed at least one signal you *used* (Pattern A, B, or C). Every used signal gets exactly one row here, regardless of which lens it came from — this is the table half of the provenance contract. Unlike the earlier Slack-only design, **Pattern A corroborations now also get a row** (a used signal is a used signal — provenance applies even when the lens merely confirmed what the data already showed); the inline `(per … ↗)` citation and the table row are complementary, not either/or. See "External signals & corroboration block" in the Section 3 spec below for the full HTML pattern.
 
-### Slack signal patterns (cross-reference)
+### Signal patterns (cross-reference) — applies to every lens
 
-The classification logic for incoming Slack signals lives in `hypothesis.md → "Slack signal classification"`. Four patterns: A (direct corroboration), B (mechanism explanation), C (reframing context), D (testable gap). Each surfaces in the report differently:
+The classification logic lives in `hypothesis.md → "Slack signal classification"` (named for Slack historically, but the four patterns apply identically to perf-audit and CE Health). Four patterns: A (direct corroboration), B (mechanism explanation), C (reframing context), D (testable gap). Each surfaces in the report as follows — *and any signal you act on, A through C, also earns a row in the External Signals table*:
 
 | Pattern | Where it surfaces |
 |---|---|
-| A — direct corroboration | Inline `(corroborated ↗)` or `(per Author · date ↗)` in the relevant block's subtext + Source column in Hypotheses Explored table |
-| B — mechanism explanation | Layer 1 narrative weaving + row in Market Context block |
-| C — reframing context | Layer 2 Important Context callout-item + row in Market Context block |
-| D — testable gap | Result of the one-query test becomes a regular finding in Section 3, cited inline `(prompted by Source · date ↗)`. Don't double-list in Market Context. |
+| A — direct corroboration | Inline `(per <source> ↗)` in the relevant block's subtext + **row in External Signals table** + Source column in Hypotheses Explored table |
+| B — mechanism explanation | Layer 1 narrative weaving + **row in External Signals table** |
+| C — reframing context | Layer 2 Important Context callout-item + **row in External Signals table** |
+| D — testable gap | Result of the one-query test becomes a regular finding in Section 3, cited inline `(prompted by <source> ↗)`. The prompting signal also earns an External Signals row so the provenance is visible; don't double-count the *finding* itself there. |
 
 ### Timeframe-citation rule
 
@@ -137,7 +137,7 @@ When Slack confirms a mechanism that has already been CONFIRMED via data — par
 
 ### When Slack context is unavailable
 
-If `slack_context.md` was not available at write-time — the sub-agent timed out, returned after Step 3 was completed, or hit a permission denial — render a small disclosure card inside the Market Context block. Never silently drop the Slack lens; give the reader a path forward.
+If `slack_context.md` was not available at write-time — the sub-agent timed out, returned after Step 3 was completed, or hit a permission denial — render a small disclosure card inside the External Signals block. Never silently drop the Slack lens; give the reader a path forward.
 
 ```html
 <div style="background:#f3f4f6;border-left:4px solid #8892a4;border-radius:0 6px 6px 0;padding:10px 14px;margin-top:16px;font-size:13px;color:#444;">
@@ -147,7 +147,7 @@ If `slack_context.md` was not available at write-time — the sub-agent timed ou
 </div>
 ```
 
-Use this card whenever Slack didn't reach the report, regardless of CVR direction. Remove it when Slack signals are present — the Market Context table is then the disclosure.
+Use this card whenever Slack didn't reach the report, regardless of CVR direction. Remove it when Slack signals are present — the External Signals table is then the disclosure.
 
 ### ↗ link-to-table pattern
 
@@ -157,7 +157,7 @@ Every Section 3 analysis block carries an `id` attribute (see "Anchor ID convent
 - Section 1 callout — after every numeric or named-finding claim cluster, pointing to the primary block that carries the supporting evidence. A claim cluster is "a complete thought," not "every individual number"; aim for one arrow per sentence.
 - Section 2 action cards — after the `cause` line, pointing to the block that confirms the cause.
 - Section 3 Hypotheses Explored table, "Test run" column — pointing to the block that ran the test.
-- Slack source citations everywhere — the arrow in `Source · date ↗` routes to the Market Context block.
+- Slack source citations everywhere — the arrow in `Source · date ↗` routes to the External Signals block.
 
 **Where NOT to use ↗ (don't):**
 - Inside Section 3 verdict lines, subtexts, or any non-Hypothesis table within Section 3. Section 3 *is* the evidence — jumping from one Section 3 block to another is navigation noise.
@@ -295,7 +295,7 @@ The four-pattern reconciliation in `SKILL.md → Step 2b check #10` produces cit
 | D — testable gap | Inline `(prompted by perf-audit ↗)` after the data-driven leaf that resulted | "TGID 7148 surge confirmed (prompted by perf-audit ↗)." |
 
 Citation placement follows the same rules as Slack:
-- **Allowed:** Section 1 callout subtexts, Section 2 action card cause lines, Section 3 Market Context block, Hypotheses Explored "Test run" column.
+- **Allowed:** Section 1 callout subtexts, Section 2 action card cause lines, Section 3 External Signals block, Hypotheses Explored "Test run" column.
 - **Not allowed:** Section 3 verdict lines or their subtexts (Section 3 *is* the evidence — internal navigation between Section 3 blocks is noise).
 - **One citation per concept** — same rule as Slack. If the perf-audit verdict supports three sentences in a paragraph, cite it once at the most natural anchor.
 
@@ -737,7 +737,7 @@ Naming convention: `block-<kebab-name>` for tables and text blocks, `chart-<keba
   </div>
   <!-- Optional: dashboards row — see the consuming skill's structure file
        for URL templates (e.g., CVR-RCA's report_structure.md
-       "Dashboards row — Omni + Sentra" section). Omit the entire div if the
+       "Dashboards row" section). Omit the entire div if the
        skill defines no external dashboards. -->
   <div class="dashboards">
     <span class="dash-label">DASHBOARDS</span>
@@ -1078,6 +1078,7 @@ Plotly.newPlot('trend-90day', traces90d, {
 
 | # | Date | Changes |
 |---|------|---------|
+| c007 | 2026-06-03 | **"Slack integration & link-to-table styling" → "External context integration & link-to-table styling" (lens-agnostic).** The section now explicitly governs how *any* external lens (Slack, perf-audit, CE Health, future siblings) surfaces — Slack stays the worked example, but the three-layer model + four-pattern classification + ↗ link-to-table affordance are stated as lens-agnostic. Section intro gains a one-line provenance statement (used signals appear both woven-in and as a table row). Layer 3 reframed: the block is the **External Signals & Corroboration** "sources cited" panel, rendered whenever any lens contributed a used signal — and **Pattern A corroborations now earn a table row** (previously inline-only). The four-pattern surfacing table updated so A/B/C all add a row. Paired with cvr-rca SKILL.md c040 (provenance contract in the Step 2b preamble) and report_structure.md (block renamed/generalised, id `block-market-context` retained). |
 | c006 | 2026-06-03 | Registered two new cross-tab anchor prefixes for the CE-RCA umbrella composite: `summary-*` (the Summary synthesis tab) and `cehealth-*` (the CE Health tab). Citation format split gains a CE Health source form (`per CE Health ↗` / `CE Health: <fact> ↗`). Both prefixes apply only inside the CE-RCA composite where those tabs exist; standalone CVR-RCA reports are unaffected. Paired with cvr-rca SKILL.md c039 (CE Health reconciliation lens at Step 2b). |
 | c001 | 2026-05-28 | Initial version. Skill-agnostic visual primitives extracted from `cvr-rca/references/report_structure.md` (v1.19): shared `<style>` block (CSS for header / container / metric cards / callout / action cards / analysis blocks / verdict lines / tables / shapley flex bar / fixed segment banner / ref-link / tab bar / md-content); Page skeleton; Section label; Metric cards HTML; Root cause callout HTML (Shape A paragraph + Shape B multi-driver bullet); Action card HTML; Analysis block (general pattern); Table with highlight rows; Plotly chart conventions; Anchor ID convention; Styling and language guidelines (rules 1–7); Slack integration & link-to-table styling; Tabbed report structure (full HTML pattern); Anti-patterns. Read by any skill producing an HTML report. |
 | c005 | 2026-05-29 | **Trimmed the "ignore `.html`" defensive language from Perf-audit tab rendering.** Removed the "Source of truth: never `perf_audit_report.html`" paragraph and rewrote the corresponding anti-pattern row to focus on the positive rule (perf-audit content stays in the perf-audit's structure) rather than enumerating the specific `.html` failure mode. The c004 guardrails made sense when perf-audit-skill had been emitting `.html` locally; once perf-audit-skill was rolled back to emitting markdown only, those guardrails became obsolete. Scalable skill instructions describe canonical behavior; one-off defensive negations belong in commit messages and changelog history, not in the live spec. Canonical rule unchanged: Tab 2 reads `perf_audit_report.md` and converts verbatim. Companion change in `SKILL.md` c037. |

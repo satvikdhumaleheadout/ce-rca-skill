@@ -102,10 +102,19 @@ If CE Health can't be resolved or fails, tell the user plainly and stop — CE
 Health is the entry point of this skill; without it there's nothing to orient on.
 
 **0d. Enrich `meta.json`.** Read CE Health's JSON sidecar and fill in
-`combined_entity_name`, `combined_entity_type`, `market`, `country`, and
-`top_page_url` if present. Add the `dashboards` array (Omni + Sentra URL
-templates with the CE ID substituted — same templates CVR-RCA's
-`report_structure.md → "Dashboards row"` documents).
+`combined_entity_name`, `combined_entity_type`, `market`, and `country`.
+
+- **`dashboards` — always add it (unconditional).** It only needs the CE ID,
+  which you already have, so there is no "if present" — every composite header
+  carries the Omni pill. Substitute the CE ID into the Omni URL template from
+  CVR-RCA's `report_structure.md → "Dashboards row — Omni"`:
+  `[{"label": "Omni", "url": "<Omni URL with CE_ID substituted>"}]`.
+- **`top_page_url` — NOT available here; back-filled later.** CE Health's
+  sidecar does **not** carry the CE's landing-page URL, so leave it unset now.
+  The reliable source is CVR-RCA's `summary.json` (`meta.top_page_url`), which
+  doesn't exist until the deep dives run. Step 4 back-fills it before compose
+  (see Step 4a). This is why the header's 🔗 landing-page link and the CE-name
+  hyperlink only appear once CVR-RCA has run — that's expected.
 
 ---
 
@@ -216,7 +225,31 @@ unaffected).
 
 Read `references/composition_rules.md` for the full spec. The mechanics:
 
-**4a. Rename CVR-RCA's report** (if cvr-rca ran) so `compose.py` can read it
+**4a. Back-fill `top_page_url` into `meta.json` (deferred from Step 0d).** CE
+Health's sidecar lacks the landing-page URL, but CVR-RCA's `summary.json` carries
+it as `meta.top_page_url`. If `<run_dir>/summary.json` exists and `meta.json`
+has no `top_page_url` yet, copy it across so the composite header renders the 🔗
+landing-page link and the clickable CE name:
+
+```bash
+python3 - <<'PY'
+import json, pathlib
+rd = pathlib.Path("<run_dir>")
+meta = json.loads((rd/"meta.json").read_text())
+summ = rd/"summary.json"
+if summ.exists() and not meta.get("top_page_url"):
+    tpu = json.loads(summ.read_text()).get("meta",{}).get("top_page_url")
+    if tpu:
+        meta["top_page_url"] = tpu
+        (rd/"meta.json").write_text(json.dumps(meta, indent=2))
+        print("back-filled top_page_url:", tpu)
+PY
+```
+
+(If CVR-RCA didn't run, there's no `summary.json` — the header simply omits the
+landing-page link, which is acceptable.)
+
+**4b. Rename CVR-RCA's report** (if cvr-rca ran) so `compose.py` can read it
 without a same-path read/write against the composite output:
 
 ```bash
@@ -226,7 +259,7 @@ mv "<run_dir>/report.html" "<run_dir>/cvr_rca_report.html"
 (Only if cvr-rca ran and wrote `report.html`. perf-audit, CE Health, and the
 Summary write artifacts that need no rename.)
 
-**4b. Run the composer:**
+**4c. Run the composer:**
 
 ```bash
 python3 "$SKILL_DIR/scripts/compose.py" --run-dir "<run_dir>"
@@ -239,7 +272,7 @@ embeds the Summary verbatim, converts the markdown tabs verbatim, extracts
 CVR-RCA's CVR content + charts, injects the shared visual_kit styling, and writes
 the composite to `<run_dir>/report.html`.
 
-**4c. Report the result.** Tell the user where the composite landed and which
+**4d. Report the result.** Tell the user where the composite landed and which
 tabs it contains. Keep it short — the report is the deliverable, not a chat recap.
 
 ---
@@ -293,4 +326,6 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 | # | Date | Changes |
 |---|------|---------|
 | m001 | 2026-06-03 | Initial version. Top-down master orchestrator for CE-level RCAs. Step 0 runs CE Health (foreground); Step 1 presents the diagnosis and pauses for free-form user confirmation; Step 2 dispatches matched deep-dive skills (CVR-RCA + perf-audit today) in parallel after writing the `orchestration.json` handshake; Step 3 composes a tabbed report via `scripts/compose.py`. Sub-skill outputs appear verbatim (composer, not editor). Registry-driven dispatch (`references/registry.md`) makes new sub-skills one-row additions. Visual kit vendored from cvr-rca; composite styling extracted from it at build time so the umbrella report is visually identical to a standalone CVR-RCA report. Future hooks (user context paste, cross-skill references, summary skill) designed-in but deferred. |
+| m003 | 2026-06-03 | **Header completeness fix — Omni pill + landing-page link.** Two header elements were missing from composites because of a meta-enrichment gap. **(1) Omni dashboard pill:** Step 0d now adds the `dashboards` array **unconditionally** (it only needs the CE ID, which is always known — there is no "if present"), so every composite header carries the Omni link. **(2) Landing-page link (`top_page_url`):** CE Health's JSON sidecar does not carry the CE's landing-page URL, so Step 0d can't fill it. The reliable source is CVR-RCA's `summary.json` (`meta.top_page_url`), which only exists after the deep dives run — so new Step 4a **back-fills `top_page_url` from `summary.json` before compose**, and the header's 🔗 link + clickable CE name now render whenever CVR-RCA ran. Step 4 sub-steps renumbered (4a back-fill → 4b rename → 4c compose → 4d report). No code change to `compose.py` — `build_header` already renders both when `meta.json` carries them; the fix is ensuring meta.json is populated. |
+| m003 | 2026-06-03 | **Sentra dashboard link deprecated.** Step 0d's `meta.json` enrichment now adds the Omni dashboard link only (was Omni + Sentra) — Sentra is being retired. `compose.py` builds the dashboards row generically from `meta.json.dashboards`, so dropping Sentra from the instruction is the only change needed; `composition_rules.md` (header-chrome line + meta.json example) and the `visual_kit.md` Page-skeleton doc-comment are updated to match. Paired with CVR-RCA v1.26 c041 (standalone-side Sentra trim). |
 | m002 | 2026-06-03 | **Cross-skill RCA: Summary synthesis tab + context manifest.** Two additions make the tabs talk to each other. **(1) Context manifest:** `orchestration.json` gains a `context_lenses` array listing the lens artifacts deep dives should reconcile against (CE Health + perf-audit + Slack). CVR-RCA reads this at its Step 2b (v1.25) and folds CE Health's CE-level facts into its funnel findings — e.g. corroborating a TGID's S2C drop against CE Health's RPC drop for that same TGID. **(2) Summary tab:** new Step 3 (Synthesise) fires a pure-synthesis sub-agent (`references/summary_guide.md`) that reads every finished tab and writes `summary_report.html` — a polished HTML fragment (vitals cards + root-cause callout + cross-reference table + per-driver blocks) that traces the headline revenue driver across all tabs with `↗` cross-tab links. Compose renumbered to Step 4; `compose.py` adds the Summary as the first tab via a new `html-fragment` type (embedded verbatim). Tab order: Summary → CE Health → CVR RCA → Paid Performance Audit. Summary is the peer↔peer weave surface (avoids circular cross-referencing in individual deep-dive tabs). Graceful degradation: if the Summary agent fails, the composite still builds without that tab. Pure-synthesis for now — an arbiter upgrade (tie-break query on contradiction) is a documented TODO. perf-audit cross-skill enrichment is a hand-off TODO for its owner. |

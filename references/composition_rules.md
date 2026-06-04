@@ -114,7 +114,7 @@ drift between the kit and the umbrella report.
 
 The composite header (eyebrow "CE Root Cause Analysis", CE name, pre/post meta
 row, dashboards row) is built by `compose.py` from `<run_dir>/meta.json`, which
-the master writes at Step 0. The dashboards row (Omni + Sentra) and back-to-top
+the master writes at Step 0. The dashboards row (Omni) and back-to-top
 arrow are inherited from visual_kit chrome. `meta.json` carries the dashboard
 URL list so the composite shows the same pill links a standalone CVR-RCA report
 would.
@@ -134,8 +134,7 @@ would.
   "post_end": "2026-04-30",
   "top_page_url": "https://www.headout.com/...",
   "dashboards": [
-    {"label": "Omni Analytics", "url": "https://..."},
-    {"label": "Sentra", "url": "https://..."}
+    {"label": "Omni Analytics", "url": "https://..."}
   ],
   "generated_date": "2026-06-03"
 }

@@ -5,9 +5,16 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
-## [v1.1.2] — 2026-06-03 — Composite header completeness: Omni pill + landing-page link
+## [v1.1.3] — 2026-06-03 — Composite header completeness: Omni pill + landing-page link from CE Health
 
-**Summary:** Two header elements were silently missing from composites. **Omni dashboard pill** — Step 0d now adds the `dashboards` array unconditionally (it only needs the CE ID), so every composite header carries the Omni link rather than depending on the orchestrator remembering to add it. **Landing-page link** — CE Health's sidecar doesn't carry the CE's landing-page URL, so it couldn't be filled at Step 0d; new Step 4a back-fills `top_page_url` from CVR-RCA's `summary.json` (the source that does have it) before compose, so the 🔗 link and clickable CE name render whenever CVR-RCA ran. No `compose.py` change — `build_header` already rendered both when present; the gap was meta.json not being populated. Step 4 sub-steps renumbered (4a back-fill → 4b rename → 4c compose → 4d report).
+**Summary:** Two header elements were silently missing from composites; both now render reliably. **Omni dashboard pill** — Step 0d adds the `dashboards` array unconditionally (it only needs the CE ID), so every composite header carries the Omni link rather than depending on the orchestrator remembering to add it. **Landing-page link** — CE Health now emits the CE's most-visited landing-page URL in its JSON sidecar at `metadata.top_page_url` (derived from the highest-traffic page in its landing-page funnel, mirroring CVR-RCA's Q0), so Step 0d reads it directly and the header's 🔗 link + clickable CE name render **from the start** — before the deep dives, and even when CVR-RCA isn't dispatched. Step 4a is kept as a **fallback** only: if CE Health found no landing-page data but CVR-RCA did, it back-fills `top_page_url` from CVR-RCA's `summary.json` before compose. No `compose.py` change — `build_header` already rendered both when present; the gap was meta.json not being populated.
+
+**Paired change in CE Health (local-only skill, not git-versioned):** `ce_health.py` now derives `top_page_url` from the highest-`l4w_users` row of its landing-page funnel and injects it into `meta`, so it flows into the sidecar's `metadata` block and into the "## 1. CE Metadata" markdown table (new "Landing Page" row). No new BQ query — reuses the landing-page data already fetched.
+
+### Changes by file
+
+- **`SKILL.md`** (m003) — Step 0d reads `top_page_url` from CE Health's sidecar `metadata.top_page_url` (primary); Step 4a reframed as a `summary.json` fallback; `dashboards` array added unconditionally (Omni). Step 4 sub-steps renumbered (4a fallback → 4b rename → 4c compose → 4d report).
+- **CE Health `ce_health.py`** (local) — derive + emit `top_page_url`.
 
 ---
 

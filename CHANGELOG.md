@@ -5,6 +5,29 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v1.2.0] — 2026-06-03 — User-context input layer (v1): optional free-text steering
+
+**Summary:** The umbrella can now take the analyst's own knowledge into the RCA. At the Step 1 pause (after CE Health's diagnosis), an **optional** prompt invites a focus area, a hunch about where to look, or a known event (deploy / pricing / promo). The free-form reply is parsed into a short, structured `user_context.md`, which the CVR-RCA deep dive consumes at **two points**: L0 (the analyst's priors become **prioritised, falsifiable** branches — opened early, tested, can be ruled out) and Step 2b (corroboration against the data-driven findings, via the existing four-pattern model). It is built to a deliberate **balance** — it drives priority checks and corroboration but **does not narrow** the RCA (the full data-driven scope still runs; the primary driver is whatever the data says), **does not overwhelm** the output (proportional weight — a ruled-out hunch is one line), and **is never silently ignored** (every prior is closed CONFIRMED / RULED OUT / DATA GAP). Skipping is zero-friction — a bare "continue" writes no file and changes nothing, preserving adoption.
+
+User context is deliberately **not** another evidence lens. Slack / perf-audit / CE Health are secondhand evidence held to Step 2b so they can't bias branch selection; user context is the analyst's *intent*, which legitimately directs the investigation — so it is the one input read at L0. The falsifiability guardrail (priors are tested; data decides the leaf) keeps that honest.
+
+**v1 is lean — free-text only.** Attached files, Google Sheets, and user-named Slack channels are captured under a "Deferred inputs" slot with a "not consumed yet (v2)" note so nothing is silently dropped, but they aren't ingested yet.
+
+### Changes by file
+
+- **`SKILL.md`** (m005) — Step 1 pause gains the optional context prompt + the structured `user_context.md` template; `orchestration.json` gains a `user_context` pointer (separate from `context_lenses`); future-hook #3 promoted to v1-shipped. VERSION → 1.2.0.
+
+### Paired change in CVR-RCA (separate repo)
+
+- CVR-RCA v1.27 (c042): dual-consumes `user_context.md` — L0 steering (Signal 0) + Step 2b corroboration; standalone-safe.
+
+### Deferred (v2 / hand-offs)
+
+- Ingest the "Deferred inputs" slot (files → Sheets → Slack channels).
+- perf-audit should consume `user_context.md` the same way (owner hand-off).
+
+---
+
 ## [v1.1.3] — 2026-06-03 — Composite header completeness: Omni pill + landing-page link from CE Health
 
 **Summary:** Two header elements were silently missing from composites; both now render reliably. **Omni dashboard pill** — Step 0d adds the `dashboards` array unconditionally (it only needs the CE ID), so every composite header carries the Omni link rather than depending on the orchestrator remembering to add it. **Landing-page link** — CE Health now emits the CE's most-visited landing-page URL in its JSON sidecar at `metadata.top_page_url` (derived from the highest-traffic page in its landing-page funnel, mirroring CVR-RCA's Q0), so Step 0d reads it directly and the header's 🔗 link + clickable CE name render **from the start** — before the deep dives, and even when CVR-RCA isn't dispatched. Step 4a is kept as a **fallback** only: if CE Health found no landing-page data but CVR-RCA did, it back-fills `top_page_url` from CVR-RCA's `summary.json` before compose. No `compose.py` change — `build_header` already rendered both when present; the gap was meta.json not being populated.

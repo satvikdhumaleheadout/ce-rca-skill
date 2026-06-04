@@ -104,11 +104,21 @@ Health is the entry point of this skill; without it there's nothing to orient on
 **0d. Enrich `meta.json`.** Read CE Health's JSON sidecar and fill in
 `combined_entity_name`, `combined_entity_type`, `market`, and `country`.
 
-- **`dashboards` — always add it (unconditional).** It only needs the CE ID,
-  which you already have, so there is no "if present" — every composite header
-  carries the Omni pill. Substitute the CE ID into the Omni URL template from
-  CVR-RCA's `report_structure.md → "Dashboards row — Omni"`:
-  `[{"label": "Omni", "url": "<Omni URL with CE_ID substituted>"}]`.
+- **`dashboards` — always add it (unconditional).** Every composite header
+  carries the Omni pill. Build the Omni URL from CVR-RCA's
+  `report_structure.md → "Dashboards row — Omni"`, which has two templates:
+  - **Default window** (the user did not pass a custom date range): substitute
+    only `<CE_ID>` — the URL keeps Omni's relative `30 complete days ago / 30 days`
+    date params so the dashboard runs its own last-30-vs-prior-30 comparison.
+  - **Custom window** (the user passed a specific date range): use the absolute
+    `BETWEEN` template — substitute `<CE_ID>`, `<POST_START>` (post-window start,
+    `YYYY-MM-DD`), and `<POST_END_EXCLUSIVE>` (post-window end **+ 1 day** —
+    Omni's `BETWEEN` upper bound is exclusive). This makes the Omni link show
+    exactly the period the RCA covers.
+
+  You already know both whether the window is custom (from Step 0a) and the
+  post dates (in `meta.json`), so pick the right template and write
+  `[{"label": "Omni", "url": "<built Omni URL>"}]`.
 - **`top_page_url` — read it from CE Health's sidecar.** CE Health now emits the
   CE's most-visited landing-page URL in its JSON sidecar at
   `metadata.top_page_url` (it derives it from the highest-traffic page in its
@@ -138,19 +148,60 @@ Default deep-dive based on this diagnosis: <skills, e.g. "CVR-RCA + perf-audit">
 
 Reply "continue" to proceed with the default, or describe a different direction
 (e.g. "focus on supply", "skip perf-audit", "CVR only").
+
+Optional — add context to sharpen the RCA? A focus area, a hunch about where to
+look, or a known event (deploy / pricing / promo). Or just press enter / say
+"continue" to skip.
 ```
 
 **Then stop and wait for the user's reply.** Do not dispatch until they respond.
 Parse their reply in natural language — there's no rigid command set. "continue"
-/ empty / "yes" → the default set. Anything else → interpret their intent against
-the registry and resolve a final dispatch set. If they name a driver with no
-registered sub-skill (e.g. AOV today), say so and proceed with what's available.
+/ empty / "yes" → the default set, no context captured. Anything else → interpret
+their intent against the registry and resolve a final dispatch set. If they name a
+driver with no registered sub-skill (e.g. AOV today), say so and proceed with what
+is available.
 
-**Future hook — user context paste.** A later version will let the user paste
-files / notes / hypotheses here, landing as `<run_dir>/user_context.md` for the
-sub-skills to read. Not implemented yet; if the user offers context now, accept
-it into `user_context.md` and mention sub-skills don't consume it automatically
-yet.
+### Capturing user context (optional — `user_context.md`)
+
+If the user's reply contains any steering or context beyond a bare
+continue/pivot, capture it. **This is optional and additive** — most runs will
+skip it, and skipping must stay zero-friction (a bare "continue" writes no file
+and changes nothing). When there *is* context, parse the free-form reply into a
+**short, structured** `<run_dir>/user_context.md` — labeled slots, a handful of
+bullets each, never a transcript of the chat (the deep dives read this file, so
+keeping it lean protects their context window):
+
+```markdown
+# User Context (provided <date>)
+
+## Focus / direction
+[what the user wants prioritised — e.g. "Focus on CVR — user believes it's the
+ driver". Also feeds the dispatch decision above.]
+
+## Hypothesis priors
+[where the user thinks the problem is — e.g. "LP2S at the landing-page level —
+ user's intuition something's broken / always broken here". Each becomes a
+ PRIORITISED, FALSIFIABLE branch in the deep dive — tested, can be ruled out.]
+
+## Known events
+[operational facts — e.g. "Pricing changed Apr 8", "ran a promo last week".
+ Each seeds a hypothesis AND anchors a Step 2b corroboration.]
+
+## Deferred inputs (captured, NOT consumed in v1)
+[any file paths / Google Sheet URLs / Slack channels the user mentions — record
+ them here verbatim with a "not ingested yet (v2)" note so nothing is silently
+ dropped. Tell the user these aren't consumed automatically yet.]
+```
+
+Only write slots that have content. If the user provides a file / Sheet / Slack
+channel, acknowledge in chat that it's recorded but not consumed in v1.
+
+**How the deep dives use it (so you set expectations correctly):** `user_context.md`
+is the analyst's *intent*, not another evidence lens — so CVR-RCA reads it at
+**L0** (priors become prioritised, falsifiable branches) **and** corroborates it
+at Step 2b. It **steers attention, never the conclusion**: the full data-driven
+investigation still runs, the primary driver is whatever the data says, and a
+prior can be RULED OUT. See `cvr-rca/SKILL.md → "Signal 0 — user context"`.
 
 ---
 
@@ -169,6 +220,7 @@ path. Skip (with a logged note) any that don't resolve.
   "version": "<this skill's VERSION>",
   "fired_by_master": ["perf-audit-skill", "cvr-rca"],
   "context_lenses": ["ce_health_report.md", "perf_audit_report.md", "slack_context.md"],
+  "user_context": "user_context.md",
   "run_dir": "<absolute run_dir path>"
 }
 ```
@@ -177,6 +229,13 @@ path. Skip (with a logged note) any that don't resolve.
 contract that stops CVR-RCA from double-firing perf-audit: CVR-RCA checks this
 file and, seeing `perf-audit-skill` listed, skips its own perf-audit spawn and
 consumes the master's output instead.
+
+`user_context` points at the structured `user_context.md` you wrote at Step 1 —
+**only include this key if you actually wrote that file** (the user provided
+context). It is deliberately **separate from `context_lenses`**: the lenses are
+secondhand evidence consumed only at Step 2b, but user context is the analyst's
+*intent* — the deep dive reads it earlier, at L0, to prioritise (not narrow)
+its branches. Omit the key on a bare-continue run.
 
 `context_lenses` is the **cross-skill manifest** — the list of lens artifacts the
 deep dives should reconcile against at their synthesis step. Always include
@@ -320,9 +379,13 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
    read CE Health (and CVR-RCA findings) at its own synthesis and cite them in its
    tab — mirroring CVR-RCA's manifest context layer. perf-audit is owned by
    another team, so this is a hand-off, not our change. See `references/registry.md`.
-3. **User context paste** — `<run_dir>/user_context.md` slot exists; wiring it
-   into the `context_lenses` manifest (so deep dives + Summary read user-supplied
-   context) is deferred.
+3. **User context paste — v1 shipped (free-text steering).** The Step 1 pause
+   now captures focus / hypothesis priors / known events into a structured
+   `user_context.md`, which CVR-RCA consumes at L0 (prioritised falsifiable
+   branches) + Step 2b (corroboration). **v2 remainder (deferred):** ingest the
+   "Deferred inputs" slot — attached files, Google Sheets, user-named Slack
+   channels (files lowest-risk first). And perf-audit should consume
+   `user_context.md` the same way (owner hand-off).
 4. **More drivers** — AOV-RCA, Completion-RCA, Take-Rate-RCA plug into
    `registry.md` and `compose.py`'s `TAB_SPECS` as one-row / one-entry additions.
 
@@ -330,6 +393,7 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 |---|------|---------|
+| m005 | 2026-06-03 | **User-context input layer v1 (free-text steering).** The Step 1 pause gains an optional context prompt; the user's free-form reply is parsed into a short, structured `<run_dir>/user_context.md` with labelled slots (Focus / Hypothesis priors / Known events / Deferred inputs). `orchestration.json` gains a `user_context` pointer — kept **separate from `context_lenses`** because user context is the analyst's *intent* (read at the deep dive's L0 to prioritise branches), not a Step-2b-only evidence lens. Skipping is zero-friction (bare "continue" → no file, no behaviour change). Files / Google Sheets / Slack channels are captured under "Deferred inputs" with a not-consumed-yet note (v2). CVR-RCA dual-consumes the file (c042): L0 steering (prioritised, falsifiable branches) + Step 2b corroboration; it steers attention, never the conclusion, and the full data-driven investigation still runs. Future-hook #3 promoted from deferred to v1-shipped. |
 | m001 | 2026-06-03 | Initial version. Top-down master orchestrator for CE-level RCAs. Step 0 runs CE Health (foreground); Step 1 presents the diagnosis and pauses for free-form user confirmation; Step 2 dispatches matched deep-dive skills (CVR-RCA + perf-audit today) in parallel after writing the `orchestration.json` handshake; Step 3 composes a tabbed report via `scripts/compose.py`. Sub-skill outputs appear verbatim (composer, not editor). Registry-driven dispatch (`references/registry.md`) makes new sub-skills one-row additions. Visual kit vendored from cvr-rca; composite styling extracted from it at build time so the umbrella report is visually identical to a standalone CVR-RCA report. Future hooks (user context paste, cross-skill references, summary skill) designed-in but deferred. |
 | m004 | 2026-06-03 | **Header completeness — Omni pill + landing-page link from CE Health (v1.1.3).** Two header elements that were silently missing now render reliably. **(1) Omni dashboard pill:** Step 0d adds the `dashboards` array **unconditionally** (it only needs the CE ID), so every composite header carries the Omni link. **(2) Landing-page link (`top_page_url`):** CE Health now emits the most-visited landing-page URL in its sidecar at `metadata.top_page_url` (derived from the highest-traffic page in its landing-page funnel, mirroring CVR-RCA's Q0), so Step 0d reads it directly — the 🔗 link + clickable CE name render from the start, before the deep dives and even when CVR-RCA isn't dispatched. Step 4a is kept as a `summary.json` fallback only (CE Health found no LP data but CVR-RCA did). No `compose.py` change — `build_header` already renders both when `meta.json` carries them. Paired CE Health change (local skill, not git-versioned): `ce_health.py` derives + injects `top_page_url` into `meta` (flows to sidecar + the "## 1. CE Metadata" markdown table). |
 | m003 | 2026-06-03 | **Sentra dashboard link deprecated (v1.1.2).** Step 0d's `meta.json` enrichment now adds the Omni dashboard link only (was Omni + Sentra) — Sentra is being retired. `compose.py` builds the dashboards row generically from `meta.json.dashboards`, so dropping Sentra from the instruction is the only change needed; `composition_rules.md` (header-chrome line + meta.json example) and the `visual_kit.md` Page-skeleton doc-comment are updated to match. Paired with CVR-RCA v1.26 c041 (standalone-side Sentra trim). |

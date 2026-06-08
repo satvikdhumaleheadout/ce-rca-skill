@@ -166,7 +166,9 @@ def _cell_split(c):
     m = _PURE_DELTA.match(s)
     if m:
         d = _delta_dir(m.group('delta'))
-        return f'<span class="ceh-chg {d}">{_html.escape(m.group("delta"))}</span>'
+        # Colour the whole token (sign classified from the delta), preserving any
+        # trailing parenthetical like "+31% (+$32.1K)" so no figure is dropped.
+        return f'<span class="ceh-chg {d}">{_html.escape(s)}</span>'
     return _cell(c)
 
 
@@ -513,7 +515,8 @@ def _clean_history_md(md_section: str) -> str:
     """Drop CE Health's filesystem-search placeholders that never resolve in the
     bundle (no thoughts/shared dir), so §8 reads cleanly once we inject real content."""
     drop = ("Past perf audits:** None found", "Recent weekly reviews:** None found",
-            "Slack context: searched by SKILL.md")
+            "Slack context: searched by SKILL.md",
+            "Add your context:")  # interactive CLI prompt — never belongs in the report
     return "\n".join(ln for ln in md_section.splitlines()
                      if not any(p in ln for p in drop))
 
@@ -599,14 +602,14 @@ def build_fragment(run_dir: Path) -> str:
     vh, vr = tables_in(section(md, "CE Vitals"))[0]
     s2 = block("2. CE Vitals", "cehealth-vitals",
                f'<div class="metric-cards" style="grid-template-columns:repeat(6,1fr);">{cards}</div>'
-               + _subhead("Full 4-window comparison") + styled_table(vh, vr) + vit_note)
+               + _subhead("Full 4-window comparison") + styled_table(vh, vr, split_deltas=True) + vit_note)
 
     # §3 Channel Breakdown — ALL rows (Δ columns coloured up/down/flat)
     s3 = block("3. Channel Breakdown", "cehealth-channels",
                styled_table(*tables_in(section(md, "Channel Breakdown"))[0], split_deltas=True))
 
     # §4 Funnel — all rows
-    s4 = block("4. Funnel", "cehealth-funnel", styled_table(*tables_in(section(md, "Funnel"))[0]))
+    s4 = block("4. Funnel", "cehealth-funnel", styled_table(*tables_in(section(md, "Funnel"))[0], split_deltas=True))
 
     # §5 L12M Trajectory — charts replace the two monthly tables (same data)
     l12 = section(md, "L12M Trajectory")
@@ -641,7 +644,7 @@ def build_fragment(run_dir: Path) -> str:
         print(f"WARN: Query 1 failed ({e}); rendering CE Health's §7 table verbatim.", file=sys.stderr)
         sec7 = section(md, "Driver Diagnosis")
         tbls = tables_in(sec7)
-        inner = styled_table(*tbls[0]) if tbls else f'<div class="md-content">{render_markdown_to_html(sec7)}</div>'
+        inner = styled_table(*tbls[0], split_deltas=True) if tbls else f'<div class="md-content">{render_markdown_to_html(sec7)}</div>'
         s7 = block("7. Driver Diagnosis (Shapley)", "cehealth-shapley", inner)
 
     # §8 Historical Context — CE Health's markdown, plus our institutional memory
@@ -649,24 +652,25 @@ def build_fragment(run_dir: Path) -> str:
     hist = ce_history_block(run_dir)          # synthesised trajectory (sub-agent)
     prior = prior_runs_block(run_dir, ce_id)  # deterministic prior-run index + links
     uctx = user_context_subsection(run_dir)   # user-provided + recent Slack
-    hist_md = section(md, "Historical Context")
-    if hist or prior or uctx:
-        hist_md = _clean_history_md(hist_md)  # drop dead "None found" placeholders
+    # Always strip CE Health's filesystem-search placeholders and the interactive
+    # "Add your context" prompt — neither belongs in the rendered report (Slack /
+    # user context is surfaced below via uctx, and prior RCAs via `prior`).
+    hist_md = _clean_history_md(section(md, "Historical Context"))
     s8 = block("8. Historical Context", "cehealth-history",
                f'<div class="md-content">{render_markdown_to_html(hist_md)}</div>'
                + hist + prior + uctx)
 
     # §9 Lead Time Cohorts — all rows
     s9 = block("9. Lead Time Cohorts", "cehealth-leadtime",
-               styled_table(*tables_in(section(md, "Lead Time Cohorts"))[0]))
+               styled_table(*tables_in(section(md, "Lead Time Cohorts"))[0], split_deltas=True))
 
     # §10 Landing Pages — ALL rows
     s10 = block("10. Landing Pages", "cehealth-landing",
-                styled_table(*tables_in(section(md, "Landing Pages"))[0]))
+                styled_table(*tables_in(section(md, "Landing Pages"))[0], split_deltas=True))
 
     # §11 Customer Countries — ALL rows
     s11 = block("11. Customer Countries", "cehealth-countries",
-                styled_table(*tables_in(section(md, "Customer Countries"))[0]))
+                styled_table(*tables_in(section(md, "Customer Countries"))[0], split_deltas=True))
 
     footer = (f'<footer style="text-align:center;font-size:12px;color:#aaa;padding:18px;">'
               f'CE Health v2.0 | {d.get("generated_at", "")} | {d.get("range", "month")} windows</footer>')

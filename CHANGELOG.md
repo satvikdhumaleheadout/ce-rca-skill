@@ -5,6 +5,32 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.1.2] — 2026-06-08 — Colour-coded deltas across all CE Health tables + §8 prompt removed
+
+**Summary:** Extends the delta-colouring polish to **every** CE Health table (v1.8.2 only did §3 + §6) and removes a stray interactive prompt from §8 that doesn't belong in a report.
+
+### What changed
+- **`scripts/render_ce_health.py`** — `split_deltas=True` is now applied to the remaining CE Health tables: **§2 Full 4-window comparison, §4 Funnel, §9 Lead Time Cohorts, §10 Landing Pages, §11 Customer Countries** (and the §7 verbatim-fallback table). Their `Δ … (MOM / YoY / LY)` and `pp` columns now render green (up) / red (down) / amber (near-flat, `|Δ|<1pp` or `<5%`) like §3 — consistent colour across the whole tab.
+- **Parenthetical-preserving fix** — `_cell_split` previously dropped a trailing parenthetical when colouring a lone delta, so a cell like `+31% (+$32.1K)` lost the `(+$32.1K)`. It now colours the **whole token**, preserving the figure (verified: `-66% (-$708.8K)`, `+62% (+$111.3K)` intact).
+- **§8 "Add your context" removed** — CE Health's interactive CLI prompt (`> **Add your context:** …`) was leaking into the rendered §8. `_clean_history_md` now drops it (alongside the existing "None found" placeholders) and runs **unconditionally**, so §8 never shows the prompt. Slack / user context is already surfaced below via the user-context subsection.
+
+### Blast radius
+- **`render_ce_health.py` only** — no `compose.py` / template / shared `visual_kit.md` / sub-skill change. The scoped `#tab-cehealth` `.ceh-chg` CSS already existed (v1.8.2). Graceful degradation intact: non-delta cells and unexpected shapes render plainly. Verified on CE 243 + CE 3593 (deltas coloured in §2/§4/§9/§10/§11, parentheticals preserved, no "Add your context").
+
+---
+
+## [v2.1.1] — 2026-06-08 — Colour-coded delta cells in Follow-ups tables
+
+**Summary:** Follow-up answer tables rendered their delta / lost-checkout columns in plain black (e.g. `−3.13pp`, `202 (64%)`), unlike the CE Health tables where declines are red and gains green. v2.1.1 makes Claude colour those cells when it authors a Follow-ups card — matching the rest of the report at zero engine cost.
+
+### What changed
+- **`references/followup_guide.md`** — the entry-card table template + a new rule instruct colouring every directional cell: **`.neg`** (red, bold) for declines/losses (negative Δ, "lost checkouts", drops), **`.pos`** (green, bold) for gains, **plain text** for near-flat, plus **`.num`** on numeric cells for right-aligned tabular figures. The sign convention follows the *business outcome direction* (more lost checkouts / falling rate = red).
+
+### Why no code change
+- `.neg` / `.pos` / `.num` already live in the shared `visual_kit.md` (unscoped), so they render inside the Follow-ups `.md-table` identically to the CE Health tab. Verified: the classes survive verbatim into the composite and their red/green CSS is present. **No `compose.py` / template / sub-skill change.**
+
+---
+
 ## [v2.1.0] — 2026-06-08 — Private-repo distribution via fine-grained read-only token
 
 **Summary:** Keeps the repo **private** while preserving no-GitHub-CLI install + auto-update. Access is gated by a **read-only, repo-scoped fine-grained token** the user mints once and saves to `~/.ce-rca-token`; all downloads/version-checks authenticate with it via the **GitHub API** (which works on private repos, unlike `raw.githubusercontent.com` / the public codeload zip).

@@ -106,12 +106,16 @@ markdown** (this tab is embedded verbatim, not markdown-rendered).
   <p><the answer, in prose. Cite sources inline with a working cross-tab link:
      the swapped-off branded LP fed these listings
      <a class="ref-link" href="#block-cascade">↗</a>.</p>
-  <!-- include ONLY when the answer is tabular: wrap wide tables in .md-table-wrap -->
+  <!-- include ONLY when the answer is tabular: wrap wide tables in .md-table-wrap.
+       Colour every delta / change / lost-type cell: .neg (red) for declines/losses,
+       .pos (green) for gains, plain text for near-flat. Add .num to numeric cells
+       for right-aligned tabular figures. -->
   <div class="md-table-wrap">
     <table class="md-table">
-      <thead><tr><th>Segment</th><th>Pre S2C</th><th>Post S2C</th><th>Δ</th></tr></thead>
+      <thead><tr><th>TGID</th><th>Tour</th><th class="num">Pre S2C</th><th class="num">Post S2C</th><th class="num">Δ</th><th class="num">Lost checkouts</th></tr></thead>
       <tbody>
-        <tr><td>Lower + Upper Antelope</td><td>32.6%</td><td>29.5%</td><td>−3.1pp</td></tr>
+        <tr><td>29649</td><td>Lower Antelope</td><td class="num">32.6%</td><td class="num">29.5%</td><td class="num neg">−3.13pp</td><td class="num neg">202 (64%)</td></tr>
+        <tr><td>30270</td><td>Antelope Canyon Tour</td><td class="num">18.8%</td><td class="num">19.4%</td><td class="num pos">+0.6pp</td><td class="num">—</td></tr>
       </tbody>
     </table>
   </div>
@@ -123,6 +127,14 @@ markdown** (this tab is embedded verbatim, not markdown-rendered).
   unique (`followups-<short-slug>` from the question).
 - Every card carries the **tag pill + date**. Use **`.delta-flat`** by default (neutral); use
   `.delta-neg` / `.delta-pos` only when the *finding itself* is a decline / improvement.
+- **Colour every directional table cell** — match the CE Health tables. Any delta / change /
+  loss / drop column gets a colour class on the `<td>`: **`.neg`** (red, bold) for a
+  decline or a loss (negative Δ, "lost checkouts", drop counts), **`.pos`** (green, bold) for
+  a gain (positive Δ, improvement), and **plain text** (no class) for a near-flat change
+  (≈0, e.g. `−0.1pp`). Add **`.num`** to every numeric `<td>`/`<th>` for right-aligned
+  tabular figures. The sign convention is about *direction of the business outcome*: more lost
+  checkouts / a falling rate = `.neg`; recovered checkouts / a rising rate = `.pos`. These
+  classes live in the shared visual kit, so they render identically to the CE Health tab.
 - **No SQL in the card.** Even for a `new query` answer, show only the result (prose + table) — the
   tag pill `new query` is the provenance; the SQL stays in chat / `_run_log.md`, never in the tab.
 - **Cross-tab links must be valid and resolve.** Use `<a class="ref-link" href="#<anchor>">↗</a>`

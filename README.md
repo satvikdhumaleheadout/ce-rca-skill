@@ -39,7 +39,8 @@ The default window is last 30 days vs prior 30 days.
 
 | File | Role |
 |---|---|
-| `SKILL.md` | The orchestrator: Steps 0–3 (run CE Health → present + pause → dispatch → compose) |
+| `SKILL.md` | The orchestrator: auto-update check → Steps 0–5 (run CE Health → present + pause → dispatch → compose → follow-ups) |
+| `skills/{cvr-rca,perf-audit,ce-health}/` | Vendored sub-skills, run from fixed paths inside the bundle |
 | `references/registry.md` | Driver → sub-skill dispatch table + the orchestration handshake spec |
 | `references/composition_rules.md` | How the tabbed report is assembled (verbatim fidelity, CVR-RCA extraction, styling) |
 | `references/visual_kit.md` | Vendored copy of CVR-RCA's shared visual primitives (manual-sync) |
@@ -47,16 +48,37 @@ The default window is last 30 days vs prior 30 days.
 | `scripts/helpers.py` | Markdown→HTML renderer + CVR-RCA tab/chart extraction |
 | `templates/report.html` | Composite shell (header, tab bar, panes, tab JS, back-to-top) |
 
-## Companion skills
+## Install
 
-CE-RCA orchestrates three skills, installed separately (see `INSTALL.md`):
+CE-RCA is a **self-contained bundle** — you install one thing and the three
+sub-skills come with it. No GitHub CLI needed. In Claude Code / Cowork, paste:
 
-- **CE Health** — required (the orientation step)
-- **CVR-RCA** — `~/.cvr-rca/` (v1.24+ for the orchestration handshake)
-- **perf-audit** — `~/.perf-audit-skill/`
+```
+Install the CE-RCA skill from:
+https://raw.githubusercontent.com/satvikdhumaleheadout/ce-rca-skill/main/INSTALL.md
+```
 
-Any companion that isn't installed simply won't appear as a tab — the run still
-completes.
+Claude runs the installer: downloads the bundle to `~/.ce-rca/`, registers the
+`/ce-rca` command, checks prerequisites (`bq`, Python 3.9+), and creates the runs
+folder. Then `/ce-rca <CE>`.
+
+**Always-latest, automatically.** At the start of every run the skill checks the
+published `VERSION` and, if the local bundle is behind, **silently re-downloads
+the latest and continues** — you never run a stale version, and there's no
+minimum-version gate to manage. Offline runs proceed on the installed bundle.
+
+## Bundled sub-skills
+
+The three sub-skills are **vendored inside the bundle** under
+`~/.ce-rca/skills/` — no separate installs, no path configuration:
+
+- **CE Health** — `skills/ce-health/` (the orientation step; required)
+- **CVR-RCA** — `skills/cvr-rca/` (the funnel deep-dive)
+- **perf-audit** — `skills/perf-audit/` (the paid deep-dive)
+
+Maintainers refresh these snapshots with `bash ~/.ce-rca/scripts/vendor.sh`
+before a release. A sub-skill not selected for a run simply won't appear as a
+tab — the run still completes.
 
 ## Standalone skills still work
 

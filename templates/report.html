@@ -25,6 +25,24 @@
     .tab-button.active { color:#fff; border-bottom-color:#4a7eff; }
     .tab-pane { display:none; }
     .tab-pane.active { display:block; }
+    /* Nested sub-tabs (the Transcript tab). Distinct classes from .tab-* so the
+       global tab switcher never toggles these, and vice-versa. */
+    .subtab-bar { display:flex; gap:4px; flex-wrap:wrap; margin:0 0 14px;
+      border-bottom:1px solid #e0e4ef; }
+    .subtab-button { font:inherit; font-size:12px; font-weight:600; color:#8892a4;
+      background:transparent; border:none; padding:8px 14px; cursor:pointer;
+      border-bottom:2px solid transparent; transition:color .15s, border-color .15s; }
+    .subtab-button:hover { color:#3a3a5a; }
+    .subtab-button.active { color:#1a1a2e; border-bottom-color:#4a7eff; }
+    .subtab-pane { display:none; }
+    .subtab-pane.active { display:block; }
+    /* Transcripts are markdown-rendered into .md-content. Fenced ASCII tree-maps
+       arrive as <pre><code> — keep them monospace + aligned (white-space:pre) and
+       horizontally scrollable so wide trees/tables don't overflow the pane. */
+    .subtab-pane .md-content pre { background:#f7f8fb; border:1px solid #e8ebf4;
+      border-radius:6px; padding:14px 16px; overflow-x:auto; margin:12px 0; }
+    .subtab-pane .md-content pre code { font-family:'SF Mono',Menlo,Consolas,monospace;
+      font-size:12px; line-height:1.55; color:#2a2a44; white-space:pre; }
   </style>
 </head>
 <body>
@@ -108,6 +126,24 @@
         }, 50);
       }
     }
+  })();
+</script>
+
+<!-- Nested sub-tab switcher (Transcript tab). Scoped to the clicked button's own
+     .tab-pane so it only toggles .subtab-* within that group — never the
+     top-level .tab-pane set handled by the tab framework JS above. -->
+<script>
+  (function () {
+    document.querySelectorAll('.subtab-button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var scope = btn.closest('.tab-pane') || document;
+        scope.querySelectorAll('.subtab-button').forEach(function (b) { b.classList.remove('active'); });
+        scope.querySelectorAll('.subtab-pane').forEach(function (p) { p.classList.remove('active'); });
+        btn.classList.add('active');
+        var pane = scope.querySelector('#' + btn.dataset.subtab);
+        if (pane) pane.classList.add('active');
+      });
+    });
   })();
 </script>
 

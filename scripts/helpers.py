@@ -70,7 +70,7 @@ def _md_parse_table(lines: list[str], start: int) -> tuple[str, int]:
     while i < len(lines) and "|" in lines[i] and lines[i].strip():
         rows.append(cells(lines[i]))
         i += 1
-    out = ['<table class="md-table"><thead><tr>']
+    out = ['<div class="md-table-wrap"><table class="md-table"><thead><tr>']
     for cell in header_cells:
         out.append(f"<th>{_md_inline(cell)}</th>")
     out.append("</tr></thead><tbody>")
@@ -79,7 +79,7 @@ def _md_parse_table(lines: list[str], start: int) -> tuple[str, int]:
         for cell in row:
             out.append(f"<td>{_md_inline(cell)}</td>")
         out.append("</tr>")
-    out.append("</tbody></table>")
+    out.append("</tbody></table></div>")
     return "".join(out), i - start
 
 
@@ -331,6 +331,80 @@ def extract_cvr_rca_tab(html: str) -> tuple[str, str]:
             body = bm.group(1) if bm else html
     scripts = _extract_plotly_scripts(html)
     return body, scripts
+
+
+def extract_and_scope_cvr_style(html: str, scope: str) -> str:
+    """Pull the CVR-RCA report's own <style> block and scope every rule to `scope`.
+
+    The standalone cvr_rca_report.html ships a complete, self-contained <style>
+    that defines every class its body uses (.metric-grid, .card, .shapley-seg,
+    .action-card, etc.). The composite injects ce-rca's shared visual_kit CSS for
+    its chrome, which has drifted from cvr-rca's and lacks many of those classes —
+    so the extracted CVR pane renders unstyled. Rather than chase drift class by
+    class, we carry CVR-RCA's own stylesheet verbatim, prefixing every selector
+    with `scope` (e.g. `#tab-cvr-rca`). The ID prefix makes these rules both
+    self-sufficient (they fully style the pane) and inert outside it (higher
+    specificity wins inside the pane; zero reach outside), so the other tabs and
+    the composite chrome are untouched.
+    """
+    m = re.search(r"<style>(.*?)</style>", html, flags=re.DOTALL | re.IGNORECASE)
+    if not m:
+        return ""
+    return _scope_css(m.group(1), scope)
+
+
+def _scope_css(css: str, scope: str) -> str:
+    """Prefix every selector in `css` with `scope`. Handles @media blocks
+    (recursively), comma-separated selector lists, the universal reset, and
+    :root/html/body (mapped to the scope element itself so CSS custom properties
+    and base styles land on the pane, which is the root of the embedded content).
+    """
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)  # strip comments
+    out = []
+    i, n = 0, len(css)
+    while i < n:
+        brace = css.find("{", i)
+        if brace == -1:
+            break
+        prelude = css[i:brace].strip()
+        if prelude.startswith("@"):
+            # At-rule with a block (e.g. @media): recurse on the inner rules.
+            depth, j = 0, brace
+            while j < n:
+                if css[j] == "{":
+                    depth += 1
+                elif css[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            inner = css[brace + 1:j]
+            out.append(f"{prelude} {{\n{_scope_css(inner, scope)}\n}}")
+            i = j + 1
+        else:
+            close = css.find("}", brace)
+            if close == -1:
+                break
+            decls = css[brace + 1:close].strip()
+            out.append(f"{_scope_selectors(prelude, scope)} {{ {decls} }}")
+            i = close + 1
+    return "\n".join(out)
+
+
+def _scope_selectors(selector_list: str, scope: str) -> str:
+    parts = [s.strip() for s in selector_list.split(",") if s.strip()]
+    return ", ".join(_scope_one(s, scope) for s in parts)
+
+
+def _scope_one(sel: str, scope: str) -> str:
+    # :root / html / body map to the scope element itself so variables defined on
+    # :root and base body styles apply to the pane (the embedded content's root).
+    if sel in (":root", "html", "body"):
+        return scope
+    sel = re.sub(r"^(?:html|body)\b", scope, sel)  # body.x → scope.x
+    if sel.startswith(scope):
+        return sel
+    return f"{scope} {sel}"
 
 
 def _extract_div_by_id_from_match(html: str, open_match) -> str:

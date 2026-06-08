@@ -4,10 +4,11 @@ You are Claude. A user has asked you to install or update the CE-RCA master
 skill from this file. Execute every step below in order, narrating each action
 as you go. Do not ask for confirmation between steps — just do it and report.
 
-CE-RCA is an **umbrella** skill: it orchestrates three sub-skills (CE Health,
-CVR-RCA, perf-audit). It is most useful when all three are installed, but it
-degrades gracefully — any sub-skill that isn't installed simply won't appear as
-a tab. Steps 5–7 install the companions.
+CE-RCA is a **self-contained bundle**: it orchestrates three sub-skills (CE
+Health, CVR-RCA, perf-audit) that are **vendored inside it** under `skills/`. You
+install **one thing** and everything is there — no separate companion installs,
+no path configuration. The master runs each sub-skill from its fixed path inside
+the bundle (`skills/cvr-rca/`, `skills/perf-audit/`, `skills/ce-health/`).
 
 ---
 
@@ -37,6 +38,19 @@ python3 --version 2>&1 | head -1 || echo "NOT FOUND"
 If `bq` is missing, tell the user the sub-skills need it: "Install Google Cloud
 SDK and run `gcloud auth application-default login` before using the skill.
 Continuing the install anyway." Python 3.9+ is required for `compose.py`.
+
+**Optional — Google Sheets context ingestion.** If users will point the Step 1
+context layer at ad-hoc Google Sheets, enable the `read_sheet.py` helper once:
+
+```bash
+pip3 install google-api-python-client google-auth
+gcloud auth application-default login \
+  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets.readonly
+```
+
+This lets the context-ingestion sub-agent read private sheets via your gcloud
+identity. If skipped, sheet ingestion falls back to the Drive MCP (less reliable);
+docs and Slack channels are unaffected.
 
 ---
 
@@ -81,49 +95,24 @@ Tell the user: "Created runs folder at `~/Documents/CE RCA Runs/`."
 
 ---
 
-## Step 5 — Companion: CE Health (required for the umbrella to work)
+## Step 5 — Verify the bundle is complete
 
-CE Health is the orientation step — without it the master has nothing to run.
+The sub-skills ship inside the bundle, so there are no separate companion
+installs. Just confirm they're present:
 
 ```bash
-if [ -d "$HOME/.ce-health-skill" ] || [ -d "$HOME/Documents/ce-health-skill-main" ]; then
-  echo "ce-health found"
-else
-  echo "ce-health not found"
-fi
+for s in cvr-rca perf-audit ce-health; do
+  if [ -e "$HOME/.ce-rca/skills/$s" ]; then echo "  ✓ skills/$s"; else echo "  ✗ MISSING skills/$s"; fi
+done
 ```
 
-If not found, tell the user CE-RCA needs it and point them at the CE Health repo
-to install at `~/.ce-health-skill/`. (The master resolves it via
-`$CE_HEALTH_SKILL_PATH` → `~/.ce-health-skill/` → `~/Documents/ce-health-skill-main/`.)
+All three should be `✓`. If any is missing, the download was incomplete —
+re-run Step 2. (Maintainers refreshing the vendored copies use
+`bash ~/.ce-rca/scripts/vendor.sh`.)
 
 ---
 
-## Step 6 — Companion: CVR-RCA
-
-```bash
-if [ -d "$HOME/.cvr-rca" ]; then echo "cvr-rca found"; else echo "cvr-rca not found"; fi
-```
-
-If not found, point the user at the CVR-RCA installer
-(`https://github.com/satvikdhumaleheadout/cvr-rca-skill`) to install at
-`~/.cvr-rca/`. CVR-RCA v1.24+ is required (it carries the `orchestration.json`
-delegation check that prevents perf-audit from being fired twice).
-
----
-
-## Step 7 — Companion: perf-audit
-
-```bash
-if [ -d "$HOME/.perf-audit-skill" ]; then echo "perf-audit found"; else echo "perf-audit not found"; fi
-```
-
-If not found, point the user at `https://github.com/aaradhyaraiHO/perf-audit-skill`
-to install at `~/.perf-audit-skill/`.
-
----
-
-## Step 8 — Confirm
+## Step 6 — Confirm
 
 ```bash
 cat ~/.ce-rca/VERSION
@@ -133,12 +122,16 @@ Tell the user the installed version and summarise:
 
 > **CE-RCA v[VERSION] installed/updated successfully.**
 >
-> - Master skill: `~/.ce-rca/`
+> - Bundle: `~/.ce-rca/` (contains CVR-RCA, perf-audit, CE Health under `skills/`)
 > - Command: `/ce-rca`
 > - Runs folder: `~/Documents/CE RCA Runs/`
-> - Companions detected: CE Health [✓/✗], CVR-RCA [✓/✗], perf-audit [✓/✗]
 >
 > **Restart Claude Code** for the command to take effect.
 >
 > **Run:** `/ce-rca <CE ID or name>` — it runs CE Health, shows the diagnosis,
-> asks which directions to deep-dive, then composes a tabbed report.
+> asks which directions to deep-dive, then composes a tabbed report. Everything
+> runs from inside the bundle — no other setup.
+>
+> **Stays up to date automatically:** each run checks the published version and
+> silently re-downloads the latest bundle if yours is behind — no manual updates,
+> no minimum-version gate. (Offline runs use the installed bundle.)

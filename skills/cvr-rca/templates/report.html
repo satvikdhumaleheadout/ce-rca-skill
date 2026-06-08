@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{TITLE}}</title>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #f5f6fa;
+      color: #1a1a2e;
+      font-size: 14px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: 'cv11', 'tnum';
+    }
+
+    /* ─── Main container ─────────────────────────────────── */
+    .container {
+      max-width: 1050px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    /* ─── Report header (render.py emits dark #1a1a2e banner) ── */
+    /* Let the banner render naturally — no overrides needed */
+
+    /* ─── Analysis block — wraps each section ─────────────── */
+    .analysis-block {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e8ebf4;
+      padding: 24px 28px;
+      margin: 20px 0;
+    }
+
+    /* ─── Section label (title inside each block) ─────────── */
+    .section-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #8892a4;
+      border-bottom: 1px solid #e0e4ef;
+      padding-bottom: 10px;
+      margin-bottom: 16px;
+    }
+
+    .section-subtitle {
+      font-size: 12px;
+      color: #8892a4;
+      margin: -8px 0 14px;
+      font-weight: 500;
+    }
+
+    /* ─── Verdict line (key finding highlight) ─────────────── */
+    .verdict-line {
+      color: #c62828;
+      background: #fdecea;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 12px;
+      line-height: 1.45;
+    }
+    .verdict-line.neutral {
+      color: #3a4a8a;
+      background: #e8edf7;
+    }
+
+    /* ─── Priority badges (action cards) ───────────────────── */
+    .priority-badge { padding: 3px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .05em; white-space: nowrap; }
+    .priority-badge.p1 { background: #fdecea; color: #c62828; }
+    .priority-badge.p2 { background: #fff8e1; color: #e65100; }
+    .priority-badge.p3 { background: #f1f8e9; color: #2e7d32; }
+
+    /* ─── Tables ─────────────────────────────────────────────── */
+    .container table {
+      font-family: inherit;
+      font-variant-numeric: tabular-nums;
+    }
+    .container table th {
+      background: #f5f6fa !important;
+      color: #8892a4 !important;
+      font-size: 10px !important;
+      font-weight: 700 !important;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      border-bottom: 2px solid #e0e4ef !important;
+    }
+    .container table td {
+      border-bottom: 1px solid #f0f1f5;
+    }
+    .container table tr:last-child td { border-bottom: none; }
+    .container table tr:hover td { background: #fafbfd !important; }
+
+    /* Scrollable table wrapper */
+    .container div[style*="overflow-x:auto"],
+    .container div[style*="overflow-x: auto"] {
+      border: 1px solid #e8ebf4;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    /* ─── Callouts (render.py emits border-left:4px solid) ─── */
+    .container div[style*="border-left:4px solid"],
+    .container div[style*="border-left: 4px solid"] {
+      border-radius: 0 8px 8px 0 !important;
+      padding: 14px 18px !important;
+      margin: 12px 0 !important;
+    }
+
+    /* ─── Metric cards ──────────────────────────────────────── */
+    .container div[style*="border:1px solid #E0E0E0"][style*="border-radius:10px"],
+    .container div[style*="border: 1px solid #E0E0E0"][style*="border-radius: 10px"] {
+      border-color: #e8ebf4 !important;
+      background: #fafbfd !important;
+    }
+
+    /* ─── Plotly ────────────────────────────────────────────── */
+    .js-plotly-plot { width: 100% !important; }
+
+    /* ─── Tabbed report layout — see report_structure.md "Tabbed report structure" ── */
+    /* Tabs only appear when render.py receives a spec with `tabs[]` length ≥ 2.
+       For legacy single-tab specs the tab bar is omitted and content is flat,
+       so existing reports render byte-identically.
+
+       v1.15: .tab-bar is emitted OUTSIDE .container so the dark band stretches
+       full viewport width and buttons hug the left edge (40px padding aligns
+       with the header content edge). Survives any monitor width — no more
+       centered-island appearance on wide screens. */
+    .tab-bar {
+      display: flex;
+      gap: 4px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: #1a1a2e;
+      padding: 0 40px;
+      border-bottom: 1px solid #2a2a44;
+      margin-bottom: 0;
+    }
+    .tab-button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: #8892a4;
+      background: transparent;
+      border: none;
+      padding: 14px 22px;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-button:hover { color: #c8cfe0; }
+    .tab-button.active {
+      color: #fff;
+      border-bottom-color: #4a7eff;
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ─── Markdown-sourced tab content (perf-audit, future tabs) ─── */
+    /* Inherits the dark-theme look — same table styling as the CVR-RCA tab so
+       embedded reports don't feel foreign. Anchor IDs are injected at render
+       time with a prefix (e.g. `perfaudit-*`) so cross-tab `↗` links stay
+       namespaced and stable. */
+    .md-content {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e8ebf4;
+      padding: 28px 32px;
+      margin: 20px 0;
+      line-height: 1.7;
+    }
+    .md-content h1 { font-size: 22px; font-weight: 800; margin: 24px 0 12px; color: #1a1a2e; }
+    .md-content h2 { font-size: 18px; font-weight: 700; margin: 28px 0 10px; color: #1a1a2e; border-bottom: 1px solid #e8ebf4; padding-bottom: 6px; }
+    .md-content h3 { font-size: 15px; font-weight: 700; margin: 20px 0 8px; color: #2a2a44; }
+    .md-content h4 { font-size: 13px; font-weight: 700; margin: 16px 0 6px; color: #2a2a44; text-transform: uppercase; letter-spacing: 0.05em; }
+    .md-content p { margin: 8px 0; }
+    .md-content ul, .md-content ol { margin: 8px 0 12px 24px; }
+    .md-content li { margin: 4px 0; }
+    .md-content code { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; background: #f5f6fa; padding: 2px 6px; border-radius: 4px; color: #c62828; }
+    .md-content a { color: #3a4a8a; text-decoration: none; border-bottom: 1px solid rgba(58,74,138,0.3); }
+    .md-content a:hover { border-bottom-color: #3a4a8a; }
+    .md-content hr { border: none; border-top: 1px solid #e8ebf4; margin: 24px 0; }
+    .md-content :target { box-shadow: 0 0 0 3px #ffe082; transition: box-shadow 0.4s; border-radius: 4px; }
+    .md-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+      margin: 12px 0 16px;
+      font-size: 13px;
+    }
+    .md-table th {
+      background: #f5f6fa;
+      color: #8892a4;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 2px solid #e0e4ef;
+      padding: 10px 12px;
+      text-align: left;
+    }
+    .md-table td {
+      border-bottom: 1px solid #f0f1f5;
+      padding: 10px 12px;
+    }
+    .md-table tr:last-child td { border-bottom: none; }
+    .md-table tr:hover td { background: #fafbfd; }
+
+    /* ─── ↗ link-to-table affordance — see report_structure.md "↗ link-to-table pattern" ── */
+    /* Used in Section 1 callout, Section 2 action cards, Hypotheses Explored "Test run" column.
+       Routes to a Section 3 .analysis-block by its `id` attribute. Bare ↗ for internal navigation;
+       `Source · date ↗` for Slack citations. NEVER use inside Section 3 verdict lines/subtexts. */
+    .ref-link { color: #3a4a8a; text-decoration: none; font-size: 12px; font-weight: 700; margin-left: 3px; }
+    .ref-link:hover { color: #c62828; }
+    html { scroll-behavior: smooth; }
+    .analysis-block:target { box-shadow: 0 0 0 3px #ffe082; transition: box-shadow 0.4s; }
+
+    /* ─── Print ─────────────────────────────────────────────── */
+    @media print {
+      body { background: #fff; }
+      .analysis-block { border: 1px solid #ddd; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+
+{{TAB_BAR}}
+
+<div class="container">
+  {{BODY}}
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    {{CHART_SCRIPTS}}
+  });
+</script>
+
+<script>
+  // Tab framework — see report_structure.md "Tabbed report structure".
+  // No-ops gracefully when the report has no tab bar (legacy single-tab specs).
+  (function () {
+    function activateTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.remove('active'); });
+      document.querySelectorAll('.tab-button').forEach(function (b) {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      var pane = document.getElementById('tab-' + tabId);
+      var btn  = document.querySelector('.tab-button[data-tab="' + tabId + '"]');
+      if (pane) pane.classList.add('active');
+      if (btn)  { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
+      // Plotly charts inside a previously-hidden pane may have rendered at
+      // width 0. Force a resize so they reflow to the now-visible container.
+      if (pane && window.Plotly) {
+        pane.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+          try { window.Plotly.Plots.resize(el); } catch (e) { /* ignore */ }
+        });
+      }
+    }
+
+    // Click handlers on the tab buttons
+    document.querySelectorAll('.tab-button').forEach(function (btn) {
+      btn.addEventListener('click', function () { activateTab(btn.dataset.tab); });
+    });
+
+    // Cross-tab anchor links — when a `.ref-link` (or any in-page anchor) points
+    // to an element inside a hidden tab, switch tabs first, then scroll. We use
+    // a delegated listener so links inside dynamically-rendered markdown work.
+    document.addEventListener('click', function (e) {
+      var link = e.target.closest('a[href^="#"]');
+      if (!link) return;
+      var href = link.getAttribute('href');
+      if (!href || href === '#') return;
+      var target = document.getElementById(href.slice(1));
+      if (!target) return;
+      var pane = target.closest('.tab-pane');
+      if (pane && !pane.classList.contains('active')) {
+        e.preventDefault();
+        var tabId = pane.id.replace(/^tab-/, '');
+        activateTab(tabId);
+        // Update URL hash so back-button + reload behave naturally
+        history.pushState(null, '', href);
+        // display:none → block has a layout race with smooth scroll. Defer one
+        // frame so the target's bounding box is real before we scroll to it.
+        setTimeout(function () {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 50);
+      }
+      // else: native :target + scroll-behavior:smooth handles it (today's behaviour)
+    });
+
+    // On initial load: if the URL has a hash pointing into a non-default tab,
+    // switch to that tab before the browser tries to scroll.
+    if (location.hash) {
+      var initialTarget = document.getElementById(location.hash.slice(1));
+      var initialPane = initialTarget && initialTarget.closest('.tab-pane');
+      if (initialPane && !initialPane.classList.contains('active')) {
+        activateTab(initialPane.id.replace(/^tab-/, ''));
+        setTimeout(function () {
+          initialTarget.scrollIntoView({ behavior: 'instant', block: 'start' });
+        }, 50);
+      }
+    }
+  })();
+</script>
+
+</body>
+</html>

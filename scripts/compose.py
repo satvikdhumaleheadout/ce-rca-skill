@@ -32,7 +32,7 @@ import json
 import re
 from pathlib import Path
 
-from helpers import render_markdown_tab, extract_cvr_rca_tab
+from helpers import render_markdown_tab, extract_cvr_rca_tab, extract_and_scope_cvr_style
 
 
 def extract_style_block(visual_kit_path: Path) -> str:
@@ -74,9 +74,21 @@ TAB_SPECS = [
     {
         "id": "cehealth",
         "label": "CE Health",
-        "source": "ce_health_report.md",
-        "type": "markdown",
+        # Primary: the beautified body fragment authored by render_ce_health.py
+        # (visual_kit chrome — cards, charts, styled tables, the corrected Shapley
+        # waterfall). Embedded verbatim like the Summary; its inline Plotly
+        # scripts execute because the fragment is part of the parsed document.
+        "source": "ce_health_tab.html",
+        "type": "html-fragment",
         "anchor_prefix": "cehealth-",
+        # Fallback: if the render step didn't run (or failed), fall back to the
+        # verbatim markdown render of CE Health's report — a failed beautification
+        # never costs us the tab.
+        "fallback": {
+            "source": "ce_health_report.md",
+            "type": "markdown",
+            "anchor_prefix": "cehealth-",
+        },
     },
     {
         "id": "cvr-rca",
@@ -91,7 +103,76 @@ TAB_SPECS = [
         "type": "markdown",
         "anchor_prefix": "perfaudit-",
     },
+    {
+        # Output layer (Step 5 playground). Authored incrementally by the master
+        # as the analyst promotes follow-up Q&A; absent on a run with no promoted
+        # follow-ups, so the tab simply doesn't appear (byte-identical to before).
+        "id": "followups",
+        "label": "Follow-ups & Q&A",
+        "source": "followups.html",
+        "type": "html-fragment",
+    },
 ]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Transcript tab — the always-last tab, with one sub-tab per skill transcript.
+# Explicit labels for known generic-named files; any other transcript_<skill>.md
+# is globbed in with a humanized label. A skill appears here simply by dropping a
+# transcript_<skill>.md (or, for CVR-RCA, its generic transcript.md) in the run
+# dir — no per-skill code. The orchestrator's own log lives in _run_log.md, which
+# is deliberately excluded (no `transcript` prefix) so it never shows.
+# ─────────────────────────────────────────────────────────────────────────────
+
+TRANSCRIPT_LABELS = {
+    "transcript.md": "CVR-RCA",                       # generic name == CVR-RCA by convention
+    "transcript_perf_audit.md": "Paid Performance Audit",  # match the perf-audit tab label
+}
+
+
+def collect_transcripts(run_dir: Path) -> list:
+    """Return [(label, Path)] for transcripts present — registry order, then globbed."""
+    seen, out = set(), []
+    for fname, label in TRANSCRIPT_LABELS.items():
+        p = run_dir / fname
+        if p.exists() and p.stat().st_size > 0:
+            out.append((label, p))
+            seen.add(p.name)
+    for p in sorted(run_dir.glob("transcript_*.md")):
+        if p.name not in seen and p.stat().st_size > 0:
+            label = p.stem[len("transcript_"):].replace("_", " ").title()
+            out.append((label, p))
+    return out
+
+
+def build_transcript_tab(run_dir: Path) -> tuple:
+    """Return (tab_button_html, tab_pane_html) for the Transcript tab, or ("", "").
+
+    Each transcript is markdown-rendered (headings, tables, prose) via
+    render_markdown_tab; ASCII tree-maps survive because the sub-skills fence them
+    in ``` blocks, which the renderer emits as verbatim <pre><code>. Heading ids are
+    namespaced per sub-tab (anchor_prefix) to avoid collisions across tabs. Sub-tabs
+    use .subtab-* classes with their own scoped switcher (the global tab JS only
+    toggles .tab-pane, never .subtab-pane).
+    """
+    items = collect_transcripts(run_dir)
+    if not items:
+        return "", ""
+    subbtns, subpanes = [], []
+    for i, (label, path) in enumerate(items):
+        active = " active" if i == 0 else ""
+        sid = "tr-" + (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or f"t{i}")
+        subbtns.append(
+            f'<button class="subtab-button{active}" data-subtab="{sid}">{label}</button>'
+        )
+        body = render_markdown_tab(path, anchor_prefix=f"{sid}-")
+        subpanes.append(f'<div class="subtab-pane{active}" id="{sid}">{body}</div>')
+    pane_body = '<div class="subtab-bar">' + "".join(subbtns) + "</div>" + "".join(subpanes)
+    btn = (
+        '<button class="tab-button" data-tab="transcript" role="tab" '
+        'aria-selected="false">Transcript</button>'
+    )
+    pane = f'<div class="tab-pane" id="tab-transcript" role="tabpanel">{pane_body}</div>'
+    return btn, pane
 
 
 def build_header(meta: dict) -> str:
@@ -146,12 +227,31 @@ def build_header(meta: dict) -> str:
 
     sub_bits = " · ".join([b for b in (f"CE {ce_id}", ce_type) if b])
 
+    # Metadata pills (CE Health §1 relocated into the header) — translucent chips
+    # on the dark header. Rendered from meta.json fields the master writes at
+    # Step 0d; the row is omitted entirely when none are present.
+    pill_fields = [
+        ("Category", meta.get("combined_entity_category")),
+        ("Subcategory", meta.get("combined_entity_subcategory")),
+        ("Evolution", meta.get("evolution_bucket")),
+        ("Management", meta.get("management_type")),
+        ("Status", meta.get("headout_status")),
+    ]
+    pills = "".join(
+        '<span style="display:inline-block;background:rgba(255,255,255,0.08);'
+        'border:1px solid rgba(255,255,255,0.16);color:#c8cfe0;padding:3px 11px;'
+        f'border-radius:13px;font-size:11px;margin:2px 5px 2px 0;">{label}: {val}</span>'
+        for label, val in pill_fields if val
+    )
+    pills_html = f'<div style="margin-top:10px;">{pills}</div>' if pills else ""
+
     return f"""<header id="top">
   <div class="eyebrow">CE Root Cause Analysis</div>
   <h1>{name_html}</h1>
   <div style="font-size:12px;color:#8892a4;margin-top:4px;">{sub_bits}</div>
   <div class="meta">{''.join(meta_spans)}</div>
   {dash_html}
+  {pills_html}
 </header>"""
 
 
@@ -161,6 +261,12 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
     for spec in TAB_SPECS:
         if (run_dir / spec["source"]).exists():
             present.append(spec)
+        elif spec.get("fallback") and (run_dir / spec["fallback"]["source"]).exists():
+            # Primary source absent — fall back to the spec's declared fallback
+            # (e.g. CE Health's beautified fragment missing → verbatim markdown).
+            fb = {**spec, **spec["fallback"]}
+            fb.pop("fallback", None)
+            present.append(fb)
 
     if not present:
         # Should not happen — CE Health always runs — but degrade gracefully.
@@ -194,7 +300,12 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
         elif spec["type"] == "html-extract":
             html = src_path.read_text(encoding="utf-8")
             body, scripts = extract_cvr_rca_tab(html)
-            pane_body = body
+            # Carry CVR-RCA's own stylesheet, scoped to this pane, so the tab
+            # renders with full fidelity regardless of visual_kit drift. The
+            # ID-scoped <style> is inert outside #tab-cvr-rca, so other tabs and
+            # the composite chrome are untouched.
+            scoped_css = extract_and_scope_cvr_style(html, f"#tab-{spec['id']}")
+            pane_body = f"<style>\n{scoped_css}\n</style>\n{body}" if scoped_css else body
             if scripts:
                 chart_scripts.append(scripts)
         else:
@@ -204,6 +315,12 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
             f'<div class="tab-pane{active}" id="tab-{spec["id"]}" role="tabpanel">'
             f"{pane_body}</div>"
         )
+
+    # Transcript tab — always last, conditional on ≥1 transcript file existing.
+    t_btn, t_pane = build_transcript_tab(run_dir)
+    if t_btn:
+        buttons.append(t_btn)
+        panes.append(t_pane)
 
     tab_bar = f'<div class="tab-bar" role="tablist">{"".join(buttons)}</div>'
     panes_html = '<div class="container">' + "\n".join(panes) + "</div>"

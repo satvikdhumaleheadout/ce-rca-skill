@@ -10,3 +10,6 @@ scripts/__pycache__/
 
 # Temp output from the skill
 /tmp/
+
+# Internal planning (not for distribution)
+thoughts/

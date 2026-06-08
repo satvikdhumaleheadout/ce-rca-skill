@@ -6,15 +6,33 @@ edit** — no code change. This is the scalability contract.
 
 ## Driver → sub-skill dispatch
 
-| Driver (from CE Health Shapley) | Sub-skill | Install resolution (first match wins) | Invocation | Output artifact in run dir | Composite tab |
-|---|---|---|---|---|---|
-| `CVR` | cvr-rca | `$CVR_RCA_SKILL_PATH` → `~/.cvr-rca/SKILL.md` → `$SKILL_DIR/../cvr-rca/SKILL.md` | sub-agent reads the SKILL.md and runs it, pointed at the shared `<run_dir>` | `report.html` → master renames to `cvr_rca_report.html` | CVR RCA |
-| `Traffic` | perf-audit-skill | `$PERF_AUDIT_SKILL_PATH` → `~/.perf-audit-skill/SKILL.md` → `$SKILL_DIR/../perf-audit-skill/SKILL.md` | sub-agent reads the SKILL.md and runs it, pointed at the shared `<run_dir>` | `perf_audit_report.md` | Paid Performance Audit |
-| `AOV` | *(future: aov-rca)* | — | — | `aov_rca_report.md` (planned) | AOV RCA |
-| `Completion Rate` | *(future: completion-rca)* | — | — | `completion_rca_report.md` (planned) | Completion RCA |
-| `Take Rate` | *(future: take-rate-rca)* | — | — | `take_rate_rca_report.md` (planned) | Take Rate RCA |
+Every sub-skill is **vendored inside this bundle** at a fixed path under
+`$SKILL_DIR/skills/` — there is **no install resolution and no path hunting**.
+The master knows exactly where each one is. A missing folder means a broken
+install → **fail fast** ("reinstall the bundle" / re-run `scripts/vendor.sh`),
+never resolve elsewhere.
 
-CE Health itself is **not** in this table — it always runs first (Step 0), unconditionally, and is always Tab 1. The table governs only the *deep-dive* skills dispatched after the user confirms direction.
+| Driver (from CE Health Shapley) | Sub-skill | Fixed bundle path | Invocation | Output artifact in run dir | Composite tab |
+|---|---|---|---|---|---|
+| `CVR` | cvr-rca | `$SKILL_DIR/skills/cvr-rca/` | sub-agent reads `skills/cvr-rca/SKILL.md` and runs it, pointed at the shared `<run_dir>` | `report.html` → master renames to `cvr_rca_report.html` | CVR RCA |
+| `Traffic` | perf-audit | `$SKILL_DIR/skills/perf-audit/` | sub-agent reads `skills/perf-audit/SKILL.md` and runs it, pointed at the shared `<run_dir>` | `perf_audit_report.md` | Paid Performance Audit |
+| `AOV` | *(future: aov-rca)* | `$SKILL_DIR/skills/aov-rca/` (planned) | — | `aov_rca_report.md` (planned) | AOV RCA |
+| `Completion Rate` | *(future: completion-rca)* | `$SKILL_DIR/skills/completion-rca/` (planned) | — | `completion_rca_report.md` (planned) | Completion RCA |
+| `Take Rate` | *(future: take-rate-rca)* | `$SKILL_DIR/skills/take-rate-rca/` (planned) | — | `take_rate_rca_report.md` (planned) | Take Rate RCA |
+
+**CE Health** is also vendored, at `$SKILL_DIR/skills/ce-health/`, and is invoked
+directly (not via a SKILL.md sub-agent): `python3
+"$SKILL_DIR/skills/ce-health/ce_health.py" --ce-id <id> --range <r> --output
+<run_dir>/ce_health_report.md`. It runs from any CWD (the vendored copy is patched
+for standalone use — see `scripts/vendor.sh`). It is **not** in the dispatch table
+because it always runs first (Step 0), unconditionally, and is always Tab 1. The
+table governs only the *deep-dive* skills dispatched after the user confirms
+direction.
+
+**Vendoring & updates.** `skills/*` are copies, kept fresh by `scripts/vendor.sh`
+(which also re-applies the CE Health standalone patch). They do not auto-update
+when an upstream skill changes — re-run `vendor.sh` and commit. perf-audit is
+pinned (another team's skill).
 
 ## Special-case pairing: CVR ⇒ also fire perf-audit
 
@@ -62,10 +80,22 @@ Health) inline, but the full "CVR found X, corroborated by perf Y, links to CE
 Health Z" cross-referencing lives in the Summary, which runs last and sees
 everything. Pure synthesis (no re-query); arbiter upgrade is a TODO.
 
-## TODO — perf-audit cross-skill enrichment (owner hand-off)
+## perf-audit — ownership & changes to upstream
 
-perf-audit is owned by another team and is **not modified** by this work. Today
-its tab doesn't cite CE Health or CVR-RCA — the Summary covers those cross-links.
-The deferred enrichment: perf-audit should read the `context_lenses` manifest at
-its own synthesis (mirroring CVR-RCA's Step 2b context layer) and cite CE Health /
-CVR-RCA in its tab. This requires changes in the perf-audit repo by its owner.
+perf-audit is owned by another team. We keep its changes minimal and made in its
+**source repo** (`~/Documents/perf-audit-skill`), then re-vendor via `scripts/vendor.sh`
+— so they can be **upstreamed** to the owning team.
+
+**Changes made here (→ flag for upstream):**
+- **v6.2.0** — perf-audit writes a decision log to `transcript_perf_audit.md`, collected into the
+  composite's **Transcript** tab (Step 6 of its SKILL.md). No engine change; authored model-side.
+- **v6.3.0** — that transcript became a **decision tree** (fenced ` ```text ` tree-map + detail
+  sections, mirroring CVR-RCA) so it renders well now that the Transcript tab is markdown-rendered.
+
+(Companion CVR-RCA change, also flag for upstream: **v1.29** fences its transcript tree-map so the
+same markdown rendering keeps its alignment.)
+
+**Still deferred (owner hand-off):** perf-audit's tab doesn't cite CE Health or CVR-RCA — the
+Summary covers those cross-links. The enrichment: perf-audit should read the `context_lenses`
+manifest at its own synthesis (mirroring CVR-RCA's Step 2b context layer) and cite CE Health /
+CVR-RCA in its tab. This needs the owner's involvement.

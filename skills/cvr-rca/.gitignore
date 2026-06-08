@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+scripts/__pycache__/
+*.pyc
+*.pyo
+
+# Sensitive / large binary docs (MMP Collections are internal working docs)
+mmp collections/
+
+# tree/ has its own separate repo (cvr-rca-decision-tree)
+tree/
+
+# Temp output from the skill
+/tmp/

@@ -426,6 +426,15 @@ When any of those fail, write the report as a single-tab flat layout — no `.ta
     margin-bottom: 24px;
   }
   @media (max-width: 800px) { .metric-cards { grid-template-columns: repeat(3, 1fr); } }
+  /* Alias for the canonical cvr-rca container class (its hand-authored reports
+     emit `.metric-grid`; ce-rca composites inject this shared stylesheet). */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 800px) { .metric-grid { grid-template-columns: repeat(3, 1fr); } }
   .metric-card {
     background: #fff;
     border-radius: 10px;
@@ -664,6 +673,40 @@ When any of those fail, write the report as a single-tab flat layout — no `.ta
   .md-table tr:last-child td { border-bottom: none; }
   .md-table tr:hover td { background: #fafbfd; }
 
+  /* Wide markdown tables (e.g. perf-audit "Coverage + Matchmaking"): scroll
+     horizontally inside the content column instead of spilling off-screen, with
+     the first two columns frozen. Only applies to tables wrapped by the markdown
+     renderer — Summary / CVR-RCA / beautified-CE-Health tables are unaffected. */
+  .md-table-wrap {
+    overflow-x: auto;
+    max-width: 100%;
+    margin: 12px 0 16px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .md-table-wrap .md-table { width: auto; min-width: 100%; margin: 0; }
+  /* keep cells on one line so the table takes its natural width and scrolls */
+  .md-table-wrap .md-table th,
+  .md-table-wrap .md-table td { white-space: nowrap; }
+  /* freeze the first two columns */
+  .md-table-wrap .md-table th:nth-child(1),
+  .md-table-wrap .md-table td:nth-child(1) {
+    position: sticky; left: 0; z-index: 2;
+    white-space: normal; min-width: 150px; max-width: 150px;
+  }
+  .md-table-wrap .md-table th:nth-child(2),
+  .md-table-wrap .md-table td:nth-child(2) {
+    position: sticky; left: 150px; z-index: 2;
+    white-space: normal; min-width: 84px; max-width: 84px;
+    box-shadow: 1px 0 0 #e0e4ef;            /* boundary line at the freeze edge */
+  }
+  /* solid backgrounds so scrolling cells don't show through the frozen ones */
+  .md-table-wrap .md-table td:nth-child(1),
+  .md-table-wrap .md-table td:nth-child(2) { background: #fff; }
+  .md-table-wrap .md-table th:nth-child(1),
+  .md-table-wrap .md-table th:nth-child(2) { background: #f5f6fa; z-index: 3; }
+  .md-table-wrap .md-table tr:hover td:nth-child(1),
+  .md-table-wrap .md-table tr:hover td:nth-child(2) { background: #fafbfd; }
+
   /* Fallback for the rare case the markdown contains a construct our conversion
      mapping doesn't cover — we embed the raw markdown text directly inside this
      <pre> block. Better to show raw markdown than to paraphrase or omit. */
@@ -682,6 +725,65 @@ When any of those fail, write the report as a single-tab flat layout — no `.ta
   }
 
   footer { text-align: center; font-size: 12px; color: #aaa; padding: 24px; margin-top: 20px; }
+
+  /* ===================================================================== */
+  /* === CE-RCA Summary additions (NOT in cvr-rca source — superset only) = */
+  /* Additive classes used by the umbrella Summary tab. No edits to existing */
+  /* classes, so re-syncing this file from cvr-rca stays mechanical: keep    */
+  /* this block, replace everything above it.                               */
+  /* ===================================================================== */
+
+  /* Delta pill SHAPE available outside metric cards (the existing pill shape
+     is scoped to `.metric-card .delta`; this gives the same pill in callouts,
+     conclusion tables, and the driver table). Colors come from .delta-pos/neg/flat. */
+  .delta {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 12px;
+    display: inline-block;
+  }
+
+  /* Callout direction variants (default .callout stays red = decline) */
+  .callout.improve  { border-left-color: #2e7d32; }
+  .callout.improve h2 { color: #2e7d32; }
+  .callout.neutral  { border-left-color: #3a4a8a; }
+  .callout.neutral h2 { color: #3a4a8a; }
+
+  /* 2-column "aspect → conclusion" digest table (per-tab conclusions) */
+  .conclusions-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .conclusions-table td {
+    padding: 9px 0;
+    vertical-align: top;
+    border-bottom: 1px solid #f0f2f8;
+    line-height: 1.5;
+  }
+  .conclusions-table tr:last-child td { border-bottom: none; }
+  .conclusions-table td.aspect {
+    width: 168px;
+    font-weight: 700;
+    color: #1a1a2e;
+    padding-right: 18px;
+    white-space: nowrap;
+  }
+  .conclusions-table td.concl { color: #333; }
+  /* inline delta pill reused from .delta-*; spacing inside a conclusion cell */
+  .conclusions-table .delta { margin: 0 2px; vertical-align: baseline; }
+
+  /* Small provenance/label chip (e.g. Slack-sourced, user-provided) */
+  .tag {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 1px 7px;
+    border-radius: 8px;
+    background: #eef0f5;
+    color: #66708a;
+    vertical-align: middle;
+    margin-left: 4px;
+  }
 </style>
 ```
 

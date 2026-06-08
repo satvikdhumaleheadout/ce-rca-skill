@@ -51,47 +51,21 @@ The default window is last 30 days vs prior 30 days.
 ## Install
 
 CE-RCA is a **self-contained bundle** — you install one thing and the three
-sub-skills come with it. **No GitHub CLI needed.** The repo is private, so access is
-gated by a **read-only, repo-scoped token** you mint once (see *Getting your access
-token* below).
-
-In Claude Code / Cowork, paste this (replace `<YOUR_TOKEN>` with your token):
+sub-skills come with it. **No GitHub CLI needed.** In Claude Code / Cowork, paste:
 
 ```
-Install the CE-RCA skill. First save my access token, then fetch and run INSTALL.md:
-
-printf '%s' '<YOUR_TOKEN>' > ~/.ce-rca-token && chmod 600 ~/.ce-rca-token
-TOKEN=$(cat ~/.ce-rca-token)
-curl -sL -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/satvikdhumaleheadout/ce-rca-skill/contents/INSTALL.md"
-
-Then follow every step of that INSTALL.md.
+Install the CE-RCA skill from:
+https://raw.githubusercontent.com/satvikdhumaleheadout/ce-rca-skill/main/INSTALL.md
 ```
 
-Claude saves the token to `~/.ce-rca-token`, downloads the bundle to `~/.ce-rca/`,
-registers the `/ce-rca` command, checks prerequisites (`bq`, Python 3.9+), and creates
-the runs folder. Then `/ce-rca <CE>`.
+Claude runs the installer: downloads the bundle to `~/.ce-rca/`, registers the
+`/ce-rca` command, checks prerequisites (`bq`, Python 3.9+), and creates the runs
+folder. Then `/ce-rca <CE>`.
 
 **Always-latest, automatically.** At the start of every run the skill checks the
-published `VERSION` (using your saved token) and, if the local bundle is behind,
-**silently re-downloads the latest and continues** — you never run a stale version, and
-there's no minimum-version gate. No token / offline → it runs the installed bundle.
-
-### Getting your access token
-
-A **fine-grained personal access token**, read-only, scoped to just this repo:
-
-1. GitHub → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
-2. **Resource owner:** `satvikdhumaleheadout`. **Repository access:** *Only select repositories* → `ce-rca-skill`.
-3. **Permissions:** *Repository permissions* → **Contents: Read-only** (Metadata: Read is added automatically). Nothing else.
-4. **Expiration:** pick a window (e.g. 90 days) and re-mint when it lapses, or set a longer one per your security posture.
-5. Generate, copy the `github_pat_…` value, and drop it into the install snippet above.
-
-**Security:** the token grants *read of this one repo only* — nothing else, no write. It lives
-only in `~/.ce-rca-token` on your machine (chmod 600), is never committed to the repo, and is
-revocable any time from the same GitHub settings page. Don't paste it into shared chats or docs;
-share the install snippet privately. (Maintainers: to widen or restrict access later, rotate or
-revoke the token — no code change needed.)
+published `VERSION` and, if the local bundle is behind, **silently re-downloads the
+latest and continues** — you never run a stale version, and there's no minimum-version
+gate. Offline runs proceed on the installed bundle.
 
 ## Bundled sub-skills
 

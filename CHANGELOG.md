@@ -5,6 +5,22 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.2.0] — 2026-06-08 — Public zero-auth distribution (revert token gating)
+
+**Summary:** Reverts the v2.1.0 private-token gating in favour of the simpler **public** model — the repo is made public and install/auto-update go back to zero-auth `curl`/`raw` (no token to mint, save, or rotate). Tighter access control is deferred.
+
+### What changed
+- **`SKILL.md`** auto-update — back to the public `raw.githubusercontent.com/.../VERSION` check + public `archive/refs/heads/main.zip` re-download (kept the semver guard so a non-semver/offline body → `unknown` → run installed).
+- **`INSTALL.md`** — removed the token-presence check and token-authed download; Step 2 is the public curl-zip again (with the post-download success check retained).
+- **`README.md`** — Install section back to the one-paste public `INSTALL.md` URL; removed the "Getting your access token" section.
+- **`VERSION`** → `2.2.0`. Repo visibility flipped to **public**.
+
+### Decisions / notes
+- **Simplicity over restriction for now** — zero-friction for growth managers; "make it safer later" (token or org-gating) is deferred. The `*.token` / `.ce-rca-token` `.gitignore` lines are left in place harmlessly for whenever access control returns.
+- Rollback point: tag **`backup-pre-v2.2.0`** at v2.1.2 (`3391603`); the token-based commit remains at `backup-pre-v2.2.0`'s parent / tag `backup-pre-v2.1.0` if ever needed again.
+
+---
+
 ## [v2.1.2] — 2026-06-08 — Colour-coded deltas across all CE Health tables + §8 prompt removed
 
 **Summary:** Extends the delta-colouring polish to **every** CE Health table (v1.8.2 only did §3 + §6) and removes a stray interactive prompt from §8 that doesn't belong in a report.

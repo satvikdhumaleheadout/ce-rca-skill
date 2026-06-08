@@ -10,6 +10,11 @@ install **one thing** and everything is there — no separate companion installs
 no path configuration. The master runs each sub-skill from its fixed path inside
 the bundle (`skills/cvr-rca/`, `skills/perf-audit/`, `skills/ce-health/`).
 
+**Private repo:** access is gated by a **read-only, repo-scoped fine-grained token** the user
+mints once and saves to `~/.ce-rca-token` (the bootstrap snippet does this; see README →
+*Getting your access token*). All downloads here authenticate with it. The token is stored only
+on the user's machine, never in this repo, and is reused by the skill's auto-update.
+
 ---
 
 ## Step 0 — Detect: fresh install or update?
@@ -39,6 +44,18 @@ If `bq` is missing, tell the user the sub-skills need it: "Install Google Cloud
 SDK and run `gcloud auth application-default login` before using the skill.
 Continuing the install anyway." Python 3.9+ is required for `compose.py`.
 
+**Verify the access token (required — the repo is private).** The bootstrap snippet the user
+pasted saves a read-only, repo-scoped GitHub token to `~/.ce-rca-token`. Confirm it's present:
+
+```bash
+if [ -s ~/.ce-rca-token ]; then chmod 600 ~/.ce-rca-token; echo "token: present"; else echo "token: MISSING"; fi
+```
+
+If `MISSING`, **stop** and tell the user: "I need your CE-RCA access token first — save it with
+`printf '%s' '<YOUR_TOKEN>' > ~/.ce-rca-token && chmod 600 ~/.ce-rca-token`, then re-run. See
+README → *Getting your access token* to mint a fine-grained read-only token." Do not continue
+without it. (The same file is reused by the skill's auto-update, so the user pastes the token once.)
+
 **Optional — Google Sheets context ingestion.** If users will point the Step 1
 context layer at ad-hoc Google Sheets, enable the `read_sheet.py` helper once:
 
@@ -54,17 +71,32 @@ docs and Slack channels are unaffected.
 
 ---
 
-## Step 2 — Download and install the master
+## Step 2 — Download and install the master (token-authenticated)
+
+The repo is **private**, so download via the GitHub API using the read-only token saved at
+`~/.ce-rca-token` (Step 1). The API `zipball` extracts to an SHA-suffixed folder, so auto-detect
+it rather than hardcoding the name:
 
 ```bash
-curl -L https://github.com/satvikdhumaleheadout/ce-rca-skill/archive/refs/heads/main.zip -o /tmp/ce-rca-install.zip
-unzip -q /tmp/ce-rca-install.zip -d /tmp/
-rm -rf ~/.ce-rca
-mv /tmp/ce-rca-skill-main ~/.ce-rca
-rm /tmp/ce-rca-install.zip
+TOKEN=$(cat ~/.ce-rca-token 2>/dev/null)
+curl -sL --max-time 120 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/satvikdhumaleheadout/ce-rca-skill/zipball/main" -o /tmp/ce-rca-install.zip
+rm -rf /tmp/ce-rca-x && mkdir -p /tmp/ce-rca-x
+unzip -q /tmp/ce-rca-install.zip -d /tmp/ce-rca-x
+SRC=$(find /tmp/ce-rca-x -maxdepth 1 -mindepth 1 -type d | head -1)
+rm -rf ~/.ce-rca && mv "$SRC" ~/.ce-rca
+rm -rf /tmp/ce-rca-install.zip /tmp/ce-rca-x
 ```
 
-Tell the user: "Installed CE-RCA master to `~/.ce-rca/`."
+Then confirm the download succeeded:
+
+```bash
+[ -f ~/.ce-rca/SKILL.md ] && echo "ok: $(cat ~/.ce-rca/VERSION)" || echo "FAILED"
+```
+
+If it says `FAILED`, the token is missing/invalid/expired — tell the user to re-mint the
+fine-grained token (README → "Getting your access token") and re-save it to `~/.ce-rca-token`,
+then re-run. Otherwise: "Installed CE-RCA master to `~/.ce-rca/`."
 
 ---
 

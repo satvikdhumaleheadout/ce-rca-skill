@@ -13,3 +13,7 @@ scripts/__pycache__/
 
 # Internal planning (not for distribution)
 thoughts/
+
+# Never commit an access token if one lands in the tree
+*.token
+.ce-rca-token

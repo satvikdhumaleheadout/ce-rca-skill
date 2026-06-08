@@ -52,10 +52,18 @@ SKILL_DIR=~/.ce-rca   # or wherever this file was read from
 CE-RCA **auto-updates**. Before anything else, check whether the local bundle matches the
 published release and silently upgrade if it's behind — so a run never executes a stale skill:
 
+The repo is **private**, so the check authenticates with the read-only token saved at
+`~/.ce-rca-token` at install time, via the GitHub **Contents API** (works on private repos; plain
+`raw.githubusercontent.com` does not):
+
 ```bash
 SKILL_DIR=~/.ce-rca
+REPO="satvikdhumaleheadout/ce-rca-skill"
 INSTALLED=$(cat "$SKILL_DIR/VERSION" 2>/dev/null || echo "0.0.0")
-LATEST=$(curl -s --max-time 3 https://raw.githubusercontent.com/satvikdhumaleheadout/ce-rca-skill/main/VERSION 2>/dev/null || echo "unknown")
+TOKEN=$(cat ~/.ce-rca-token 2>/dev/null)
+LATEST=$(curl -s --max-time 3 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/$REPO/contents/VERSION?ref=main" 2>/dev/null | tr -d '[:space:]')
+echo "$LATEST" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || LATEST="unknown"   # 401/empty/JSON -> unknown
 NEEDS_UPDATE=$(python3 -c "
 a='$INSTALLED'.strip(); b='$LATEST'.strip()
 if b in ('','unknown'): print('no')
@@ -67,25 +75,30 @@ else:
 echo "installed=$INSTALLED latest=$LATEST needs_update=$NEEDS_UPDATE"
 ```
 
-- **`needs_update=no`** — current, *or* offline (`latest=unknown`): continue to Step 0 on the
-  installed version. Never block on the network; the 3-second timeout then proceeds.
+- **`needs_update=no`** — current, *or* offline, *or* no/invalid token (`latest=unknown`): continue
+  to Step 0 on the installed version. Never block on the network; the 3-second timeout then proceeds.
 - **`needs_update=yes`** — the bundle is stale. Re-install the latest **in place** (the same
-  download INSTALL.md uses), tell the user **one line** ("CE-RCA updated v`$INSTALLED` →
-  v`$LATEST`"), then **stop following this now-stale copy and re-read `~/.ce-rca/SKILL.md`**,
-  continuing from the top of the freshly-installed version. Your run folders under
-  `~/Documents/CE RCA Runs/` are never touched.
+  token-authenticated zipball INSTALL.md uses), tell the user **one line** ("CE-RCA updated
+  v`$INSTALLED` → v`$LATEST`"), then **stop following this now-stale copy and re-read
+  `~/.ce-rca/SKILL.md`**, continuing from the top of the freshly-installed version. Your run folders
+  under `~/Documents/CE RCA Runs/` are never touched.
 
 ```bash
-curl -L https://github.com/satvikdhumaleheadout/ce-rca-skill/archive/refs/heads/main.zip -o /tmp/ce-rca-update.zip \
-  && unzip -q -o /tmp/ce-rca-update.zip -d /tmp/ \
-  && rm -rf ~/.ce-rca && mv /tmp/ce-rca-skill-main ~/.ce-rca && rm /tmp/ce-rca-update.zip \
+TOKEN=$(cat ~/.ce-rca-token 2>/dev/null)
+curl -sL --max-time 60 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/satvikdhumaleheadout/ce-rca-skill/zipball/main" -o /tmp/ce-rca-update.zip \
+  && rm -rf /tmp/ce-rca-x && mkdir -p /tmp/ce-rca-x \
+  && unzip -q /tmp/ce-rca-update.zip -d /tmp/ce-rca-x \
+  && SRC=$(find /tmp/ce-rca-x -maxdepth 1 -mindepth 1 -type d | head -1) \
+  && rm -rf ~/.ce-rca && mv "$SRC" ~/.ce-rca && rm -rf /tmp/ce-rca-update.zip /tmp/ce-rca-x \
   && echo "updated to $(cat ~/.ce-rca/VERSION)"
 ```
 
-The bundle is **self-contained and replaced wholesale** — never hand-patch a file to "catch up,"
-and after an update obey the freshly-read SKILL.md, not this in-memory copy. (While the repo is
-private the version fetch returns `unknown`, so the skill simply runs on the installed bundle;
-auto-update activates the moment the repo is public.)
+(The API `zipball` extracts to an SHA-suffixed folder, so we auto-detect it with `find` rather
+than hardcode the name.) The bundle is **self-contained and replaced wholesale** — never
+hand-patch a file to "catch up," and after an update obey the freshly-read SKILL.md, not this
+in-memory copy. If `~/.ce-rca-token` is absent, the fetch returns `unknown` and the skill simply
+runs the installed bundle — auto-update resumes once a valid token is in place.
 
 Read references lazily, by phase:
 

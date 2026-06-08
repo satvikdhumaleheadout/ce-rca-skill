@@ -5,6 +5,25 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.1.0] — 2026-06-08 — Private-repo distribution via fine-grained read-only token
+
+**Summary:** Keeps the repo **private** while preserving no-GitHub-CLI install + auto-update. Access is gated by a **read-only, repo-scoped fine-grained token** the user mints once and saves to `~/.ce-rca-token`; all downloads/version-checks authenticate with it via the **GitHub API** (which works on private repos, unlike `raw.githubusercontent.com` / the public codeload zip).
+
+### What changed
+- **`SKILL.md`** auto-update — version check now uses the **Contents API** with the saved token (`Authorization: Bearer`, `Accept: application/vnd.github.raw`) and a semver guard (401/empty/JSON → `unknown` → run installed). The in-place re-download uses the token-authed **`zipball`** endpoint and **auto-detects** the SHA-suffixed extracted folder via `find`.
+- **`INSTALL.md`** — added a required token-presence check (`~/.ce-rca-token`, chmod 600) before install; Step 2 download switched to the token-authed `zipball` + auto-detect dir + a post-download success check with a clear "re-mint the token" failure path.
+- **`README.md`** — Install section rewritten to the token bootstrap snippet (`<YOUR_TOKEN>` placeholder → saved to `~/.ce-rca-token` → fetch INSTALL.md via Contents API); new **"Getting your access token"** section (mint a fine-grained PAT: this repo only, Contents: Read-only, expiry) + security notes (read-only, one repo, local-only, never committed, revocable).
+- **`.gitignore`** — defensively ignores `*.token` / `.ce-rca-token`.
+- **`VERSION`** → `2.1.0`.
+
+### Decisions / notes
+- **Token never lives in the repo** — only in the user's pasted bootstrap snippet (shared privately) and their local `~/.ce-rca-token`. The repo references the file, not a value.
+- **One token, paste once** — the same `~/.ce-rca-token` is reused by install *and* every auto-update.
+- Access control is now **token lifecycle** (rotate/revoke from GitHub settings) — no code change to widen/restrict. Flipping the repo public later would also work (token simply becomes optional).
+- Rollback point: tag **`backup-pre-v2.1.0`** at v2.0.0 (`a278083`); deeper rollback still at `backup-pre-v2.0.0` (v1.2.0).
+
+---
+
 ## [v2.0.0] — 2026-06-08 — Public bundle distribution + auto-update on every run
 
 **Summary:** Packages CE-RCA for one-paste, no-GitHub-CLI distribution (mirroring CVR-RCA) and makes the bundle **keep itself current automatically** — replacing CVR-RCA's minimum-version *nudge* with a true always-latest *self-update*. Also the first push that ships the full self-contained bundle (the vendored `skills/` tree + all accumulated reference/scripts work) to the repo.

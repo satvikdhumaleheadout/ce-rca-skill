@@ -125,20 +125,39 @@ re-run Step 2. (Maintainers refreshing the vendored copies use
 cat ~/.ce-rca/VERSION
 ```
 
-Tell the user the installed version and summarise:
+Tell the user the installed version, then give them this **structured "how to use"
+brief** (keep it exactly this tight — it's their onboarding):
 
-> **CE-RCA v[VERSION] installed/updated successfully.**
+> **✅ CE-RCA v[VERSION] installed.** Restart Claude Code, then you're ready.
 >
-> - Bundle: `~/.ce-rca/` (contains CVR-RCA, perf-audit, CE Health under `skills/`)
-> - Command: `/ce-rca`
-> - Runs folder: `~/Documents/CE RCA Runs/`
+> **What it does** — One command gives you the full picture of a Combined Entity:
+> its health (revenue, traffic, CVR, AOV, completion, take-rate), *why* the number
+> moved (funnel + paid deep-dives), and what to do — as **one tabbed report**.
 >
-> **Restart Claude Code** for the command to take effect.
+> **How to run it**
+> ```
+> /ce-rca <CE ID or name>
+> ```
+> e.g. `/ce-rca 252` or `/ce-rca "Louvre Museum"`. Default window is last 30 days
+> vs the prior 30.
 >
-> **Run:** `/ce-rca <CE ID or name>` — it runs CE Health, shows the diagnosis,
-> asks which directions to deep-dive, then composes a tabbed report. Everything
-> runs from inside the bundle — no other setup.
+> **What it'll ask you (3 quick checkpoints)**
+> 1. **Window** — confirm the default 30-vs-30, or give your own dates.
+> 2. **Direction** — after a quick CE Health diagnosis, it asks which areas to dig
+>    into (or just say *continue* to take its recommendation).
+> 3. **Context (optional)** — you can add what you already know to sharpen the run:
+>    a focus area, a known event + date ("price change Apr 8"), or a link to a doc /
+>    Google Sheet / Slack channel. Skip it by saying *continue* — zero friction.
 >
-> **Stays up to date automatically:** each run checks the published version and
-> silently re-downloads the latest bundle if yours is behind — no manual updates,
-> no minimum-version gate. (Offline runs use the installed bundle.)
+> **What you get** — a tabbed HTML report: **Summary** (the whole story, standalone)
+> · **CE Health** · **CVR RCA** · **Paid Performance Audit** · **Transcript**. It
+> opens in your browser; the file lives in `~/Documents/CE RCA Runs/`.
+>
+> **Ask follow-ups after** — the report isn't the end. In the same chat, just ask:
+> *"why is S2C the top driver?"*, *"club TGIDs 3909 + 3910"*, *"split the drop by
+> device"*. It answers from the run's data (or a quick re-query) and can fold the
+> Q&A into the report if you want. **Note:** changing the **time window** starts a
+> fresh run, not a follow-up.
+>
+> **Stays current automatically** — each run self-updates to the latest version if
+> yours is behind; offline runs use what's installed. No manual updates.

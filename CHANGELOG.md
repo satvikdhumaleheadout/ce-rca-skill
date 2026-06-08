@@ -5,6 +5,16 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.2.1] — 2026-06-08 — Post-install onboarding brief
+
+**Summary:** After install, the user now gets a tight, structured "how to use" brief instead of a bare version line — so a first-time growth manager knows what CE-RCA does, how to run it, the three input checkpoints, what they get, and that they can ask follow-ups.
+
+### What changed
+- **`INSTALL.md`** (Step 6 summary only) — replaced the terse confirm with a structured onboarding card: **What it does · How to run · What it'll ask you (window → direction → optional context) · What you get (the 5 tabs) · Ask follow-ups after (with the time-window-is-a-new-run caveat) · Stays current automatically.** Doc-only; no flow/script change.
+- **`VERSION`** → `2.2.1`.
+
+---
+
 ## [v2.2.0] — 2026-06-08 — Public zero-auth distribution (revert token gating)
 
 **Summary:** Reverts the v2.1.0 private-token gating in favour of the simpler **public** model — the repo is made public and install/auto-update go back to zero-auth `curl`/`raw` (no token to mint, save, or rotate). Tighter access control is deferred.

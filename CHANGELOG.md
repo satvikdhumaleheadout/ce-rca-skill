@@ -5,6 +5,48 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.2.4] — 2026-06-08 — Install-time BigQuery access check (verify auth, not just `bq`)
+
+**Summary:** The installer checked that `bq` *exists* but not that the user could actually *run a query* — so someone with `bq` installed but no `gcloud` auth (or no `headout-analytics` access) got a clean install and a confusing failure on their first `/ce-rca`. v2.2.4 adds a real 1-row BigQuery smoke query at install time and tells the user exactly how to fix auth if it fails.
+
+### What changed
+- **`INSTALL.md`** (Step 1) — after the `bq`/`python3` presence checks, runs `bq query --use_legacy_sql=false --project_id=headout-analytics --format=none 'SELECT 1'`. **`QUERY OK`** → "you're ready"; **`QUERY FAILED`** → install still completes but the user is prominently warned that the skill won't run until they `gcloud auth application-default login` (and have `headout-analytics` access), with the exact remedy. Installer is instructed not to claim "ready" on failure.
+- **`VERSION`** → `2.2.4`.
+
+### Notes
+- Validated the smoke query is fast and non-interactive: ~6s `QUERY OK` when authed, ~4s `QUERY FAILED` for a bad project (no hang, no prompt — `</dev/null` + `--project_id` avoid bq's interactive init).
+- Doc/installer-only; no skill-flow or sub-skill change.
+
+---
+
+## [v2.2.3] — 2026-06-08 — Follow-ups delta colouring made automatic (scalable, not author-dependent)
+
+**Summary:** v2.1.1 asked Claude to hand-class each delta cell in Follow-ups tables — which is fragile: a real run coloured the first table but left a later one (`−0.14pp`) plain, and the "near-flat → plain text" nuance made it look broken. v2.2.3 makes delta colouring **deterministic at compose time** so every table is consistent regardless of what the author tagged.
+
+### What changed
+- **`scripts/helpers.py` — new `autocolor_delta_cells()`** — a sign-based pass over `<td>` cells: a value starting with a sign (`−3.13pp`, `+0.6pp`, `-15%`, `+$111.3K`, `(−$708.8K)`) is coloured **red** (minus) / **green** (plus). Plain counts (`6,447`), levels (`21.6%`), and `—` placeholders have no sign and stay neutral. **Author intent wins** — a `<td>` already carrying `.neg`/`.pos`/`.delta-flat` is left untouched, so semantic cells a parser can't infer (a *positive* "lost checkouts" count marked `.neg`) are preserved.
+- **`scripts/compose.py`** — applies it to the **Follow-ups** `html-fragment` only (scoped by `spec["id"] == "followups"`), right after reading the fragment. No other tab is affected.
+- **`references/followup_guide.md`** — the colour rule is relaxed: *don't* hand-class signed deltas (the composer does it, consistently); only hand-class the semantic exceptions (a positive number that's actually bad). The brittle "near-flat → plain" threshold is removed — a small `−0.14pp` is still red by sign.
+
+### Why it matters
+The previous approach depended on the LLM remembering to tag every cell on every run → inconsistent across tables. Now it's automatic and uniform, while still letting the author override for loss-type columns. **Blast radius: `ce-rca` master only** — `helpers.py` + one scoped line in `compose.py` + guide; no template / shared CSS / sub-skill change (uses the existing shared `.neg`/`.pos`). Verified: 12-case unit test of the colourer + an integration compose where both a signed-delta table and the previously-plain `−0.14pp` table render coloured, loss columns stay author-red, counts/levels stay neutral, no double-classing, idempotent.
+
+---
+
+## [v2.2.2] — 2026-06-08 — §8 Historical Context: no empty box, flatter layout
+
+**Summary:** Fixes the empty bordered box at the top of CE Health §8 and tidies its layout. After v2.1.2 made `_clean_history_md` strip CE Health's placeholders unconditionally, a CE whose §8 markdown is *only* placeholders (e.g. Antelope Canyon) left an empty `md-content` block still being rendered. §8 now renders each sub-section only when it has real content.
+
+### What changed (`scripts/render_ce_health.py` only)
+- **No empty box** — the CE Health §8 markdown block is emitted only when content survives cleaning; the prior-runs / context / Slack sub-sections likewise render only when present. If *nothing* is present (first-ever run, no Slack, no context), §8 shows a single muted line ("No prior RCAs or added context for this CE yet.") instead of empty cards.
+- **Flatter headers** — dropped the redundant "User-Provided & Recent Context" parent wrapper; each piece (Analyst context / User data / Recent Slack signals) now carries its own subhead directly. The "what the RCA found → Summary ↗" link shows only when the analyst actually supplied context (not for auto-Slack).
+- **Cleaner prior-run headline** — extraction skips title/scaffold lines and shows a blank cell instead of a stark "—" when no headline is found.
+
+### Blast radius
+- `render_ce_health.py` only — no `compose.py` / template / sub-skill change. Verified on Antelope Canyon (CE 3593): empty box gone, flat subheads, prior-run row + Slack render.
+
+---
+
 ## [v2.2.1] — 2026-06-08 — Post-install onboarding brief
 
 **Summary:** After install, the user now gets a tight, structured "how to use" brief instead of a bare version line — so a first-time growth manager knows what CE-RCA does, how to run it, the three input checkpoints, what they get, and that they can ask follow-ups.

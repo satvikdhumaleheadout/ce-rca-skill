@@ -35,9 +35,35 @@ bq version 2>&1 | head -1 || echo "NOT FOUND"
 python3 --version 2>&1 | head -1 || echo "NOT FOUND"
 ```
 
-If `bq` is missing, tell the user the sub-skills need it: "Install Google Cloud
-SDK and run `gcloud auth application-default login` before using the skill.
+If `bq` is missing, tell the user: "Install Google Cloud SDK before using the skill.
 Continuing the install anyway." Python 3.9+ is required for `compose.py`.
+
+**Live query check — can they actually run BigQuery? (this is what the skill needs).**
+Presence of `bq` is not enough; the skill fails at runtime if `gcloud` auth isn't set up or the
+user has no access to the `headout-analytics` project. Run a 1-row smoke query:
+
+```bash
+if bq query --use_legacy_sql=false --project_id=headout-analytics --format=none 'SELECT 1' </dev/null >/dev/null 2>&1; then
+  echo "QUERY OK"
+else
+  echo "QUERY FAILED"
+fi
+```
+
+- **`QUERY OK`** → "✓ BigQuery is reachable — you're ready to run CE-RCA." Continue.
+- **`QUERY FAILED`** → the install still completes (files are placed), but **warn prominently** that
+  the skill won't work until this is fixed, and give the exact remedy:
+
+  > ⚠️ **BigQuery query failed — your gcloud auth isn't set up (or you lack access to
+  > `headout-analytics`).** CE-RCA can't run until this passes. Fix it with:
+  > ```
+  > gcloud auth application-default login
+  > ```
+  > Then re-run the smoke query above. If it still fails, you don't yet have access to the
+  > `headout-analytics` BigQuery project — request it, then retry. (Everything else installed fine;
+  > no need to reinstall — just fix auth.)
+
+  Do not claim the skill is ready to run if this failed.
 
 **Optional — Google Sheets context ingestion.** If users will point the Step 1
 context layer at ad-hoc Google Sheets, enable the `read_sheet.py` helper once:

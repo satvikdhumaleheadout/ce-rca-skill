@@ -183,12 +183,10 @@ means the install is broken, not that you should repair it live.
 **0e. Fire the CE-history sub-agent (fire-and-forget — do not wait).** Once CE
 Health gives you the `ce_id`, spawn a background sub-agent that reads
 `$SKILL_DIR/references/ce_history_guide.md` and writes `<run_dir>/ce_history.md` —
-a short synthesised trajectory of **prior** RCAs for this CE (trend across runs,
-recurring root causes, what was tried, what's open). Pass `ce_id`, `ce_name`,
-`run_dir`, `runs_root` (the `CE RCA Runs` parent), `output_path`. **Continue
-immediately** — mirrors the Slack pattern; it synthesises in its own context, so
-nothing prior-run-related touches yours. `render_ce_health.py` embeds the file at
-§8 if present (absent/first-run → §8 unaffected).
+a short synthesised trajectory of **prior** RCAs for this CE. Pass `ce_id`,
+`ce_name`, `run_dir`, `runs_root` (the `CE RCA Runs` parent), `output_path`, then
+**continue immediately** (like the Slack agent — it works in its own context, so
+your context stays clean). Compose surfaces it later; first runs simply have none.
 
 **That's all Step 0 does.** CE Health has run; its `.md` + `.json` sidecar are in
 `<run_dir>`. **Do not enrich `meta.json` now, and do not build the Omni URL now.**
@@ -261,11 +259,9 @@ Or just "continue" to skip.
 ```
 
 **Formatting rules for the preview:**
-- **Always surface the input guide as a clickable link.** Replace `<SKILL_DIR>`
-  with the real absolute skill path (e.g. `/Users/.../ce-rca/references/input_guide.md`)
-  so the user can open it — a relative path won't render as clickable, and the
-  guide is **never loaded into context**, so this link is the user's only window
-  into it. Do not drop or collapse this line.
+- **Keep the input-guide link, as an absolute clickable path.** Substitute the real
+  `$SKILL_DIR` so it opens; it's never loaded into context, so the link is the
+  user's only window into the guide.
 - Pick the right delta unit per metric: **% change** for revenue/orders/AOV
   (level metrics), **percentage points (pp)** for rates (CVR / completion / take
   rate). Never express a rate move as a % of a %.
@@ -319,7 +315,8 @@ Only write slots that have content.
 
 ### Step 1b — Ingest named sources (optional)
 
-If the reply names a non-Slack source (Drive / MMP doc, Google Sheet), spawn the
+If the reply points at any non-Slack source (a doc, a sheet, a link, a file — MMP
+docs and ad-hoc Sheets are the common ones, but it's open-ended), spawn the
 ingestion sub-agent (`references/context_ingest_guide.md`) with the pointers + CE
 context + `run_dir`; it reads them in its own context and **returns** a lean
 distillate (never raw text). Persist by nature: narrative/history → merge into the
@@ -674,6 +671,7 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 |---|------|---------|
+| m022 | 2026-06-08 | **Follow-ups delta colouring made automatic (v2.2.3).** v2.1.1 relied on Claude hand-classing each delta cell in Follow-ups tables — fragile: a real run coloured the first table but left a later `−0.14pp` table plain (the "near-flat → plain" nuance made it look broken). Now deterministic: new **`helpers.py:autocolor_delta_cells()`** colours any `<td>` whose value starts with a sign (`−3.13pp`→red, `+0.6pp`→green, `+$111.3K`, `(−$708.8K)`); plain counts/levels/`—` stay neutral; **author-set `.neg`/`.pos`/`.delta-flat` is never overridden** (semantic loss columns like a positive "lost checkouts" count stay author-red). `compose.py` applies it to the **Follow-ups `html-fragment` only** (`spec["id"]=="followups"`). `followup_guide.md` relaxed: don't hand-class signed deltas (composer does it, consistently), only hand-class semantic exceptions; the brittle near-flat threshold removed. **Blast radius: `ce-rca` master only** — no template / shared CSS / sub-skill change (uses shared `.neg`/`.pos`). Verified: 12-case unit test + integration compose (both tables coloured incl. the previously-plain `−0.14pp`, loss cols author-red, counts/levels neutral, no double-class, idempotent). |
 | m021 | 2026-06-08 | **Colour-coded deltas across all CE Health tables + §8 prompt removed (v2.1.2).** Extends the v1.8.2 delta-colouring (which only covered §3 Channel Breakdown + §6 Top TGIDs) to **every** CE Health table: `split_deltas=True` now also applies to **§2 Full 4-window comparison, §4 Funnel, §9 Lead Time Cohorts, §10 Landing Pages, §11 Customer Countries** and the §7 verbatim-fallback table — so all `Δ (MOM / YoY / LY)` and `pp` columns render green (up) / red (down) / amber (near-flat) consistently. **Bug fix in `_cell_split`:** a lone-delta cell with a trailing parenthetical (e.g. `+31% (+$32.1K)`) dropped the parenthetical when coloured; it now colours the whole token, preserving the figure. **§8 fix:** CE Health's interactive `> **Add your context:** …` CLI prompt was leaking into the rendered §8 — `_clean_history_md` now drops it (with the existing "None found" placeholders) and runs **unconditionally** (Slack/user context is surfaced below via the user-context subsection). **Blast radius: `scripts/render_ce_health.py` only** — the scoped `#tab-cehealth .ceh-chg` CSS already existed (v1.8.2); no `compose.py`/template/shared-`visual_kit.md`/sub-skill change; non-delta cells degrade plainly. Verified on CE 243 + CE 3593. |
 | m020 | 2026-06-08 | **Colour-coded delta cells in Follow-ups tables (v2.1.1).** Follow-up answer tables rendered delta / lost-checkout columns in plain black, unlike the CE Health tables. `followup_guide.md`'s entry-card table template + a new rule now instruct Claude to colour every directional cell when authoring a Follow-ups card: **`.neg`** (red) for declines/losses (negative Δ, "lost checkouts", drops), **`.pos`** (green) for gains, plain text for near-flat, plus **`.num`** for right-aligned numerics. The sign convention follows business-outcome direction (more lost checkouts / falling rate = red). **No code change** — `.neg`/`.pos`/`.num` already live unscoped in `visual_kit.md`, so they render in the Follow-ups `.md-table` exactly as in the CE Health tab (verified: classes + red/green CSS reach the composite). Guide-only; no `compose.py`/template/sub-skill change. |
 | m019 | 2026-06-08 | **Transcript tab: markdown-rendered + perf-audit decision tree (v1.9.0).** Two paired improvements. **(1) Rendering.** `compose.py build_transcript_tab()` now renders each transcript **as markdown** (via the already-imported `render_markdown_tab`, heading ids namespaced per sub-tab as `tr-<skill>-…`) instead of dumping it HTML-escaped in a `<pre>` — so headings, tables, and prose are styled. ASCII tree-maps stay aligned because the skills **fence** them (the renderer emits fenced ` ``` ` blocks as verbatim `<pre><code>`); `templates/report.html` drops `.transcript-raw` and adds a `.subtab-pane .md-content pre` style (scroll + chrome). **(2) Both sub-skills fence their tree-maps** (source-repo edits, re-vendored): **CVR-RCA v1.29** wraps its `## Tree map` in a ` ```text ` fence (c044), and **perf-audit v6.3.0** rewrites its Step 6 transcript into a CVR-RCA-style **fenced tree-map + detail sections** (root verdict → per-lens branches CONFIRMED/RULED OUT → LEAF). Both flagged in `registry.md` for upstreaming. Note: an *old* unfenced transcript in a pre-existing run folder renders with a flattened tree — accepted (historical); new runs are fenced. No template JS change; Transcript tab still always-last; collection mechanism (glob `transcript_*.md`) unchanged. |

@@ -15,7 +15,7 @@ distillate longer than ~25 lines per source means you're dumping, not distilling
 ## Section 1 — Inputs received
 
 The orchestrator passes you:
-- `sources` — a list, each `{type: "doc" | "sheet", pointer: "<url or title>", note: "<user's words about why>"}`
+- `sources` — a list, each `{type: "doc" | "sheet" | "other", pointer: "<url or title>", note: "<user's words about why>"}` (type is a hint, not a closed set — see Section 3)
 - `ce_id`, `ce_name`, `market`, `country` — CE identity (for relevance filtering)
 - `pre_start`, `post_start`, `post_end` — the analysis windows
 - `run_dir` — the run folder (for reference only; you do not write to it)
@@ -32,6 +32,13 @@ ToolSearch("select:mcp__cb457860-24fd-4516-a4e1-17cabe54f7a0__search_files,mcp__
 first.)
 
 ## Section 3 — Read recipe by type
+
+The types below are the **common** cases, not a closed set. If a source doesn't fit
+(a Notion page, a dashboard link, a plain URL, some other file), read it
+best-effort with whatever tool fits and classify its **content by nature** —
+narrative → priors/events, tabular → data lens. Never reject a source just because
+it isn't a "doc" or "sheet"; if you genuinely can't read it, say so in PROVENANCE
+and move on.
 
 ### type: "doc"  (MMP doc / Google Doc / PDF — narrative)
 1. `read_file_content` → markdown.
@@ -56,6 +63,12 @@ first.)
    huge/formula-heavy/unclear: do **not** guess. Return a `fallback` note asking
    the user to point at a BigQuery table or paste the key figures. Partial is
    fine; say what you could and couldn't read.
+
+### type: "other"  (anything else the user points at)
+Best-effort read with whatever tool fits (Drive `read_file_content`, a fetch, etc.),
+then classify by content nature — narrative → priors/events, tabular → data lens —
+exactly as above. If it can't be read, note it in PROVENANCE as not-ingested and
+continue. The goal is to use what the user gave you, not to force it into a type.
 
 ## Section 4 — Return contract (NOT a file write)
 

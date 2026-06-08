@@ -32,7 +32,12 @@ import json
 import re
 from pathlib import Path
 
-from helpers import render_markdown_tab, extract_cvr_rca_tab, extract_and_scope_cvr_style
+from helpers import (
+    render_markdown_tab,
+    extract_cvr_rca_tab,
+    extract_and_scope_cvr_style,
+    autocolor_delta_cells,
+)
 
 
 def extract_style_block(visual_kit_path: Path) -> str:
@@ -297,6 +302,12 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
             # no markdown conversion, no extraction, no chart-script handling
             # (the Summary references the tabs' charts via ↗ links, it has none).
             pane_body = src_path.read_text(encoding="utf-8")
+            if spec["id"] == "followups":
+                # The Follow-ups tab is hand-authored each run; auto-colour its
+                # signed-delta cells (sign-based, deterministic) so every table
+                # is consistent without depending on the author tagging each one.
+                # Author-set .neg/.pos classes (semantic loss columns) are kept.
+                pane_body = autocolor_delta_cells(pane_body)
         elif spec["type"] == "html-extract":
             html = src_path.read_text(encoding="utf-8")
             body, scripts = extract_cvr_rca_tab(html)

@@ -435,14 +435,17 @@ def user_context_subsection(run_dir: Path) -> str:
     nothing is present, so §8 renders exactly as before. Never fatal.
     """
     pieces = []
+    has_provided = False  # true if the analyst actually supplied something (vs auto-Slack)
     try:
         uc = run_dir / "user_context.md"
         if uc.exists() and uc.read_text().strip():
             pieces.append(("Analyst context (focus · priors · known events)", uc.read_text().strip()))
+            has_provided = True
         for p in sorted(run_dir.glob("user_data_*.md")):
             t = p.read_text().strip()
             if t:
                 pieces.append((f"User data — {p.stem.replace('user_data_', '')}", t))
+                has_provided = True
         sc = run_dir / "slack_context.md"
         if sc.exists():
             t = sc.read_text().strip()
@@ -452,28 +455,35 @@ def user_context_subsection(run_dir: Path) -> str:
         return ""
     if not pieces:
         return ""
+    # Flat: each piece carries its own subhead — no redundant parent wrapper.
     inner = "".join(
         f'{_subhead(title)}<div class="md-content">{render_markdown_to_html(body)}</div>'
         for title, body in pieces
     )
-    link = ('<p style="font-size:12px;color:#666;margin-top:10px;">What the RCA found '
-            'against this context → '
-            '<a class="ref-link" href="#summary-cross-reference">Summary ↗</a></p>')
-    return f'{_subhead("User-Provided &amp; Recent Context")}{inner}{link}'
+    if has_provided:  # the Summary link only makes sense for analyst-supplied context
+        inner += ('<p style="font-size:12px;color:#666;margin-top:10px;">What the RCA found '
+                  'against this context → '
+                  '<a class="ref-link" href="#summary-cross-reference">Summary ↗</a></p>')
+    return inner
 
 
 def _prior_headline(d: Path) -> str:
-    """Best-effort one-line headline for a prior run (its findings.md root cause)."""
+    """Best-effort one-line headline for a prior run — the root-cause sentence from
+    findings.md, skipping the title/scaffold lines. '' if nothing usable."""
     f = d / "findings.md"
     try:
         if f.exists():
             for ln in f.read_text().splitlines():
-                t = ln.strip().lstrip("#").strip()
-                if t and not t.startswith(("---", "|", "<")) and len(t) > 15:
+                t = ln.strip().lstrip("#").strip().strip("*").strip()
+                low = t.lower()
+                if (t and not t.startswith(("---", "|", "<", "!", ">"))
+                        and not low.startswith(("cvr-rca", "findings", "ce ", "run ",
+                                                "root cause", "date", "window"))
+                        and len(t) > 20):
                     return (t[:120] + "…") if len(t) > 120 else t
     except Exception:  # noqa: BLE001
         pass
-    return "—"
+    return ""
 
 
 def prior_runs_block(run_dir: Path, ce_id) -> str:
@@ -652,13 +662,20 @@ def build_fragment(run_dir: Path) -> str:
     hist = ce_history_block(run_dir)          # synthesised trajectory (sub-agent)
     prior = prior_runs_block(run_dir, ce_id)  # deterministic prior-run index + links
     uctx = user_context_subsection(run_dir)   # user-provided + recent Slack
-    # Always strip CE Health's filesystem-search placeholders and the interactive
-    # "Add your context" prompt — neither belongs in the rendered report (Slack /
-    # user context is surfaced below via uctx, and prior RCAs via `prior`).
-    hist_md = _clean_history_md(section(md, "Historical Context"))
-    s8 = block("8. Historical Context", "cehealth-history",
-               f'<div class="md-content">{render_markdown_to_html(hist_md)}</div>'
-               + hist + prior + uctx)
+    # Strip CE Health's filesystem-search placeholders + the interactive "Add your
+    # context" prompt — neither belongs in a report. After stripping, CE Health's
+    # own §8 is often empty (no thoughts/shared dir in the bundle), so we render its
+    # block ONLY when something real survives — otherwise it's an empty box.
+    hist_md = _clean_history_md(section(md, "Historical Context")).strip()
+    parts = []
+    if hist_md:
+        parts.append(f'<div class="md-content">{render_markdown_to_html(hist_md)}</div>')
+    parts += [hist, prior, uctx]
+    inner = "".join(p for p in parts if p and p.strip())
+    if not inner.strip():  # first-ever run, no Slack, no context → don't show an empty card
+        inner = ('<div class="md-content"><p style="color:#8a8a8a;">'
+                 'No prior RCAs or added context for this CE yet.</p></div>')
+    s8 = block("8. Historical Context", "cehealth-history", inner)
 
     # §9 Lead Time Cohorts — all rows
     s9 = block("9. Lead Time Cohorts", "cehealth-leadtime",

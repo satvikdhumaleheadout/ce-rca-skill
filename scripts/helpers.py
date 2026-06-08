@@ -256,6 +256,53 @@ def render_markdown_tab(path: Path, anchor_prefix: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Deterministic delta-cell colouring (Follow-ups tab)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TD_RE = re.compile(r"<td\b([^>]*)>(.*?)</td>", re.DOTALL | re.IGNORECASE)
+_STRIP_TAGS_RE = re.compile(r"<[^>]+>")
+# A "signed delta" cell: visible text begins (after an optional "(") with an
+# explicit +/− sign followed by a digit (optionally a currency symbol first).
+# Covers −3.13pp, +0.6pp, -15%, +98%, +$111.3K, (−$708.8K). A plain count
+# ("6,447"), a level ("21.6%"), or an em-dash placeholder ("—") has no leading
+# sign and is left untouched.
+_SIGNED_DELTA_RE = re.compile(r"^\(?\s*([+\-−–])\s*\$?\d")
+_HAS_COLOR_CLASS_RE = re.compile(r"\b(neg|pos|flat)\b")
+
+
+def autocolor_delta_cells(html: str) -> str:
+    """Add `.pos`/`.neg` to table cells whose value is a signed delta.
+
+    Deterministic, sign-based, scoped to the caller (used for the Follow-ups
+    tab). Green for a leading `+`, red for a leading `-`/`−`/`–`. **Author
+    intent wins:** a `<td>` that already carries a `neg`/`pos`/`flat` class is
+    left exactly as written — so semantic cells the parser can't infer (e.g. a
+    *positive* "lost checkouts" count the author marked `.neg`) are preserved.
+    Cells without a leading sign (counts, levels, "—") are never touched.
+    """
+
+    def repl(m: "re.Match[str]") -> str:
+        attrs, inner = m.group(1), m.group(2)
+        cls_m = re.search(r'class\s*=\s*"([^"]*)"', attrs, re.IGNORECASE)
+        existing = cls_m.group(1) if cls_m else ""
+        if _HAS_COLOR_CLASS_RE.search(existing):
+            return m.group(0)  # respect an author-set colour
+        text = _STRIP_TAGS_RE.sub("", inner).strip()
+        dm = _SIGNED_DELTA_RE.match(text)
+        if not dm:
+            return m.group(0)
+        color = "pos" if dm.group(1) == "+" else "neg"
+        if cls_m:
+            merged = (existing + " " + color).strip()
+            new_attrs = attrs[: cls_m.start(1)] + merged + attrs[cls_m.end(1) :]
+        else:
+            new_attrs = f'{attrs} class="{color}"'
+        return f"<td{new_attrs}>{inner}</td>"
+
+    return _TD_RE.sub(repl, html)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CVR-RCA report.html extraction
 # ─────────────────────────────────────────────────────────────────────────────
 

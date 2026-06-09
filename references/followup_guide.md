@@ -15,9 +15,9 @@ is *in-session* for v1 — there is no live chat widget in the HTML and no durab
 1. **Answer within the run's fixed scope.** Every follow-up is answered for the run's
    **fixed segment + comparison window** (the pre/post in `meta.json`). You may reinterpret,
    re-aggregate, or run a small bounded query — but you stay in this scope.
-2. **Non-destructive.** You only ever **append** to `<run_dir>/followups.html`. You never edit
-   `summary_report.html`, `ce_health_tab.html`, `cvr_rca_report.html`, `perf_audit_report.md`,
-   or any other tab. Re-composing rebuilds the report from artifacts; the other tabs stay
+2. **Non-destructive.** You only ever **append** to `<run_dir>/tabs/followups.html`. You never edit
+   `tabs/summary_report.html`, `tabs/ce_health_tab.html`, `tabs/cvr_rca_report.html`,
+   `reports/perf_audit_report.md`, or any other tab. Re-composing rebuilds the report from artifacts; the other tabs stay
    byte-identical.
 3. **The pivot rule (load-bearing).** Any question that **changes the time window** or
    otherwise **re-scopes** the run (different CE, different segment, "show me all of this
@@ -32,33 +32,37 @@ is *in-session* for v1 — there is no live chat widget in the HTML and no durab
 
 ## Inputs — read whatever is present in `<run_dir>` (read-only)
 
+A finished run is organized into by-type subfolders (Step 4f of the orchestrator). The paths
+below are the canonical (organized) locations; if a file isn't there, **fall back to the run-dir
+root** (older / un-organized runs).
+
 | File | What it gives you |
 |---|---|
-| `meta.json` | The fixed window (`pre_period`/`post_period`, `post_start`/`post_end`), CE id/name, segment. **Defines the scope you answer within.** |
-| `summary.json` | Rolled-up funnel: CE-level + MB/HO × channel × period, Shapley, mix, trend. |
-| `stage1.json` | MB/HO × channel × period funnel counts. |
-| `stage3.json` | **Daily** funnel + rates (lp2s/s2c/c2o) across the pre/post window — re-sliceable by any date sub-range. |
-| `stage7.json` | **Daily** 90-day rolling trend, current + LY series. |
-| `ce_health_report.json` (+ `.md`) | CE Health sidecar — incl. the **§6 per-TGID** table (revenue / traffic / RPC). The one place per-TGID rows are on disk. |
-| `findings.md` (CVR-RCA) | Structured root cause, mechanism, evidence inventory, what was tested. |
-| `transcript.md` | What branches were explored and ruled out (so you don't re-tread). |
-| `perf_audit_report.md` (+ `perf_audit_summary.md`) | Paid verdict, traffic quality, campaign status. |
-| `user_context.md` | The analyst's original steering, if any. |
-| `cvr_rca_report.html`, `summary_report.html` | The rendered tabs, for cross-tab citation anchors. |
+| `data/meta.json` | The fixed window (`pre_period`/`post_period`, `post_start`/`post_end`), CE id/name, segment. **Defines the scope you answer within.** |
+| `data/summary.json` | Rolled-up funnel: CE-level + MB/HO × channel × period, Shapley, mix, trend. |
+| `data/stage1.json` | MB/HO × channel × period funnel counts. |
+| `data/stage3.json` | **Daily** funnel + rates (lp2s/s2c/c2o) across the pre/post window — re-sliceable by any date sub-range. |
+| `data/stage7.json` | **Daily** 90-day rolling trend, current + LY series. |
+| `data/ce_health_report.json` (+ `reports/ce_health_report.md`) | CE Health sidecar — incl. the **§6 per-TGID** table (revenue / traffic / RPC). The one place per-TGID rows are on disk. |
+| `reports/findings.md` (CVR-RCA) | Structured root cause, mechanism, evidence inventory, what was tested. |
+| `transcripts/transcript_cvr_rca.md` | What branches were explored and ruled out (so you don't re-tread). |
+| `reports/perf_audit_report.md` | Paid verdict, traffic quality, campaign status. |
+| `reports/user_context.md` | The analyst's original steering, if any. |
+| `tabs/cvr_rca_report.html`, `tabs/summary_report.html` | The rendered tabs, for cross-tab citation anchors. |
 
 ## Routing — decide per question, in this order
 
 **1. Reinterpret (no numbers needed).** Clarification / "why" / "what does this mean"
-questions → answer from `findings.md` + `transcript.md`. Tag **`from existing data`**.
+questions → answer from `reports/findings.md` + `transcripts/transcript_cvr_rca.md`. Tag **`from existing data`**.
 
 **2. Re-aggregate from disk (no new query).** The answer is a re-slice/re-group of data
 already persisted:
 - **Temporal re-slice** — "S2C for the last week of post", "CVR by day", "June 1–4 vs May" →
-  from `stage3.json` / `stage7.json` daily rows.
+  from `data/stage3.json` / `data/stage7.json` daily rows.
 - **Segment / channel aggregates** — MB vs HO, Paid vs Organic within the primary segment →
-  from `summary.json` / `stage1.json`.
+  from `data/summary.json` / `data/stage1.json`.
 - **TGID revenue / traffic clubbing** — "club TGIDs A+B+C, show combined revenue/traffic/RPC"
-  → re-aggregate the **`ce_health_report.json` §6** table. *(This is the one TGID cut that's
+  → re-aggregate the **`data/ce_health_report.json` §6** table. *(This is the one TGID cut that's
   free — see the limit below.)*
 Tag **`from existing data`**.
 
@@ -81,11 +85,12 @@ relevant anchors.
 > Health §6 sidecar (route 2). Clubbed TGID **funnel** (LP→S→C→O) is **not** on disk → route 3
 > (a `q4` re-query). Don't conflate the two; say which you're giving.
 
-## Promote — append an audited **HTML card** to `followups.html`
+## Promote — append an audited **HTML card** to `tabs/followups.html`
 
 After a **substantive** answer, offer: *"Want me to add this to the report's Follow-ups tab?"*
-On an explicit yes, append one **`.analysis-block` card** to `<run_dir>/followups.html` (create the
-file if absent), then **re-run the composer** so the tab refreshes:
+On an explicit yes, append one **`.analysis-block` card** to `<run_dir>/tabs/followups.html` (create
+the file if absent — `mkdir -p <run_dir>/tabs` first on an older flat run), then **re-run the
+composer** so the tab refreshes:
 
 ```bash
 python3 "$SKILL_DIR/scripts/compose.py" --run-dir "<run_dir>"

@@ -40,6 +40,33 @@ from helpers import (
 )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Run-folder layout. The orchestrator's "organize" step tidies a finished run
+# into by-type subfolders (report.html at top; tabs/ reports/ data/ transcripts/
+# logs/). compose resolves each input **subfolder-first, root-fallback**, so it
+# works identically on an organized run AND on a flat/older/standalone run dir.
+# ─────────────────────────────────────────────────────────────────────────────
+_SUBDIR = {
+    "summary_report.html": "tabs",
+    "ce_health_tab.html": "tabs",
+    "ce_health_report.md": "reports",
+    "cvr_rca_report.html": "tabs",
+    "perf_audit_report.md": "reports",
+    "followups.html": "tabs",
+    "meta.json": "data",
+}
+
+
+def resolve(run_dir: Path, name: str) -> Path:
+    """Resolve an input file: prefer its canonical subfolder, else the run-dir root."""
+    sub = _SUBDIR.get(name)
+    if sub:
+        p = run_dir / sub / name
+        if p.exists():
+            return p
+    return run_dir / name
+
+
 def extract_style_block(visual_kit_path: Path) -> str:
     """Pull the shared <style>...</style> block out of the vendored visual_kit.md.
 
@@ -129,23 +156,37 @@ TAB_SPECS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 TRANSCRIPT_LABELS = {
-    "transcript.md": "CVR-RCA",                       # generic name == CVR-RCA by convention
+    "transcript_cvr_rca.md": "CVR-RCA",                    # organized name (transcripts/)
     "transcript_perf_audit.md": "Paid Performance Audit",  # match the perf-audit tab label
+    "transcript.md": "CVR-RCA",                            # back-compat: pre-organize / standalone
 }
 
 
 def collect_transcripts(run_dir: Path) -> list:
-    """Return [(label, Path)] for transcripts present — registry order, then globbed."""
-    seen, out = set(), []
+    """Return [(label, Path)] for transcripts present — registry order, then globbed.
+
+    Looks in `transcripts/` first (the organized layout), then the run-dir root
+    (older / standalone runs). Dedupes by resolved path so the same transcript is
+    never listed twice across the two locations.
+    """
+    seen_paths, seen_names, out = set(), set(), []
+
+    def _add(label: str, p: Path):
+        rp = p.resolve()
+        if p.exists() and p.stat().st_size > 0 and rp not in seen_paths:
+            out.append((label, p))
+            seen_paths.add(rp)
+            seen_names.add(p.name)
+
     for fname, label in TRANSCRIPT_LABELS.items():
-        p = run_dir / fname
-        if p.exists() and p.stat().st_size > 0:
-            out.append((label, p))
-            seen.add(p.name)
-    for p in sorted(run_dir.glob("transcript_*.md")):
-        if p.name not in seen and p.stat().st_size > 0:
-            label = p.stem[len("transcript_"):].replace("_", " ").title()
-            out.append((label, p))
+        _add(label, run_dir / "transcripts" / fname)   # organized
+        _add(label, run_dir / fname)                     # root fallback
+
+    for base in (run_dir / "transcripts", run_dir):
+        for p in sorted(base.glob("transcript_*.md")):
+            if p.name not in seen_names and p.exists() and p.stat().st_size > 0:
+                label = p.stem[len("transcript_"):].replace("_", " ").title()
+                _add(label, p)
     return out
 
 
@@ -264,9 +305,9 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
     """Build (tab_bar_html, panes_html, chart_scripts_html) from present artifacts."""
     present = []
     for spec in TAB_SPECS:
-        if (run_dir / spec["source"]).exists():
+        if resolve(run_dir, spec["source"]).exists():
             present.append(spec)
-        elif spec.get("fallback") and (run_dir / spec["fallback"]["source"]).exists():
+        elif spec.get("fallback") and resolve(run_dir, spec["fallback"]["source"]).exists():
             # Primary source absent — fall back to the spec's declared fallback
             # (e.g. CE Health's beautified fragment missing → verbatim markdown).
             fb = {**spec, **spec["fallback"]}
@@ -294,7 +335,7 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
             f'role="tab" aria-selected="{aria}">{spec["label"]}</button>'
         )
 
-        src_path = run_dir / spec["source"]
+        src_path = resolve(run_dir, spec["source"])
         if spec["type"] == "markdown":
             pane_body = render_markdown_tab(src_path, spec["anchor_prefix"])
         elif spec["type"] == "html-fragment":
@@ -354,7 +395,7 @@ def main():
     )
 
     meta = {}
-    meta_path = run_dir / "meta.json"
+    meta_path = resolve(run_dir, "meta.json")
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
 

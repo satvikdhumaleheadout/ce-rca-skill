@@ -17,6 +17,26 @@ python3 scripts/compose.py --run-dir <run_dir>
 artifact (in the fixed reading order below), and writes `<run_dir>/report.html`.
 This keeps composition deterministic and the master's job small.
 
+## Run-folder layout (organized — Step 4f)
+
+After compose, the master's **Organize** step (SKILL.md Step 4f) tidies the run so
+**`report.html` is the only top-level file**; everything else is grouped by type:
+
+```
+<run_dir>/
+  report.html                 ← the deliverable (only top-level file)
+  transcripts/                transcript_cvr_rca.md (renamed from transcript.md), transcript_perf_audit.md
+  tabs/                       summary_report.html, ce_health_tab.html, cvr_rca_report.html, followups.html
+  reports/                    ce_health_report.md, findings.md, perf_audit_report.md, *_evaluation.md, slack_context.md, …
+  data/                       summary.json, stage*.json, ce_health_report.json, meta.json, orchestration.json
+  logs/                       _run_log.md
+```
+
+`compose.py` is **layout-aware**: it resolves each input **subfolder-first, then the
+run-dir root** (see `resolve()` + `_SUBDIR`), so it composes identically whether the run
+is organized or flat. Older runs and standalone sub-skill runs (which write flat) still
+compose unchanged — the reorganization is purely cosmetic and fully backward-compatible.
+
 ## Reading order (fixed)
 
 Tabs are emitted in this order, each only if its source artifact exists:

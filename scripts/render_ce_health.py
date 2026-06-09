@@ -89,7 +89,10 @@ def numparse(s):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def section(md, name):
-    m = re.search(rf'^## .*{re.escape(name)}.*?$(.*?)(?=^## |\Z)', md, re.M | re.S)
+    # Header match is single-line ([^\n]* — never crosses newlines, so e.g.
+    # "Funnel" matches "## 4. Funnel" and NOT greedily through "## Funnel by
+    # Language"); the body capture stays multi-line via re.S.
+    m = re.search(rf'^##[^\n]*{re.escape(name)}[^\n]*$(.*?)(?=^## |\Z)', md, re.M | re.S)
     return m.group(1) if m else ""
 
 
@@ -135,11 +138,43 @@ CEH_TABLE_STYLE = (
     "#tab-cehealth th.ceh-group{text-align:center;background:#f0f2f8;color:#5a6478;"
     "font-size:10px;letter-spacing:.6px;text-transform:uppercase;"
     "border-bottom:1px solid #e0e4ef;padding:6px 12px;}"
+    # Blue vertical dividers at group boundaries (left-border on the first column of
+    # each group, header + body).
+    "#tab-cehealth table .ceh-gdiv{border-left:2px solid #6c8ebf;}"
+    # Benchmark / step flag chips (amber=watch, red=off).
+    "#tab-cehealth .ceh-flag{display:inline-block;margin-left:5px;padding:1px 6px;"
+    "border-radius:9px;font-size:10px;font-weight:700;vertical-align:middle;}"
+    "#tab-cehealth .ceh-flag.warn{background:#fff3e0;color:#b26a00;}"
+    "#tab-cehealth .ceh-flag.bad{background:#fdecea;color:#c62828;}"
+    # Concentration highlight (rows up to ~80% cumulative revenue) + classification pill.
+    "#tab-cehealth tr.ceh-conc td{background:#eafaf0;}"
+    "#tab-cehealth .ceh-class{display:inline-block;margin:0 0 8px;padding:3px 10px;"
+    "border-radius:6px;font-size:11px;font-weight:700;background:#eef2fb;color:#3a4a8a;}"
+    # Conditional-formatting backgrounds for the TGID table cells.
+    "#tab-cehealth td.ceh-cr-low{background:#fdecea;}"
+    "#tab-cehealth .ceh-prime{display:inline-block;margin-left:6px;padding:1px 6px;"
+    "border-radius:9px;font-size:10px;font-weight:700;background:#e8edf7;color:#3a4a8a;}"
+    # Truncate long experience names (TGID sticky 2nd column) with ellipsis; the
+    # full name is in the span's title attribute (hover to read).
+    "#tab-cehealth .ceh-exp{display:block;max-width:200px;overflow:hidden;"
+    "text-overflow:ellipsis;white-space:nowrap;}"
+    # Landing-page URL cell: truncate with ellipsis, full URL in the title (hover).
+    # Source landing URLs are NOT truncated (unlike experience names), so this works.
+    "#tab-cehealth .ceh-lpurl{display:block;max-width:340px;overflow:hidden;"
+    "text-overflow:ellipsis;white-space:nowrap;}"
+    # New-CE / new-experience badge (replaces awkward trailing 'new' literal).
+    "#tab-cehealth .ceh-new{display:inline-block;margin-left:6px;padding:1px 6px;"
+    "border-radius:9px;font-size:10px;font-weight:700;background:#eef2fb;color:#5a6478;"
+    "vertical-align:middle;}"
     "</style>"
 )
 
 _TRAIL_DELTA = re.compile(r'^(?P<main>.*\S)\s+(?P<delta>[+\-−][\d.,]+(?:pp|%))(?:\s*\([^)]*\))?$')
 _PURE_DELTA = re.compile(r'^(?P<delta>[+\-−][\d.,]+(?:pp|%))(?:\s*\([^)]*\))?$')
+# New-CE / "no prior" markers that trail a value in TGID cells (e.g. "$49.2K new",
+# "97.3% —"). A lone em-dash means "no prior" → drop it; "new" → small muted badge.
+_TRAIL_NEW = re.compile(r'^(?P<main>.*\S)\s+new$')
+_TRAIL_NOPRIOR = re.compile(r'^(?P<main>.*\S)\s+[—–-]$')
 
 
 def _delta_dir(delta):
@@ -156,7 +191,8 @@ def _delta_dir(delta):
 
 def _cell_split(c):
     """Render a cell that may carry a trailing delta as a two-line value+delta, a
-    lone delta as a single coloured token, else fall back to plain `_cell`."""
+    lone delta as a single coloured token, a new-CE/no-prior marker as a value +
+    muted badge / bare value, else fall back to plain `_cell`."""
     s = c.strip()
     m = _TRAIL_DELTA.match(s)
     if m:
@@ -169,18 +205,35 @@ def _cell_split(c):
         # Colour the whole token (sign classified from the delta), preserving any
         # trailing parenthetical like "+31% (+$32.1K)" so no figure is dropped.
         return f'<span class="ceh-chg {d}">{_html.escape(s)}</span>'
+    # New-CE marker (e.g. "$49.2K new") → value + small muted "new" badge, not inline.
+    m = _TRAIL_NEW.match(s)
+    if m:
+        return f'<span class="ceh-val">{_cell(m.group("main"))}</span><span class="ceh-new">new</span>'
+    # Lone trailing em-dash ("no prior", e.g. "97.3% —") → drop it, show the value.
+    m = _TRAIL_NOPRIOR.match(s)
+    if m:
+        return f'<span class="ceh-val">{_cell(m.group("main"))}</span>'
     return _cell(c)
 
 
 def styled_table(hdr, rows, highlight_first=False, maxrows=None, sticky_cols=0,
-                 sticky_widths=None, split_deltas=False, groups=None):
+                 sticky_widths=None, split_deltas=False, groups=None,
+                 div_cols=None, row_classes=None, cell_classes=None, cell_html=None):
     """Visual-kit styled table. `sticky_cols` freezes the first N columns on
     horizontal scroll (position:sticky), `sticky_widths` their px widths.
     `split_deltas` renders 'value + trailing delta' cells as a bold value with a
     coloured delta beneath (and lone-delta cells coloured). `groups` is an ordered
     list of (label, span) rendered as a grouped header band above the column row
-    (only when the spans sum to the column count — else skipped, never broken)."""
+    (only when the spans sum to the column count — else skipped, never broken).
+    `div_cols` is a set of column indices to receive a blue left-border divider
+    (header + body). `row_classes` is an optional list (aligned to rows) of extra
+    <tr> classes. `cell_classes`/`cell_html` are optional {(row, col): str} maps for
+    per-cell extra classes / raw HTML content overrides (presentation formatting)."""
     if maxrows: rows = rows[:maxrows]
+    div_cols = div_cols or set()
+    cell_classes = cell_classes or {}
+    cell_html = cell_html or {}
+
     ncol = len(hdr)
     numcol = [False] * ncol
     for ci in range(ncol):
@@ -199,36 +252,144 @@ def styled_table(hdr, rows, highlight_first=False, maxrows=None, sticky_cols=0,
         w = sticky_widths[i] if i < len(sticky_widths) else 120
         return f'position:sticky;left:{_offset(i)}px;background:{bg};z-index:{z};min-width:{w}px;box-shadow:1px 0 0 #e8ebf4;'
 
+    def _classes(*parts):
+        cl = [p for p in parts if p]
+        return f' class="{" ".join(cl)}"' if cl else ''
+
     th = ""
     for i, h in enumerate(hdr):
-        cls = ' class="num"' if numcol[i] else ''
+        cls = _classes('num' if numcol[i] else '', 'ceh-gdiv' if i in div_cols else '')
         st = _stick(i, True)
         style_attr = ' style="' + st + '"' if st else ''
         th += "<th" + cls + style_attr + ">" + _cell(h) + "</th>"
     # Optional grouped header band — only when spans line up with the columns.
     grp = ""
     if groups and sum(int(s) for _, s in groups) == ncol:
-        gcells = "".join(
-            f'<th class="ceh-group"{f" colspan=\"{int(s)}\"" if int(s) > 1 else ""}>{_html.escape(str(lbl))}</th>'
-            for lbl, s in groups)
+        # Track which leading column each band starts at, to carry the blue divider
+        # up into the band cell too.
+        gcells = ""; col0 = 0
+        for lbl, s in groups:
+            span = int(s)
+            gdiv = 'ceh-gdiv' if col0 in div_cols else ''
+            colspan = f' colspan="{span}"' if span > 1 else ''
+            gcells += f'<th{_classes("ceh-group", gdiv)}{colspan}>{_html.escape(str(lbl))}</th>'
+            col0 += span
         grp = f"<tr>{gcells}</tr>"
     trs = ""
     for k, r in enumerate(rows):
-        rcls = ' class="highlight-row"' if (highlight_first and k == 0) else ''
+        extra = (row_classes[k] if row_classes and k < len(row_classes) else '')
+        rcls = _classes('highlight-row' if (highlight_first and k == 0) else '', extra)
         tds = ""
         for i, c in enumerate(r):
-            cls = ' class="num"' if (i < ncol and numcol[i]) else ''
+            cls = _classes('num' if (i < ncol and numcol[i]) else '',
+                           'ceh-gdiv' if i in div_cols else '',
+                           cell_classes.get((k, i), ''))
             st = _stick(i, False)
             style_attr = ' style="' + st + '"' if st else ''
-            inner = _cell_split(c) if split_deltas else _cell(c)
+            if (k, i) in cell_html:
+                inner = cell_html[(k, i)]
+            else:
+                inner = _cell_split(c) if split_deltas else _cell(c)
             tds += "<td" + cls + style_attr + ">" + inner + "</td>"
         trs += f"<tr{rcls}>{tds}</tr>"
     return f'<div style="overflow-x:auto;"><table><thead>{grp}<tr>{th}</tr></thead><tbody>{trs}</tbody></table></div>'
 
 
-def block(title, bid, inner, verdict=None):
+def block(title, bid, inner, verdict=None, summary=None, collapsed=False):
+    """Collapsible analysis block. The title is a <button class="ceh-toggle"> (not
+    an <a>, so the template's anchor router never intercepts it); `inner` lives in a
+    <div class="ceh-body"> that hides when collapsed. An optional `summary` renders a
+    <div class="ceh-summary"> BETWEEN the header and body so it stays visible while
+    collapsed (used for the Channel + Lead-time deterministic callouts). `collapsed`
+    sets the initial state; the default-open set is centralised in build_fragment."""
     v = f'<div class="verdict-line neutral">{verdict}</div>' if verdict else ''
-    return f'<div class="analysis-block" id="{bid}"><div class="block-title">{title}</div>{v}{inner}</div>'
+    summ = f'<div class="ceh-summary">{summary}</div>' if summary else ''
+    state = ' ceh-collapsed' if collapsed else ''
+    aria = 'false' if collapsed else 'true'
+    return (
+        f'<div class="analysis-block{state}" id="{bid}">'
+        f'<button type="button" class="ceh-toggle" aria-expanded="{aria}">'
+        f'<span class="ceh-chev" aria-hidden="true">▾</span>'
+        f'<span class="block-title">{title}</span></button>'
+        f'{summ}'
+        f'<div class="ceh-body">{v}{inner}</div>'
+        f'</div>'
+    )
+
+
+# Fragment-scoped collapse CSS + JS. Scoped to #tab-cehealth so it can't leak into
+# other tabs. The <script> (a) toggles a section on its header-button click and (b)
+# auto-expands a block when targeted — the template's anchor router preventDefault()s
+# cross-tab links, so :target CSS alone won't fire; we handle it in JS for both the
+# click path (doc-level listener on a[href^="#cehealth-"]) and initial load (hash).
+CEH_COLLAPSE_STYLE = (
+    "<style>"
+    "#tab-cehealth .ceh-toggle{display:flex;align-items:center;gap:10px;width:100%;"
+    "background:none;border:none;border-bottom:1px solid #e3e7f0;padding:8px 6px;"
+    "margin:0 0 10px;cursor:pointer;text-align:left;font:inherit;"
+    "border-radius:5px 5px 0 0;transition:background .15s ease;}"
+    "#tab-cehealth .ceh-toggle:hover{background:#f4f6fb;}"
+    "#tab-cehealth .ceh-toggle .block-title{margin-bottom:0;font-size:16px;font-weight:700;color:#1a1a2e;}"
+    "#tab-cehealth .ceh-chev{font-size:16px;color:#6a7690;transition:transform .18s ease;flex:0 0 auto;}"
+    "#tab-cehealth .analysis-block.ceh-collapsed .ceh-chev{transform:rotate(-90deg);}"
+    "#tab-cehealth .analysis-block.ceh-collapsed .ceh-body{display:none;}"
+    "#tab-cehealth .ceh-summary{font-size:12.5px;line-height:1.5;color:#3a4a6a;"
+    "background:#f4f6fb;border-left:3px solid #6c8ebf;border-radius:4px;"
+    "padding:8px 12px;margin:0 0 8px;}"
+    "</style>"
+)
+CEH_COLLAPSE_SCRIPT = (
+    "<script>(function(){"
+    "var root=document.getElementById('tab-cehealth');if(!root)return;"
+    "function setOpen(b,open){if(!b)return;b.classList.toggle('ceh-collapsed',!open);"
+    "var t=b.querySelector('.ceh-toggle');if(t)t.setAttribute('aria-expanded',open?'true':'false');}"
+    "root.addEventListener('click',function(e){"
+    "var t=e.target.closest('.ceh-toggle');if(!t||!root.contains(t))return;"
+    "var b=t.closest('.analysis-block');setOpen(b,b.classList.contains('ceh-collapsed'));});"
+    # Auto-expand when a cross-tab/in-tab anchor targets a CE Health block.
+    "document.addEventListener('click',function(e){"
+    "var a=e.target.closest('a[href^=\"#cehealth-\"]');if(!a)return;"
+    "var b=document.getElementById(a.getAttribute('href').slice(1));"
+    "if(b&&b.classList.contains('analysis-block'))setOpen(b,true);});"
+    "function fromHash(){var h=location.hash;if(h&&h.indexOf('#cehealth-')===0){"
+    "var b=document.getElementById(h.slice(1));"
+    "if(b&&b.classList.contains('analysis-block'))setOpen(b,true);}}"
+    "window.addEventListener('hashchange',fromHash);fromHash();"
+    "})();</script>"
+)
+
+# Funnel-by-dimension dropdown: a <select> that shows one .ceh-fdim panel at a
+# time. Delegated listener scoped to #tab-cehealth (matches the collapse pattern).
+CEH_FDIM_STYLE = (
+    "<style>"
+    "#tab-cehealth .ceh-fdim-sel{font-size:13px;padding:4px 8px;border:1px solid #d6dbe8;"
+    "border-radius:6px;background:#fff;color:#1a1a2e;margin:2px 0 10px;}"
+    "</style>"
+)
+CEH_FDIM_SCRIPT = (
+    "<script>(function(){var root=document.getElementById('tab-cehealth');if(!root)return;"
+    "root.querySelectorAll('.ceh-fdim-sel').forEach(function(sel){"
+    "sel.addEventListener('change',function(){var w=sel.closest('.ceh-fdim-wrap');if(!w)return;"
+    "w.querySelectorAll('.ceh-fdim').forEach(function(d){"
+    "d.style.display=(d.getAttribute('data-fdim')===sel.value)?'':'none';});});});"
+    "})();</script>"
+)
+
+
+def build_fdim_dropdown(panels):
+    """panels: list of (key, label, html). Returns a dropdown widget showing one
+    panel at a time (first open by default). Empty string if no panels."""
+    if not panels:
+        return ""
+    opts = "".join('<option value="{}">{}</option>'.format(k, _html.escape(lbl))
+                   for k, lbl, _ in panels)
+    divs = "".join(
+        '<div class="ceh-fdim" data-fdim="{}"{}>{}</div>'.format(
+            k, "" if i == 0 else ' style="display:none"', h)
+        for i, (k, lbl, h) in enumerate(panels))
+    return ('<div class="ceh-fdim-wrap"><label style="font-size:12px;color:#777;'
+            'margin-right:6px;">Break funnel down by:</label>'
+            '<select class="ceh-fdim-sel">{}</select>{}</div>'.format(opts, divs))
 
 
 def _subhead(t):
@@ -377,7 +538,7 @@ def build_shapley_block(raw, windows):
 
     pre_lbl = f"Pre ({windows['prior'][0]} – {windows['prior'][1]})"
     post_lbl = f"Post ({windows['current'][0]} – {windows['current'][1]})"
-    x = [pre_lbl] + [_FLBL[f] for f in _FAC] + ["Unattributable", post_lbl]
+    x = ["Pre"] + [_FLBL[f] for f in _FAC] + ["Unattributable", "Post"]
     y = [round(pre_rev, 2)] + [round(contrib[f], 2) for f in _FAC] + [round(unattr, 2), round(post_rev, 2)]
     measure = ["absolute"] + ["relative"] * (len(_FAC) + 1) + ["total"]
     text = [money(pre_rev)] + [_sm(contrib[f]) for f in _FAC] + [_sm(unattr), money(post_rev)]
@@ -388,13 +549,10 @@ def build_shapley_block(raw, windows):
         f"Booking revenue {'fell' if delta < 0 else 'rose'} {_sm(delta)} ({net_pct:.1f}%) "
         f"Pre → Post. Biggest {'drags' if drags else 'movers'}: {', '.join(drags) or '—'}; "
         f"offset by {', '.join(lifts) or '—'}. The 6-factor identity reconciles fully "
-        f"({_sm(unattr)} unattributable). <em>Note: this decomposes booking revenue "
-        f"(≈ CE Health's revenue_actual); the headline card shows CE Health's normalised Revenue.</em>"
+        f"({_sm(unattr)} unattributable). <em>Note: this decomposes <strong>Actual Revenue</strong>; "
+        f"the §1 headline card shows <strong>Predicted Revenue</strong>.</em>"
     )
-    return f'''<div class="analysis-block" id="cehealth-shapley">
-  <div class="block-title">7. Driver Diagnosis (Shapley)</div>
-  <div class="verdict-line neutral">{verdict}</div>
-  <div id="chart-cehealth-shapley" class="chart-container"></div>
+    inner = f'''<div id="chart-cehealth-shapley" class="chart-container" style="width:100%"></div>
   <script>Plotly.newPlot('chart-cehealth-shapley',[{{
     type:'waterfall',orientation:'v',
     measure:{json.dumps(measure)},
@@ -407,12 +565,12 @@ def build_shapley_block(raw, windows):
     totals:{{marker:{{color:'#3d5a8a',line:{{color:'#fff',width:1}}}}}},
     hovertemplate:'%{{x}}<br>cumulative %{{y:$,.0f}}<extra></extra>'
   }}],{{title:{{text:'Revenue Waterfall<br><span style=\\"font-size:11px;color:#888\\">{pre_lbl} → {post_lbl} · {_sm(delta)} ({net_pct:.1f}%)</span>',font:{{size:14,color:'#1a1a2e'}},x:0.5,xanchor:'center'}},
-    height:420,margin:{{l:75,r:30,t:64,b:90}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',
+    height:440,autosize:true,margin:{{l:75,r:80,t:64,b:104}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',
     font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},showlegend:false,
     yaxis:{{title:'Revenue (USD)',tickprefix:'$',gridcolor:'#eef',zerolinecolor:'#ccc'}},
     xaxis:{{tickangle:15}}}},
-    {{responsive:true,displayModeBar:false}});</script>
-</div>'''
+    {{responsive:true,displayModeBar:false}});</script>'''
+    return block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner, verdict=verdict)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -557,9 +715,10 @@ def _tgid_groups(hdr):
             return ''
         if 'rev' in n or n == 'share':
             return 'Revenue'
-        if n in ('rpc', 'aov', 'cr', 'tr'):
+        # RPC (revenue-per-click) is a funnel-efficiency metric → Funnel group.
+        if n in ('aov', 'cr', 'tr'):
             return 'Order Metrics'
-        if 'sel users' in n or 'traffic' in n or n in ('s2c', 'c2o', 's2o'):
+        if 'sel users' in n or 'traffic' in n or n in ('s2c', 'c2o', 's2o', 'rpc'):
             return 'Funnel Metrics'
         if '0-2d' in n or '3-7d' in n or '7d+' in n:
             return 'Lead-time mix'
@@ -575,87 +734,772 @@ def _tgid_groups(hdr):
     return bands if any(lbl for lbl, _ in bands) else None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Wave A — rule-based (deterministic) presentation helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Default-open sections (every other block ships collapsed). One obvious place.
+CEH_DEFAULT_OPEN = {"cehealth-vitals", "cehealth-l12m"}
+
+
+def _col_idx(hdr, *names):
+    """First header index whose lowercased text contains any of `names`. -1 if none."""
+    low = [h.strip().lower() for h in hdr]
+    for nm in names:
+        for i, h in enumerate(low):
+            if nm in h:
+                return i
+    return -1
+
+
+def _flag_chip(kind, txt):
+    return f'<span class="ceh-flag {kind}">{_html.escape(txt)}</span>'
+
+
+# §3 Channel benchmark rules (Share, current period). Tunable in one place.
+_CHAN_BENCH = {
+    "Google PMax": (10.0, 5.0),   # (target %, tolerance pp)
+    "Bing": (10.0, 5.0),
+    "Organic": (5.0, 4.0),
+}
+
+
+def channel_flags_and_summary(hdr, rows):
+    """Return ({row_idx: chip_html}, summary_html) for the channel table, from
+    rule-based Share benchmarks. Deterministic; degrades to ({}, '') on odd shapes."""
+    share_i = _col_idx(hdr, "share")
+    name_i = 0
+    if share_i < 0:
+        return {}, ""
+    shares = {}
+    order = []
+    for k, r in enumerate(rows):
+        if share_i >= len(r):
+            continue
+        name = r[name_i].strip().strip("*")
+        if name.upper() == "TOTAL":
+            continue
+        v = numparse(r[share_i])
+        if v is None:
+            # "<1%" → treat as ~0.5
+            v = 0.5 if "<1" in r[share_i] else None
+        if v is None:
+            continue
+        shares[name] = v
+        order.append((k, name, v))
+    if not shares:
+        return {}, ""
+    chips = {}
+    lead_note = ""        # the Google Search headline (always first)
+    flag_notes = []       # deviations / leakage (surfaced first within the cap)
+    ok_notes = []         # in-range channels (used only to pad the 2–3 lines)
+    # Google Search should be the top channel and ~50%.
+    gs = shares.get("Google Search")
+    top_name = max(shares, key=shares.get) if shares else None
+    if gs is not None:
+        if top_name != "Google Search":
+            ki = next((k for k, n, _ in order if n == "Google Search"), None)
+            if ki is not None:
+                chips[ki] = _flag_chip("bad", "not top")
+            lead_note = (f"Google Search is not the top channel ({top_name} leads at "
+                         f"{shares[top_name]:.0f}%) — investigate.")
+        elif gs < 45:
+            ki = next((k for k, n, _ in order if n == "Google Search"), None)
+            if ki is not None:
+                chips[ki] = _flag_chip("warn", f"low ({gs:.0f}%)")
+            lead_note = f"Google Search leads but at {gs:.0f}% (below the ~50% norm)."
+        else:
+            lead_note = f"Google Search leads at {gs:.0f}% (healthy)."
+    for name, (tgt, tol) in _CHAN_BENCH.items():
+        if name not in shares:
+            continue
+        v = shares[name]
+        if abs(v - tgt) > tol:
+            ki = next((k for k, n, _ in order if n == name), None)
+            if ki is not None:
+                chips[ki] = _flag_chip("warn", f"{v:.0f}% vs ~{tgt:.0f}%")
+            flag_notes.append(f"{name} {v:.0f}% (vs ~{tgt:.0f}% benchmark).")
+        else:
+            ok_notes.append(f"{name} {v:.0f}% in range.")
+    # Cross-sell leakage: Google + Bing cross-sell combined > 10%.
+    xs = shares.get("Google Cross-sell", 0) + shares.get("Bing Cross-sell", 0)
+    if xs > 10:
+        for nm in ("Google Cross-sell", "Bing Cross-sell"):
+            ki = next((k for k, n, _ in order if n == nm), None)
+            if ki is not None:
+                chips[ki] = _flag_chip("bad", "leakage")
+        flag_notes.append(f"Cross-sell combined {xs:.0f}% (>10%) — watch for keyword leakage.")
+    elif xs > 0:
+        ok_notes.append(f"Cross-sell combined {xs:.0f}% — within tolerance.")
+    # Lead with the Google Search verdict, then problems, padding with in-range notes
+    # up to 3 lines so the material flags are never crowded out.
+    notes = ([lead_note] if lead_note else []) + flag_notes + ok_notes
+    summary = " ".join(notes[:3])
+    return chips, summary
+
+
+# §9 Lead-time bands → dominant-band callout.
+def leadtime_summary(hdr, rows):
+    """2–3 line callout comparing the dominant lead-time band's Share to the typical
+    0–2D-led pattern. '' on odd shapes."""
+    band_i = 0
+    share_i = _col_idx(hdr, "share")
+    if share_i < 0:
+        return ""
+    bands = []
+    for r in rows:
+        if share_i >= len(r):
+            continue
+        name = r[band_i].strip().strip("*")
+        if name.upper() == "TOTAL":
+            continue
+        v = numparse(r[share_i])
+        if v is not None:
+            bands.append((name, v))
+    if not bands:
+        return ""
+    dom_name, dom_v = max(bands, key=lambda x: x[1])
+    short = next((v for n, v in bands if "0-2" in n), None)
+    if dom_name.startswith("0-2"):
+        return (f"Bookings are 0–2D-led ({dom_v:.0f}% in the 0–2D band) — the typical "
+                f"near-term-purchase pattern.")
+    msg = f"{dom_name} drives {dom_v:.0f}% of bookings"
+    if short is not None:
+        msg += f" vs {short:.0f}% in 0–2D"
+    msg += " — long-lead skew vs the usual 0–2D-led pattern."
+    return msg
+
+
+# §2 Vitals — the primary driver comes from the §7 Shapley decomposition (factor
+# with the largest |contribution|), NOT from the largest vitals Δ (which mislabels
+# Revenue). `shapley_top_vitals_row` maps that factor to a vitals table row if one
+# exists, so we can bold it; factors with no vitals row (Traffic, CVR) → note only.
+
+# Shapley factor → vitals-row matcher. Each entry: (factor_key, [name substrings]).
+# Factors absent here (traffic, cvr) deliberately map to no vitals row.
+_SHAP_VITALS_MATCH = {
+    "aov": ["aov"],
+    "take_rate": ["take rate", "take_rate", "tr"],
+    "completion_rate": ["completion", "cr"],
+    "orders_per_converter": ["orders", "order"],
+}
+
+
+def shapley_top_driver(contrib):
+    """Given the §7 6-factor `contrib` dict, return (factor_key, signed_contribution)
+    for the factor with the largest |contribution|. None if empty."""
+    if not contrib:
+        return None
+    f = max(contrib, key=lambda k: abs(contrib[k]))
+    return f, contrib[f]
+
+
+def shapley_top_vitals_row(hdr, rows, factor):
+    """Index of the vitals row that corresponds to a Shapley `factor`, or None if the
+    factor has no vitals row (Traffic / CVR) or no row matches."""
+    subs = _SHAP_VITALS_MATCH.get(factor)
+    if not subs:
+        return None
+    for k, r in enumerate(rows):
+        if not r:
+            continue
+        nm = r[0].strip().strip("*").lower()
+        for s in subs:
+            # Exact match for short tokens (tr/cr/orders) to avoid false hits.
+            if (len(s) <= 3 and nm == s) or (len(s) > 3 and s in nm):
+                return k
+    return None
+
+
+def _band_divider_cols(groups, hdr_len):
+    """Column indices that start a new (non-blank) group band → blue divider there.
+    Skips the leading blank/identity group so the first divider sits at the first
+    real group boundary."""
+    cols = set()
+    col0 = 0
+    prev_lbl = None
+    for lbl, s in groups:
+        if lbl and lbl != prev_lbl and col0 > 0:
+            cols.add(col0)
+        col0 += int(s)
+        prev_lbl = lbl
+    return cols
+
+
+def build_tgid_main(hdr, rows):
+    """Build the main TGID table: drop the lead-time-bucket columns, reorder so RPC
+    sits in the Funnel group, sort rows desc by Share, then apply concentration
+    (green up to ~80% cumulative) + conditional formatting (CR<80% red, S2C/C2O scale)
+    + a derived-S2O high-traffic-low-S2O flag. Returns the full <div> table HTML +
+    a classification pill. Degrades to a plain styled table on odd shapes."""
+    lead_names = ('%0-2d', '%3-7d', '%7d+', '0-2d', '3-7d', '7d+')
+    keep = [i for i, h in enumerate(hdr)
+            if h.strip().lower() not in lead_names and not any(
+                ln in h.strip().lower() for ln in lead_names)]
+    # Reorder: identity cols, Revenue (Rev/Share), then move RPC after them so it
+    # joins the funnel group, then the rest in original order.
+    rpc_i = _col_idx([hdr[i] for i in keep], "rpc")
+    # Build the new column order over `keep` indices.
+    new_order = list(keep)
+    if rpc_i >= 0:
+        # Find the position of RPC and the position right after Share, move RPC there.
+        keep_hdr = [hdr[i].strip().lower() for i in keep]
+        rpc_pos = keep_hdr.index('rpc') if 'rpc' in keep_hdr else -1
+        share_pos = next((j for j, h in enumerate(keep_hdr) if h == 'share'), -1)
+        # Target: after the funnel-group-start; simplest is to leave RPC where the
+        # group classifier already puts it in Funnel Metrics. Since classifier groups
+        # by name (not position), reordering is only needed so the band is contiguous.
+        # Move RPC to just before 'sel users'/'%traffic' (funnel block start).
+        fstart = next((j for j, h in enumerate(keep_hdr)
+                       if 'sel users' in h or 'traffic' in h or h in ('s2c', 'c2o')), -1)
+        if rpc_pos >= 0 and fstart >= 0 and rpc_pos < fstart:
+            col = new_order.pop(rpc_pos)
+            new_order.insert(fstart - 1, col)
+    nhdr = [hdr[i] for i in new_order]
+    nrows = [[r[i] if i < len(r) else "" for i in new_order] for r in rows]
+
+    # Derive an S2O column = S2C × C2O per row and insert it right after C2O so it
+    # lands inside the Funnel Metrics group. S2O is NOT in the source data; this is a
+    # presentation-derived approximation (S2C×C2O), pending an exact engine figure
+    # (Wave B). Parse the two rate columns, ignoring any trailing delta token. Cells
+    # with un-parseable inputs (or a TOTAL row) get an empty S2O cell.
+    pre_s2c_i = _col_idx(nhdr, "s2c")
+    pre_c2o_i = _col_idx(nhdr, "c2o")
+
+    def _lead_rate(cell):
+        # Parse the leading rate from a cell, IGNORING any trailing delta token
+        # (e.g. "16.5% -4.8pp" → 16.5). Returns None if no leading number.
+        m = re.match(r'\s*[$]?([\d,]+(?:\.\d+)?)', cell.strip().strip('*'))
+        return float(m.group(1).replace(',', '')) if m else None
+
+    if pre_s2c_i >= 0 and pre_c2o_i >= 0:
+        insert_at = pre_c2o_i + 1
+        nhdr.insert(insert_at, "S2O")
+        for r in nrows:
+            a = _lead_rate(r[pre_s2c_i]) if pre_s2c_i < len(r) else None
+            b = _lead_rate(r[pre_c2o_i]) if pre_c2o_i < len(r) else None
+            if a is not None and b is not None:
+                r.insert(insert_at, f"{a / 100.0 * b:.1f}%")
+            else:
+                r.insert(insert_at, "")
+
+    share_i = _col_idx(nhdr, "share")
+    cr_i = _col_idx(nhdr, "cr")
+    s2c_i = _col_idx(nhdr, "s2c")
+    c2o_i = _col_idx(nhdr, "c2o")
+    s2o_i = next((j for j, h in enumerate(nhdr) if h.strip().lower() == "s2o"), -1)
+    traf_i = _col_idx(nhdr, "%traffic", "traffic")
+    exp_i = _col_idx(nhdr, "experience")
+
+    # Sort rows desc by Share (TOTAL rows, if any, sink to the bottom).
+    def share_val(r):
+        if share_i < 0 or share_i >= len(r):
+            return -1
+        v = numparse(r[share_i])
+        return v if v is not None else -1
+    is_total = [r[0].strip().strip("*").upper() == "TOTAL" for r in nrows]
+    idxd = list(range(len(nrows)))
+    idxd.sort(key=lambda k: (is_total[k], -share_val(nrows[k])))
+    nrows = [nrows[k] for k in idxd]
+
+    # Concentration: green until cumulative Share >= 80%; classification label.
+    row_classes = [''] * len(nrows)
+    cum = 0.0
+    conc_rows = 0
+    top_share = 0.0
+    for k, r in enumerate(nrows):
+        if r[0].strip().strip("*").upper() == "TOTAL":
+            continue
+        sv = share_val(r)
+        if sv < 0:
+            continue
+        if k == 0:
+            top_share = sv
+        if cum < 80:
+            row_classes[k] = 'ceh-conc'
+            conc_rows += 1
+        cum += sv
+    if top_share > 80:
+        cls_label = "Concentrated"
+        cls_note = f"one TGID is {top_share:.0f}% of revenue"
+    elif conc_rows <= 3:
+        cls_label = "Normal"
+        cls_note = f"top {conc_rows} TGIDs carry ~80% of revenue"
+    else:
+        cls_label = "Fragmented"
+        cls_note = f"~{conc_rows} TGIDs needed to reach 80% of revenue"
+
+    # Conditional formatting + derived S2O flag.
+    cell_classes = {}
+    cell_html = {}
+
+    def _scale_bg(frac):
+        # frac in [0,1] → green (high) to red (low) light background.
+        frac = max(0.0, min(1.0, frac))
+        r = int(253 - frac * (253 - 232))
+        g = int(236 + frac * (250 - 236))
+        b = int(234 + frac * (240 - 234))
+        return f'background:rgb({r},{g},{b});'
+
+    s2c_vals = [numparse(r[s2c_i]) for r in nrows] if s2c_i >= 0 else []
+    c2o_vals = [numparse(r[c2o_i]) for r in nrows] if c2o_i >= 0 else []
+    s2o_vals = [numparse(r[s2o_i]) for r in nrows] if s2o_i >= 0 else []
+
+    def _scale_range(vals):
+        v = [x for x in vals if x is not None]
+        return (min(v), max(v)) if v else (0, 1)
+    s2c_lo, s2c_hi = _scale_range(s2c_vals)
+    c2o_lo, c2o_hi = _scale_range(c2o_vals)
+    s2o_lo, s2o_hi = _scale_range(s2o_vals)
+    traf_vals = [numparse(r[traf_i]) for r in nrows] if traf_i >= 0 else []
+    traf_v = [x for x in traf_vals if x is not None]
+    traf_med = sorted(traf_v)[len(traf_v) // 2] if traf_v else None
+
+    for k, r in enumerate(nrows):
+        if r[0].strip().strip("*").upper() == "TOTAL":
+            continue
+        # Experience name: truncate with ellipsis but expose the full name on hover.
+        if exp_i >= 0 and exp_i < len(r):
+            full = r[exp_i].strip().strip("*")
+            if full:
+                cell_html[(k, exp_i)] = (f'<span class="ceh-exp" title="{_html.escape(full)}">'
+                                         f'{_cell(full)}</span>')
+        # CR < 80% → red highlight.
+        if cr_i >= 0 and cr_i < len(r):
+            cv = numparse(r[cr_i])
+            if cv is not None and cv < 80:
+                cell_classes[(k, cr_i)] = 'ceh-cr-low'
+        # S2C / C2O colour scale (style override via cell_html wrapping not needed —
+        # use inline style on a span). We override via cell_html to add the bg.
+        for ci, lo, hi in ((s2c_i, s2c_lo, s2c_hi), (c2o_i, c2o_lo, c2o_hi),
+                           (s2o_i, s2o_lo, s2o_hi)):
+            if ci >= 0 and ci < len(r):
+                vv = numparse(r[ci])
+                if vv is not None and hi > lo:
+                    frac = (vv - lo) / (hi - lo)
+                    cell_html[(k, ci)] = (f'<span style="display:block;{_scale_bg(frac)}'
+                                          f'margin:-6px -10px;padding:6px 10px;">'
+                                          f'{_cell_split(r[ci])}</span>')
+        # Derived S2O = S2C × C2O (presentation approximation; exact engine value is a
+        # later wave). Flag high-traffic + low-S2O TGIDs.
+        if s2c_i >= 0 and c2o_i >= 0 and traf_i >= 0 and traf_med is not None:
+            s2c = numparse(r[s2c_i]); c2o = numparse(r[c2o_i]); tf = numparse(r[traf_i])
+            if None not in (s2c, c2o, tf):
+                s2o = s2c / 100.0 * c2o / 100.0 * 100  # %
+                # high traffic vs median, low S2O (< 8% ≈ 0.08 product) → flag.
+                if tf >= traf_med and s2o < 8 and traf_i < len(r):
+                    base = cell_html.get((k, traf_i))
+                    chip = _flag_chip("warn", f"low S2O ~{s2o:.0f}%")
+                    if base:
+                        cell_html[(k, traf_i)] = base + chip
+                    else:
+                        cell_html[(k, traf_i)] = _cell_split(r[traf_i]) + chip
+
+    groups = _tgid_groups(nhdr)
+    div_cols = _band_divider_cols(groups, len(nhdr)) if groups else set()
+    pill = (f'<div class="ceh-class">CE classification: {cls_label}'
+            f' <span style="font-weight:400;color:#5a6478;">— {cls_note}</span></div>')
+
+    table = styled_table(nhdr, nrows, sticky_cols=2, sticky_widths=[64, 210],
+                         split_deltas=True, groups=groups, div_cols=div_cols,
+                         row_classes=row_classes, cell_classes=cell_classes,
+                         cell_html=cell_html)
+    note = ('<p style="font-size:11px;color:#888;margin-top:6px;">Green rows = TGIDs '
+            'making up ~80% of revenue (sorted by Share). CR&lt;80% flagged red; S2C/C2O/S2O '
+            'on a colour scale. S2O is a presentation-derived approximation (S2C×C2O), '
+            'pending an exact engine figure (Wave B).</p>')
+    return pill + table + note
+
+
+def build_tgid_leadtime(hdr, rows):
+    """Separate 'TGID × Lead-time mix' table: identity cols + the %0-2D/%3-7D/%7D+
+    buckets only. '' if no lead-time columns present."""
+    lead_idx = [i for i, h in enumerate(hdr)
+                if any(ln in h.strip().lower() for ln in ('0-2d', '3-7d', '7d+'))]
+    if not lead_idx:
+        return ""
+    # Keep TGID + Experience identity columns up front.
+    id_idx = [i for i, h in enumerate(hdr)
+              if 'tgid' in h.strip().lower() or 'experience' in h.strip().lower()]
+    cols = id_idx + lead_idx
+    nhdr = [hdr[i] for i in cols]
+    nrows = [[r[i] if i < len(r) else "" for i in cols] for r in rows]
+    return styled_table(nhdr, nrows, sticky_cols=min(2, len(id_idx)),
+                        sticky_widths=[64, 210], split_deltas=True)
+
+
+def build_funnel_cards(hdr, rows, period_label="MoM"):
+    """4 KPI cards from the §4 funnel table: LP2S · S2C · C2O · LP Users, period Δ
+    (current vs prior columns). `period_label` is the window-agnostic delta label
+    ("MoM" for a calendar month, else "vs prior"). '' if expected stages aren't found."""
+    cur_i, pri_i = 1, 2  # 'Apr06-Jun04' (current) and 'Feb05-Apr05' (prior)
+    by = {}
+    for r in rows:
+        if not r:
+            continue
+        by[r[0].strip().strip("*").lower()] = r
+    if not by:
+        return ""
+
+    def _card_pct(name, label):
+        r = by.get(name)
+        if not r or pri_i >= len(r):
+            return ""
+        cv, pv = numparse(r[cur_i]), numparse(r[pri_i])
+        if cv is None:
+            return ""
+        if pv is not None:
+            dtxt, dcls = pp_delta(cv, pv)
+            dtxt = f"Δ {dtxt} {period_label}"
+        else:
+            dtxt, dcls = "", "delta-flat"
+        return card(label, f"{cv:.1f}%", dtxt, dcls, f"{pv:.1f}%" if pv is not None else None)
+
+    def _card_users(name, label):
+        r = by.get(name)
+        if not r or pri_i >= len(r):
+            return ""
+        cv, pv = numparse(r[cur_i]), numparse(r[pri_i])
+        if cv is None:
+            return ""
+        dtxt, dcls = (pct_delta(cv, pv) if pv else ("", "delta-flat"))
+        dtxt = f"Δ {dtxt} {period_label}" if dtxt else ""
+
+        def _fmt(v):
+            return f"{v/1000:.0f}K" if v >= 1000 else f"{v:.0f}"
+        return card(label, _fmt(cv), dtxt, dcls, _fmt(pv) if pv else None)
+
+    cards = "".join([
+        _card_pct("lp2s", "LP2S"),
+        _card_pct("s2c", "S2C"),
+        _card_pct("c2o", "C2O"),
+        _card_users("lp users", "LP Users"),
+    ])
+    if not cards.strip():
+        return ""
+    return f'<div class="metric-cards" style="grid-template-columns:repeat(4,1fr);">{cards}</div>'
+
+
 def build_fragment(run_dir: Path) -> str:
     d = json.loads((run_dir / "ce_health_report.json").read_text())
     md = (run_dir / "ce_health_report.md").read_text()
     V, W = d["vitals"], d["windows"]
     cur, pri = V["current"], V["prior"]
 
+    # Window-agnostic delta label: a calendar-month run is MoM; any custom window
+    # gets the neutral "vs prior" (the literal "MoM" is wrong for custom ranges).
+    # Used on the vitals cards, the funnel cards, and the vitals note. Date-driven
+    # bits (columns / Shapley / 4-window table) already carry their own dates.
+    period_label = "MoM" if d.get("range") == "month" else "vs prior"
+
     # §2 — vitals metric cards (TM = post, LM = pre, Δ MoM). Revenue card uses
     # CE Health's normalised revenue (matches the §2 table); §7 decomposes booking.
     rev_d = pct_delta(cur["revenue"], pri["revenue"]); roi_d = pp_delta(cur["roi_1"], pri["roi_1"])
     tr_d = pp_delta(cur["tr"], pri["tr"]); cr_d = pp_delta(cur["cr"], pri["cr"])
     aov_d = pct_delta(cur["aov"], pri["aov"]); ord_d = pct_delta(cur["orders"], pri["orders"])
+    # Card order (Wave A): Revenue · Orders · AOV · Take Rate · Completion · ROI. Tunable.
     cards = "".join([
-        card("Revenue", money(cur["revenue"]), f"Δ {rev_d[0]} MoM", rev_d[1], money(pri["revenue"])),
-        card("ROI(1)", f"{cur['roi_1']:.0f}%", f"Δ {roi_d[0]} MoM", roi_d[1], f"{pri['roi_1']:.0f}%"),
-        card("Take Rate", f"{cur['tr']:.1f}%", f"Δ {tr_d[0]} MoM", tr_d[1], f"{pri['tr']:.1f}%"),
-        card("Completion", f"{cur['cr']:.1f}%", f"Δ {cr_d[0]} MoM", cr_d[1], f"{pri['cr']:.1f}%"),
-        card("AOV", f"${cur['aov']:.0f}", f"Δ {aov_d[0]} MoM", aov_d[1], f"${pri['aov']:.0f}"),
-        card("Orders", f"{cur['orders']:,}", f"Δ {ord_d[0]} MoM", ord_d[1], f"{pri['orders']:,}"),
+        card("Revenue", money(cur["revenue"]), f"Δ {rev_d[0]} {period_label}", rev_d[1], money(pri["revenue"])),
+        card("Orders", f"{cur['orders']:,}", f"Δ {ord_d[0]} {period_label}", ord_d[1], f"{pri['orders']:,}"),
+        card("AOV", f"${cur['aov']:.0f}", f"Δ {aov_d[0]} {period_label}", aov_d[1], f"${pri['aov']:.0f}"),
+        card("Take Rate", f"{cur['tr']:.1f}%", f"Δ {tr_d[0]} {period_label}", tr_d[1], f"{pri['tr']:.1f}%"),
+        card("Completion", f"{cur['cr']:.1f}%", f"Δ {cr_d[0]} {period_label}", cr_d[1], f"{pri['cr']:.1f}%"),
+        card("ROI(1)", f"{cur['roi_1']:.0f}%", f"Δ {roi_d[0]} {period_label}", roi_d[1], f"{pri['roi_1']:.0f}%"),
     ])
     rev_norm_pct = pct_delta(cur["revenue"], pri["revenue"])[0]
     book_cur, book_pri = cur.get("revenue_actual"), pri.get("revenue_actual")
     book_pct = pct_delta(book_cur, book_pri)[0] if (book_cur and book_pri) else ""
     vit_note = (
         '<p style="font-size:12px;color:#777;margin-top:10px;">Note: the '
-        f'<strong>Revenue</strong> row/card is CE Health\'s normalised figure '
-        f'({money(cur["revenue"])}, {rev_norm_pct} MoM). The Driver Diagnosis (§7) '
-        f'decomposes <strong>booking revenue</strong> (revenue_actual'
-        + (f', {money(book_cur)}, {book_pct}' if book_cur else '')
-        + ') — the figure the 6-factor identity reconstructs.</p>'
+        f'<strong>Revenue</strong> row/card is <strong>Predicted Revenue</strong> '
+        f'({money(cur["revenue"])}, {rev_norm_pct} {period_label}). The Driver Diagnosis (§7) '
+        f'decomposes <strong>Actual Revenue</strong>'
+        + (f' ({money(book_cur)}, {book_pct})' if book_cur else '')
+        + '.</p>'
     )
 
     # §1 Metadata → header pills (rendered by compose.build_header). No block here.
 
-    # §2 — cards + full 4-window table
+    # §7 Shapley decomposition is computed ONCE here (before §2) so the primary driver
+    # for the vitals annotation comes from the corrected 6-factor decomposition, not
+    # the largest vitals Δ. The same `raw` is reused by build_shapley_block below —
+    # we never double-query. On any Query-1 failure, `shap_raw` stays None and the
+    # vitals render with NO primary-driver note (and §7 falls back to verbatim).
+    ce_id = d.get("ce_id") or d.get("metadata", {}).get("combined_entity_id")
+    shap_raw = None
+    shap_contrib = None
+    try:
+        shap_raw = query_raw(str(ce_id), W)
+        shap_contrib = _decompose(_facs(shap_raw["pre"]), _facs(shap_raw["post"]))
+    except Exception as e:  # noqa: BLE001 — any failure → no driver note + verbatim §7
+        print(f"WARN: Query 1 failed ({e}); no primary-driver note, §7 verbatim.", file=sys.stderr)
+
+    # §2 — cards + full 4-window table. The primary driver is the Shapley factor with
+    # the largest |contribution|; if it maps to a vitals row, bold/mark that row.
     vh, vr = tables_in(section(md, "CE Vitals"))[0]
-    s2 = block("2. CE Vitals", "cehealth-vitals",
+    v_rowcls = [''] * len(vr)
+    v_cellhtml = {}
+    driver_note = ""
+    if shap_contrib:
+        td = shapley_top_driver(shap_contrib)
+        if td:
+            fac, amt = td
+            sign = "+" if amt >= 0 else "−"
+            driver_note = (
+                '<p style="font-size:12.5px;color:#3a4a6a;background:#f4f6fb;'
+                'border-left:3px solid #6c8ebf;border-radius:4px;padding:8px 12px;'
+                'margin:8px 0 0;"><strong>Primary driver (Shapley):</strong> '
+                f'{_html.escape(_FLBL[fac])} ({sign}{money(abs(amt))})</p>')
+            pm_k = shapley_top_vitals_row(vh, vr, fac)
+            if pm_k is not None and pm_k < len(vr):
+                v_rowcls[pm_k] = 'highlight-row'
+                nm = vr[pm_k][0].strip().strip("*")
+                v_cellhtml[(pm_k, 0)] = (f'<strong>{_html.escape(nm)}</strong>'
+                                         '<span class="ceh-prime">primary driver</span>')
+    s2 = block("1. CE Vitals", "cehealth-vitals",
                f'<div class="metric-cards" style="grid-template-columns:repeat(6,1fr);">{cards}</div>'
-               + _subhead("Full 4-window comparison") + styled_table(vh, vr, split_deltas=True) + vit_note)
+               + _subhead("Full 4-window comparison")
+               + styled_table(vh, vr, split_deltas=True, row_classes=v_rowcls, cell_html=v_cellhtml)
+               + driver_note
+               + vit_note)
 
-    # §3 Channel Breakdown — ALL rows (Δ columns coloured up/down/flat)
-    s3 = block("3. Channel Breakdown", "cehealth-channels",
-               styled_table(*tables_in(section(md, "Channel Breakdown"))[0], split_deltas=True))
+    # §3 Channel Breakdown — Revenue + Share moved to the LEFT (current state first),
+    # rule-based benchmark flags on Share, deterministic 2–3 line collapsed summary.
+    ch_h, ch_r = tables_in(section(md, "Channel Breakdown"))[0]
+    sh_i = _col_idx(ch_h, "share")
+    rev_i = _col_idx(ch_h, "rev")
+    if sh_i >= 0 and rev_i >= 0:
+        # New order: name (0), Rev, Share, then everything else in original order.
+        lead = [0, rev_i, sh_i]
+        rest = [i for i in range(len(ch_h)) if i not in lead]
+        order = lead + rest
+        ch_h = [ch_h[i] for i in order]
+        ch_r = [[r[i] if i < len(r) else "" for i in order] for r in ch_r]
+        new_sh_i = 2  # Share is now column index 2
+    else:
+        new_sh_i = sh_i
+    ch_chips, ch_summary = channel_flags_and_summary(ch_h, ch_r)
+    ch_cellhtml = {}
+    for k, chip in ch_chips.items():
+        if k < len(ch_r) and new_sh_i >= 0 and new_sh_i < len(ch_r[k]):
+            ch_cellhtml[(k, new_sh_i)] = _cell_split(ch_r[k][new_sh_i]) + chip
+    s3 = block("4. Channel Breakdown", "cehealth-channels",
+               styled_table(ch_h, ch_r, split_deltas=True, cell_html=ch_cellhtml),
+               summary=ch_summary or None)
 
-    # §4 Funnel — all rows
-    s4 = block("4. Funnel", "cehealth-funnel", styled_table(*tables_in(section(md, "Funnel"))[0], split_deltas=True))
+    # §4 Funnel — 4 KPI cards (MoM Δ) on top, then the 4-window table as YoY detail,
+    # then the §10 Landing Pages table folded in as a funnel lens.
+    fn_h, fn_r = tables_in(section(md, "Funnel"))[0]
+    fn_cards = build_funnel_cards(fn_h, fn_r, period_label)
+    # Flag a materially-off step on the 4-window table: largest negative MoM Δ among
+    # the rate stages (LP2S/S2C/C2O) gets a red chip.
+    fn_di = _col_idx(fn_h, "vs prior")
+    fn_cellhtml = {}
+    worst_k, worst_v = None, 0.0
+    for k, r in enumerate(fn_r):
+        nm = r[0].strip().strip("*").lower()
+        if nm in ("lp2s", "s2c", "c2o") and fn_di >= 0 and fn_di < len(r):
+            m = re.search(r'[+\-−]?[\d.,]+', r[fn_di].replace('−', '-'))
+            if m:
+                try:
+                    v = float(m.group().replace(',', ''))
+                except ValueError:
+                    continue
+                if v < worst_v:
+                    worst_v, worst_k = v, k
+    if worst_k is not None and worst_v < -1.0:  # > 1pp drop below prior is materially off
+        fn_cellhtml[(worst_k, 0)] = (f'<strong>{_html.escape(fn_r[worst_k][0].strip())}</strong>'
+                                     + _flag_chip("bad", f"↓ {abs(worst_v):.1f}pp vs prior"))
+    lp_h, lp_r = tables_in(section(md, "Landing Pages"))[0]
+    # Truncate the URL column with ellipsis but expose the full URL on hover. Landing
+    # URLs are full in the source (unlike experience names, which are truncated at
+    # source), so this genuinely helps. URL is the first column ("Page URL").
+    lp_url_i = _col_idx(lp_h, "url", "page")
+    if lp_url_i < 0:
+        lp_url_i = 0
+    lp_cellhtml = {}
+    for k, r in enumerate(lp_r):
+        if lp_url_i < len(r):
+            u = r[lp_url_i].strip().strip("*")
+            if u and u.upper() != "TOTAL":
+                lp_cellhtml[(k, lp_url_i)] = (f'<span class="ceh-lpurl" title="{_html.escape(u)}">'
+                                              f'{_cell(u)}</span>')
+    # Funnel-by-dimension dropdown: Landing page (existing) + Channel + Language
+    # (new engine cuts). Each is a panel; the <select> switches between them.
+    fdim_panels = [("landing", "Landing page",
+                    styled_table(lp_h, lp_r, split_deltas=True, cell_html=lp_cellhtml))]
+    _ch_t = tables_in(section(md, "Funnel by Channel"))
+    if _ch_t:
+        fdim_panels.append(("channel", "Channel", styled_table(*_ch_t[0], split_deltas=True)))
+    _lg_t = tables_in(section(md, "Funnel by Language"))
+    if _lg_t:
+        fdim_panels.append(("language", "Language", styled_table(*_lg_t[0], split_deltas=True)))
+    s4_inner = (fn_cards
+                + _subhead("4-window detail (YoY)")
+                + styled_table(fn_h, fn_r, split_deltas=True, cell_html=fn_cellhtml)
+                + _subhead("Funnel by dimension")
+                + build_fdim_dropdown(fdim_panels))
+    s4 = block("5. Funnel", "cehealth-funnel", s4_inner)
 
-    # §5 L12M Trajectory — charts replace the two monthly tables (same data)
-    l12 = section(md, "L12M Trajectory")
-    t_health, t_paid = tables_in(l12)[0], tables_in(l12)[1]
+    # §5 Multi-Year Trajectory — charts replace the two monthly tables (same data),
+    # plus a YoY pivot (Predicted Revenue, month × year) rendered beneath the chart.
+    l12 = section(md, "Trajectory")
+    _l12_tables = tables_in(l12)
+    t_health, t_paid = _l12_tables[0], _l12_tables[-1]
     hr = t_health[1]; months = [r[0] for r in hr]
     rev = [numparse(r[1]) for r in hr]; orders = [numparse(r[2]) for r in hr]
+    # Per-month metric strings for the enriched hover (Revenue·Orders·ROI·TR·CR·AOV —
+    # all already in the monthly table). customdata feeds the hovertemplate.
+    h_custom = [[r[1] if len(r) > 1 else "", r[2] if len(r) > 2 else "",
+                 r[3] if len(r) > 3 else "", r[4] if len(r) > 4 else "",
+                 r[5] if len(r) > 5 else "", r[6] if len(r) > 6 else ""] for r in hr]
+    rev_hover = ("<b>%{x}</b><br>Revenue %{customdata[0]}<br>Orders %{customdata[1]}"
+                 "<br>ROI %{customdata[2]}<br>TR %{customdata[3]}<br>CR %{customdata[4]}"
+                 "<br>AOV %{customdata[5]}<extra></extra>")
     pr_ = t_paid[1]; clicks = [numparse(r[3]) for r in pr_]; paidroi = [numparse(r[6]) for r in pr_]
     c_rev = ('<div id="chart-cehealth-l12m-rev" class="chart-container" style="width:100%"></div>'
-             f'''<script>Plotly.newPlot('chart-cehealth-l12m-rev',[{{type:'bar',name:'Revenue',x:{json.dumps(months)},y:{json.dumps(rev)},marker:{{color:'#6c8ebf'}}}},{{type:'scatter',mode:'lines+markers',name:'Orders',x:{json.dumps(months)},y:{json.dumps(orders)},line:{{color:'#c62828',width:2}},yaxis:'y2'}}],{{height:300,autosize:true,margin:{{l:62,r:55,t:14,b:55}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},legend:{{orientation:'h',y:-0.25}},yaxis:{{title:'Revenue',tickprefix:'$',gridcolor:'#eef'}},yaxis2:{{title:'Orders',overlaying:'y',side:'right',showgrid:false}}}},{{responsive:true,displayModeBar:false}});</script>''')
+             f'''<script>Plotly.newPlot('chart-cehealth-l12m-rev',[{{type:'bar',name:'Revenue',x:{json.dumps(months)},y:{json.dumps(rev)},customdata:{json.dumps(h_custom)},hovertemplate:{json.dumps(rev_hover)},marker:{{color:'#6c8ebf'}}}},{{type:'scatter',mode:'lines+markers',name:'Orders',x:{json.dumps(months)},y:{json.dumps(orders)},customdata:{json.dumps(h_custom)},hovertemplate:{json.dumps(rev_hover)},line:{{color:'#c62828',width:2}},yaxis:'y2'}}],{{height:300,autosize:true,margin:{{l:62,r:55,t:14,b:55}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},legend:{{orientation:'h',y:-0.25}},yaxis:{{title:'Revenue',tickprefix:'$',gridcolor:'#eef'}},yaxis2:{{title:'Orders',overlaying:'y',side:'right',showgrid:false}}}},{{responsive:true,displayModeBar:false}});</script>''')
     c_paid = ('<div id="chart-cehealth-l12m-paid" class="chart-container" style="width:100%"></div>'
               f'''<script>Plotly.newPlot('chart-cehealth-l12m-paid',[{{type:'bar',name:'Clicks',x:{json.dumps(months)},y:{json.dumps(clicks)},marker:{{color:'#90a4d4'}}}},{{type:'scatter',mode:'lines+markers',name:'Paid ROI %',x:{json.dumps(months)},y:{json.dumps(paidroi)},line:{{color:'#43A047',width:2}},yaxis:'y2'}}],{{height:300,autosize:true,margin:{{l:62,r:55,t:14,b:55}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},legend:{{orientation:'h',y:-0.25}},yaxis:{{title:'Clicks',gridcolor:'#eef'}},yaxis2:{{title:'Paid ROI %',overlaying:'y',side:'right',showgrid:false,ticksuffix:'%'}}}},{{responsive:true,displayModeBar:false}});</script>''')
-    s5 = block("5. L12M Trajectory", "cehealth-l12m",
-               _subhead("CE Health (Monthly)") + c_rev + _subhead("Paid Performance (Monthly)") + c_paid
-               + '<p style="font-size:12px;color:#777;margin-top:8px;">Charts visualise CE Health\'s '
-               'monthly tables (same data). The full monthly tables remain in the CE Health source.</p>')
+    # Year-overlay charts: group monthly YYYY-MM data into one trace per calendar year,
+    # x = month-of-year (Jan…Dec) so years align seasonally. Replaces the old YoY pivot table.
+    _MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    _COLORS = ["#6c8ebf", "#43A047", "#c62828", "#8e44ad", "#f39c12", "#16a085"]
 
-    # §6 Top TGIDs — ALL rows, first two cols (TGID, Experience) frozen on scroll,
-    # in-cell deltas split into value+coloured-delta, grouped header bands.
+    def yoy_chart(cid, title, ytitle, mkeys, vals, tickprefix="", ticksuffix="",
+                  cmap=None, hovertemplate=None):
+        # mkeys: list of "YYYY-MM"; vals: parallel list of numbers (Nones skipped).
+        # cmap: optional {mkey: [customdata...]} for an enriched per-point hover.
+        by_year = {}
+        cust_by_year = {}
+        for mk, v in zip(mkeys, vals):
+            if v is None or "-" not in str(mk):
+                continue
+            y, m = str(mk).split("-")[:2]
+            try:
+                mi = int(m)
+            except ValueError:
+                continue
+            by_year.setdefault(y, {})[mi] = v
+            if cmap is not None:
+                cust_by_year.setdefault(y, {})[mi] = cmap.get(str(mk), [])
+        if not by_year:
+            return ""  # no monthly data — skip gracefully
+        traces = []
+        for i, y in enumerate(sorted(by_year)):
+            pts = by_year[y]
+            xs = [_MN[mi - 1] for mi in sorted(pts)]
+            ys = [pts[mi] for mi in sorted(pts)]
+            tr = {"type": "scatter", "mode": "lines+markers", "name": y,
+                  "x": xs, "y": ys, "line": {"shape": "spline", "width": 2,
+                  "color": _COLORS[i % len(_COLORS)]}, "marker": {"size": 5}}
+            if cmap is not None and hovertemplate:
+                cy = cust_by_year.get(y, {})
+                tr["customdata"] = [cy.get(mi, []) for mi in sorted(pts)]
+                tr["hovertemplate"] = hovertemplate
+            traces.append(tr)
+        return (f'<div id="{cid}" class="chart-container" style="width:100%"></div>'
+                f'''<script>Plotly.newPlot('{cid}',{json.dumps(traces)},{{height:320,autosize:true,'''
+                f'''title:{json.dumps(title)},margin:{{l:62,r:30,t:32,b:55}},plot_bgcolor:'#fff',paper_bgcolor:'#fff','''
+                f'''font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},legend:{{orientation:'h',y:-0.2}},'''
+                f'''xaxis:{{categoryorder:'array',categoryarray:{json.dumps(_MN)}}},'''
+                f'''yaxis:{{title:{json.dumps(ytitle)},tickprefix:{json.dumps(tickprefix)},ticksuffix:{json.dumps(ticksuffix)},gridcolor:'#eef'}}}},'''
+                f'''{{responsive:true,displayModeBar:false}});</script>''')
+
+    # Enriched YoY hovers built from the same monthly table rows as the linear charts.
+    # Revenue YoY: reuse the health-table per-month metrics (Revenue·Orders·ROI·TR·CR·AOV).
+    rev_cmap = {r[0]: [r[1] if len(r) > 1 else "", r[2] if len(r) > 2 else "",
+                       r[3] if len(r) > 3 else "", r[4] if len(r) > 4 else "",
+                       r[5] if len(r) > 5 else "", r[6] if len(r) > 6 else ""] for r in hr}
+    yoy_rev_hover = ("<b>%{x} %{data.name}</b><br>Revenue %{customdata[0]}<br>Orders %{customdata[1]}"
+                     "<br>ROI %{customdata[2]}<br>TR %{customdata[3]}<br>CR %{customdata[4]}"
+                     "<br>AOV %{customdata[5]}<extra></extra>")
+    yoy_html = yoy_chart("chart-cehealth-yoy-rev", "Revenue YoY", "Revenue",
+                         months, rev, tickprefix="$",
+                         cmap=rev_cmap, hovertemplate=yoy_rev_hover)
+    # CVR lives in the paid table (column index 4, e.g. "3.1%"); show CVR + clicks/paid-ROI context.
+    cvr_keys = [r[0] for r in pr_]; cvr_vals = [numparse(r[4]) if len(r) > 4 else None for r in pr_]
+    cvr_cmap = {r[0]: [r[4] if len(r) > 4 else "", r[3] if len(r) > 3 else "",
+                       r[6] if len(r) > 6 else ""] for r in pr_}
+    yoy_cvr_hover = ("<b>%{x} %{data.name}</b><br>CVR %{customdata[0]}"
+                     "<br>Clicks %{customdata[1]}<br>Paid ROI %{customdata[2]}<extra></extra>")
+    yoy_html += yoy_chart("chart-cehealth-yoy-cvr", "CVR YoY", "CVR %",
+                          cvr_keys, cvr_vals, ticksuffix="%",
+                          cmap=cvr_cmap, hovertemplate=yoy_cvr_hover)
+    # "(new)" pill when history is thin (no LY) — engine emits has_ly/history_months.
+    new_pill = "" if d.get("has_ly", True) else '<span class="ceh-new">new</span>'
+    # Linear ↔ YoY view toggle so the 4 charts aren't stacked. Default = Linear.
+    # A Plotly chart in a display:none container has zero width until shown, so the
+    # toggle script must resize each .js-plotly-plot in the newly-shown group
+    # (mirrors the on-load resize script).
+    traj_style = ('<style>.ceh-traj{display:none}.ceh-traj.active{display:block}'
+                  '.ceh-traj-toggle{display:inline-flex;gap:4px;margin:0 0 12px;border:1px solid #d6d6e0;'
+                  'border-radius:6px;overflow:hidden}.ceh-traj-toggle label{font-size:12px;padding:5px 12px;'
+                  'cursor:pointer;color:#555;background:#f6f6fa;user-select:none}'
+                  '.ceh-traj-toggle label:has(input:checked){background:#6c8ebf;color:#fff}'
+                  '.ceh-traj-toggle input{position:absolute;opacity:0;pointer-events:none}</style>')
+    traj_toggle = ('<div class="ceh-traj-toggle">'
+                   '<label><input type="radio" name="ceh-traj-view" value="linear" checked>Linear trajectory</label>'
+                   '<label><input type="radio" name="ceh-traj-view" value="yoy">YoY comparison</label>'
+                   '</div>')
+    traj_script = ("<script>(function(){var t=document.getElementById('tab-cehealth');if(!t)return;"
+                   "t.addEventListener('change',function(e){var i=e.target;"
+                   "if(!i||i.name!=='ceh-traj-view')return;"
+                   "t.querySelectorAll('.ceh-traj-linear').forEach(function(g){"
+                   "g.classList.toggle('active',i.value==='linear');});"
+                   "t.querySelectorAll('.ceh-traj-yoy').forEach(function(g){"
+                   "g.classList.toggle('active',i.value==='yoy');});"
+                   "var sel=i.value==='yoy'?'.ceh-traj-yoy':'.ceh-traj-linear';"
+                   "if(window.Plotly)t.querySelectorAll(sel+' .js-plotly-plot').forEach(function(el){"
+                   "try{window.Plotly.Plots.resize(el);}catch(err){}});});})();</script>")
+    traj_body = (traj_toggle
+                 + '<div class="ceh-traj ceh-traj-linear active">'
+                 + _subhead("CE Health (Monthly)") + c_rev
+                 + _subhead("Paid Performance (Monthly)") + c_paid + '</div>'
+                 + '<div class="ceh-traj ceh-traj-yoy">' + yoy_html + '</div>'
+                 + traj_script)
+    s5 = block("2. Revenue Trajectory" + (" " if new_pill else ""), "cehealth-l12m",
+               (traj_style + new_pill + traj_body
+                + '<p style="font-size:12px;color:#777;margin-top:8px;">Charts visualise CE Health\'s '
+                'monthly tables (same data). The full monthly tables remain in the CE Health source.</p>'))
+
+    # §6 Top TGIDs — single main table (Order/Funnel groups + blue dividers, RPC in
+    # Funnel, 80%-concentration green, classification pill, CR<80% / S2C / C2O
+    # conditional formatting, derived-S2O flag), plus a SEPARATE TGID × Lead-time mix
+    # table below, plus the §9 CE-level lead-time cohorts (its own collapsible block).
     tg = tables_in(section(md, "Top TGIDs"))[0]
-    s6 = block("6. Top TGIDs", "cehealth-tgids",
-               styled_table(tg[0], tg[1], sticky_cols=2, sticky_widths=[64, 210],
-                            split_deltas=True, groups=_tgid_groups(tg[0])))
-
-    # §7 Driver Diagnosis (Shapley) — corrected 6-factor waterfall (Query 1).
-    # On any Query-1 failure, fall back to CE Health's §7 table, verbatim.
-    ce_id = d.get("ce_id") or d.get("metadata", {}).get("combined_entity_id")
     try:
-        raw = query_raw(str(ce_id), W)
-        s7 = build_shapley_block(raw, W)
+        tgid_main = build_tgid_main(tg[0], tg[1])
+        tgid_lead = build_tgid_leadtime(tg[0], tg[1])
+    except Exception as e:  # noqa: BLE001 — never emit a broken table
+        print(f"WARN: TGID enrichment failed ({e}); plain table fallback.", file=sys.stderr)
+        tgid_main = styled_table(tg[0], tg[1], sticky_cols=2, sticky_widths=[64, 210],
+                                 split_deltas=True, groups=_tgid_groups(tg[0]))
+        tgid_lead = ""
+    s6_inner = tgid_main
+    if tgid_lead:
+        s6_inner += _subhead("TGID × Lead-time mix") + tgid_lead
+    s6 = block("6. Top TGIDs", "cehealth-tgids", s6_inner)
+
+    # Vendor Breakdown — supply/sales landscape, right after TGID. Two-line
+    # value+delta cells (MoM revenue Δ); graceful: empty string if absent.
+    _vb = tables_in(section(md, "Vendor Breakdown"))
+    s_vendor = (block("7. Vendor Breakdown", "cehealth-vendors",
+                      styled_table(*_vb[0], split_deltas=True))
+                if _vb else "")
+
+    # §7 Driver Diagnosis (Shapley) — corrected 6-factor waterfall, reusing the
+    # `shap_raw` already pulled above (no double-query). On any Query-1 failure
+    # (shap_raw is None), fall back to CE Health's §7 table, verbatim.
+    if shap_raw is not None:
+        s7 = build_shapley_block(shap_raw, W)
         print("§7 Shapley: corrected 6-factor waterfall (Query 1 OK)")
-    except Exception as e:  # noqa: BLE001 — any failure → verbatim fallback
-        print(f"WARN: Query 1 failed ({e}); rendering CE Health's §7 table verbatim.", file=sys.stderr)
+    else:
+        print("WARN: Query 1 unavailable; rendering CE Health's §7 table verbatim.", file=sys.stderr)
         sec7 = section(md, "Driver Diagnosis")
         tbls = tables_in(sec7)
         inner = styled_table(*tbls[0], split_deltas=True) if tbls else f'<div class="md-content">{render_markdown_to_html(sec7)}</div>'
-        s7 = block("7. Driver Diagnosis (Shapley)", "cehealth-shapley", inner)
+        s7 = block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner)
 
     # §8 Historical Context — CE Health's markdown, plus our institutional memory
     # (prior RCAs for this CE) and any user-provided context captured this run.
@@ -675,18 +1519,19 @@ def build_fragment(run_dir: Path) -> str:
     if not inner.strip():  # first-ever run, no Slack, no context → don't show an empty card
         inner = ('<div class="md-content"><p style="color:#8a8a8a;">'
                  'No prior RCAs or added context for this CE yet.</p></div>')
-    s8 = block("8. Historical Context", "cehealth-history", inner)
+    s8 = block("9. Historical Context", "cehealth-history", inner)
 
-    # §9 Lead Time Cohorts — all rows
-    s9 = block("9. Lead Time Cohorts", "cehealth-leadtime",
-               styled_table(*tables_in(section(md, "Lead Time Cohorts"))[0], split_deltas=True))
+    # §9 Lead Time Cohorts — all rows + rule-based dominant-band callout (collapsed).
+    lt_h, lt_r = tables_in(section(md, "Lead Time Cohorts"))[0]
+    lt_summary = leadtime_summary(lt_h, lt_r)
+    s9 = block("8. Lead Time Cohorts", "cehealth-leadtime",
+               styled_table(lt_h, lt_r, split_deltas=True),
+               summary=lt_summary or None)
 
-    # §10 Landing Pages — ALL rows
-    s10 = block("10. Landing Pages", "cehealth-landing",
-                styled_table(*tables_in(section(md, "Landing Pages"))[0], split_deltas=True))
+    # §10 Landing Pages — folded into the Funnel block (§4) as a funnel lens.
 
     # §11 Customer Countries — ALL rows
-    s11 = block("11. Customer Countries", "cehealth-countries",
+    s11 = block("10. Customer Countries", "cehealth-countries",
                 styled_table(*tables_in(section(md, "Customer Countries"))[0], split_deltas=True))
 
     footer = (f'<footer style="text-align:center;font-size:12px;color:#aaa;padding:18px;">'
@@ -694,11 +1539,39 @@ def build_fragment(run_dir: Path) -> str:
     resize = ("<script>window.addEventListener('load',function(){setTimeout(function(){"
               "if(window.Plotly)document.querySelectorAll('#tab-cehealth .js-plotly-plot')"
               ".forEach(function(el){try{window.Plotly.Plots.resize(el);}catch(e){}});},200);});</script>")
+
+    # Page order (Wave A): Vitals → Revenue trajectory → Channels → Funnel (Landing
+    # folded in) → TGID (+ TGID×lead-time) → Lead-time cohorts → Historical → Driver
+    # diagnosis → Customer countries.
+    ordered = [
+        ("cehealth-vitals", s2),
+        ("cehealth-l12m", s5),
+        ("cehealth-shapley", s7),
+        ("cehealth-channels", s3),
+        ("cehealth-funnel", s4),
+        ("cehealth-tgids", s6),
+        ("cehealth-vendors", s_vendor),
+        ("cehealth-leadtime", s9),
+        ("cehealth-history", s8),
+        ("cehealth-countries", s11),
+    ]
+    # Apply the default-open set centrally: collapse every block NOT in
+    # CEH_DEFAULT_OPEN by injecting the collapsed class + flipping aria-expanded.
+    def _maybe_collapse(bid, frag):
+        if bid in CEH_DEFAULT_OPEN:
+            return frag
+        frag = frag.replace(f'<div class="analysis-block" id="{bid}">',
+                            f'<div class="analysis-block ceh-collapsed" id="{bid}">', 1)
+        frag = frag.replace('class="ceh-toggle" aria-expanded="true"',
+                            'class="ceh-toggle" aria-expanded="false"', 1)
+        return frag
+    body = "".join(_maybe_collapse(bid, frag) for bid, frag in ordered if frag)
+
     # Widen the CE Health tab beyond the 1050px .container so the wide tables
     # (TGIDs, Channels, Landing) are readable. Centered breakout.
     open_div = '<div style="width:min(1280px,95vw);margin-left:50%;transform:translateX(-50%);">'
-    return (CEH_TABLE_STYLE + open_div + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9 + s10 + s11
-            + footer + '</div>' + resize)
+    return (CEH_TABLE_STYLE + CEH_COLLAPSE_STYLE + open_div + body
+            + footer + '</div>' + CEH_COLLAPSE_SCRIPT + CEH_FDIM_STYLE + CEH_FDIM_SCRIPT + resize)
 
 
 def main():

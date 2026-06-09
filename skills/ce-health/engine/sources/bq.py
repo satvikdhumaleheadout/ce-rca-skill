@@ -359,13 +359,15 @@ def fetch_channel_breakdown(
     }
 
 
-def _fetch_monthly_summary(ce_id):
-    # type: (int) -> List[Dict[str, Any]]
-    """L12M monthly aggregate for snapshot trajectory analysis.
+def _fetch_monthly_summary(ce_id, months=36):
+    # type: (int, int) -> List[Dict[str, Any]]
+    """Multi-year monthly aggregate for snapshot trajectory analysis.
 
     Returns CE-level (Table 1) and paid-level (Table 2) metrics per month
     using the validated Omni-matched formulas. Feeds the snapshot analysis
     with trajectory context: "ROI declined from 185% (Nov) → 148% (now)."
+
+    Lookback defaults to 36 months (combined_entity_stats has data since 2015).
     """
     query = """
     WITH ce_monthly AS (
@@ -387,7 +389,7 @@ def _fetch_monthly_summary(ce_id):
                 + sum_affiliate_commission) AS gross_marketing_cost
         FROM `{project}.{dataset}.combined_entity_stats`
         WHERE combined_entity_id = '{ce_id}'
-            AND report_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)
+            AND report_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {months} MONTH)
                 AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
         GROUP BY 1
     ),
@@ -411,7 +413,7 @@ def _fetch_monthly_summary(ce_id):
             SUM(sum_coupon_and_wallet_credits) AS coupon_wallet
         FROM `{project}.{dataset}.ads_campaign_stats`
         WHERE campaign_target_combined_entity_id = '{ce_id}'
-            AND report_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)
+            AND report_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {months} MONTH)
                 AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
             AND ad_platform IN ('Google Ads', 'Microsoft Ads')
         GROUP BY 1
@@ -425,7 +427,7 @@ def _fetch_monthly_summary(ce_id):
             SUM(sum_conversion_value * COALESCE(revenue_percentage, 0.25)) AS cm1
         FROM `{project}.{dataset}.google_ads_pmax_asset_stats`
         WHERE combined_entity_id = '{ce_id}'
-            AND date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)
+            AND date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {months} MONTH)
                 AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
         GROUP BY 1
     )
@@ -460,6 +462,7 @@ def _fetch_monthly_summary(ce_id):
         project=PROJECT_ID,
         dataset=DATASET,
         ce_id=ce_id,
+        months=months,
     )
 
     results = run_bq_query(query)
@@ -469,6 +472,55 @@ def _fetch_monthly_summary(ce_id):
         )
         return []
     return results
+
+
+def fetch_monthly_cvr(ce_id, months=36):
+    # type: (int, int) -> List[Dict[str, Any]]
+    """Monthly CVR via the CVR-RCA definition (mixpanel_user_page_funnel_progression).
+
+    CVR = COUNT(DISTINCT order_completed users) / COUNT(DISTINCT LP users) per month,
+    with the q1_base page_type whitelist + PERFORMANCE_MAX exclusion. LP = distinct
+    users on the funnel table; order_completed = distinct users with has_order_completed.
+
+    Returns list of {month, cvr} with cvr as a fraction (0-1).
+    """
+    query = """
+    SELECT
+        SUBSTR(CAST(event_date AS STRING), 1, 7) AS month,
+        COUNT(DISTINCT user_id) AS lp_users,
+        COUNT(DISTINCT IF(has_order_completed, user_id, NULL)) AS oc_users,
+        SAFE_DIVIDE(
+            COUNT(DISTINCT IF(has_order_completed, user_id, NULL)),
+            COUNT(DISTINCT user_id)
+        ) AS cvr
+    FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
+    WHERE combined_entity_id = '{ce_id}'
+        AND event_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {months} MONTH)
+            AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+        AND page_type IN (
+            'Collection', 'ShoulderPage', 'Cruises Landing Page', 'Hop-On Hop-Off',
+            'Airport Transfers', 'Content Page', 'Theme', 'Collection Page', 'Experience Page'
+        )
+        AND (
+            advertising_channel_type IS NULL
+            OR advertising_channel_type != 'PERFORMANCE_MAX'
+        )
+    GROUP BY 1
+    ORDER BY 1
+    """.format(
+        project=PROJECT_ID,
+        dataset=DATASET,
+        ce_id=ce_id,
+        months=months,
+    )
+
+    results = run_bq_query(query)
+    if not results:
+        logger.info(
+            "fetch_monthly_cvr: no rows for ce_id=%s", ce_id,
+        )
+        return []
+    return [{"month": r["month"], "cvr": r.get("cvr")} for r in results]
 
 
 def _fetch_channel_window_v2(ce_id, start, end):
@@ -699,6 +751,129 @@ def _fetch_channel_window_v2(ce_id, start, end):
         merged.append(entry)
 
     return merged
+
+
+# ============================================================================
+# VENDOR BREAKDOWN (supply / sales landscape — fct_orders by vendor)
+# ============================================================================
+
+def _fetch_vendor_window(ce_id, start, end):
+    # type: (int, date, date) -> List[Dict[str, Any]]
+    """Vendor-level revenue + order economics from fct_orders for one window.
+
+    Net revenue = amount_revenue_usd; AOV/CR/TR mirror _fetch_channel_window_v2.
+    vendor_name + fulfilment_type joined from dim_vendors. Lean by design: one
+    query, no paid-metrics merge (vendor is a supply lens, not a channel lens).
+    """
+    query = """
+    WITH order_vendor AS (
+        -- vendor_id is booking-grain; attribute each order to its PRIMARY booking's
+        -- vendor (lowest booking_id) so order-level revenue isn't fan-out double-counted.
+        SELECT order_id, vendor_id FROM (
+            SELECT order_id, vendor_id,
+                   ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY booking_id) AS rn
+            FROM `{project}.{dataset}.fct_bookings_v2`
+            WHERE combined_entity_id = '{ce_id}'
+                AND DATE(created_at) BETWEEN '{start}' AND '{end}'
+        ) WHERE rn = 1
+    ),
+    orders AS (
+        SELECT order_id,
+            amount_revenue_usd AS revenue,
+            order_value_usd AS order_value,
+            order_value_completed_usd AS order_value_completed
+        FROM `{project}.{dataset}.fct_orders`
+        WHERE combined_entity_id = '{ce_id}'
+            AND DATE(created_at) BETWEEN '{start}' AND '{end}'
+            AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+            AND user_type = 'Customer'
+    )
+    SELECT
+        COALESCE(v.vendor_name, CAST(ov.vendor_id AS STRING)) AS vendor,
+        ANY_VALUE(v.fulfilment_type) AS fulfilment_type,
+        ROUND(SUM(o.revenue), 2) AS revenue,
+        COUNT(*) AS orders,
+        ROUND(SAFE_DIVIDE(SUM(o.order_value), COUNT(*)), 2) AS aov,
+        ROUND(SAFE_DIVIDE(SUM(o.revenue), NULLIF(SUM(o.order_value_completed), 0)) * 100, 2) AS tr,
+        ROUND(SAFE_DIVIDE(SUM(o.order_value_completed), NULLIF(SUM(o.order_value), 0)) * 100, 2) AS cr
+    FROM orders o
+    JOIN order_vendor ov USING (order_id)
+    LEFT JOIN `{project}.{dataset}.dim_vendors` v ON v.vendor_id = ov.vendor_id
+    GROUP BY vendor
+    HAVING orders > 0
+    ORDER BY revenue DESC
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+    )
+    rows = run_bq_query(query)
+    if not rows:
+        logger.info("fetch_vendor_breakdown: no rows for ce_id=%s window %s..%s", ce_id, start, end)
+        return []
+    return rows
+
+
+def fetch_vendor_breakdown(ce_id, cur, pri):
+    # type: (int, tuple, tuple) -> Dict[str, List[Dict[str, Any]]]
+    """Vendor breakdown for the supply/sales landscape: current + prior windows
+    (prior enables the MoM revenue delta). cur/pri are (start, end) date tuples."""
+    return {
+        "current": _fetch_vendor_window(ce_id, cur[0], cur[1]),
+        "prior": _fetch_vendor_window(ce_id, pri[0], pri[1]),
+    }
+
+
+# ============================================================================
+# FUNNEL BY DIMENSION (landing page / channel / language — the funnel cut)
+# ============================================================================
+
+def _fetch_funnel_by_dim(ce_id, dim_col, start, end, top_n=12):
+    # type: (int, str, date, date, int) -> List[Dict[str, Any]]
+    """Per-dimension funnel (LP2S/S2C/C2O/CVR) from the page-funnel table, one
+    window. Per-user MAX-flag dedup (mirrors cvr-rca q2 + fetch_lp_funnel grain);
+    no page-type whitelist so cuts stay comparable to the LP cut already in §4.
+    `dim_col` is a real column (channel_name | language)."""
+    query = """
+    WITH base AS (
+        SELECT
+            COALESCE(CAST({dim} AS STRING), '(unknown)') AS dim_value,
+            user_id,
+            MAX(IF(has_select_page_viewed, 1, 0)) AS sel,
+            MAX(IF(has_checkout_started, 1, 0)) AS chk,
+            MAX(IF(has_order_completed, 1, 0)) AS ord
+        FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
+        WHERE combined_entity_id = '{ce_id}'
+            AND event_date BETWEEN '{start}' AND '{end}'
+        GROUP BY dim_value, user_id
+    )
+    SELECT
+        dim_value,
+        COUNT(*) AS lp_users,
+        ROUND(SAFE_DIVIDE(SUM(sel), COUNT(*)) * 100, 1) AS lp2s,
+        ROUND(SAFE_DIVIDE(SUM(chk), NULLIF(SUM(sel), 0)) * 100, 1) AS s2c,
+        ROUND(SAFE_DIVIDE(SUM(ord), NULLIF(SUM(chk), 0)) * 100, 1) AS c2o,
+        ROUND(SAFE_DIVIDE(SUM(ord), COUNT(*)) * 100, 2) AS cvr
+    FROM base
+    GROUP BY dim_value
+    HAVING lp_users >= 1
+    ORDER BY lp_users DESC
+    LIMIT {top_n}
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id, dim=dim_col,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), top_n=top_n,
+    )
+    return run_bq_query(query) or []
+
+
+def fetch_funnel_by_dimension(ce_id, cur):
+    # type: (int, tuple) -> Dict[str, List[Dict[str, Any]]]
+    """Current-window funnel cut by channel + language (landing-page cut already
+    comes from fetch_lp_funnel). Lean: current window only — the §4 CE funnel
+    carries the YoY detail; these answer 'where does the funnel break, by X?'."""
+    return {
+        "channel": _fetch_funnel_by_dim(ce_id, "channel_name", cur[0], cur[1]),
+        "language": _fetch_funnel_by_dim(ce_id, "language", cur[0], cur[1]),
+    }
 
 
 # ============================================================================

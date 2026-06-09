@@ -144,13 +144,22 @@ create:
 ~/Documents/CE RCA Runs/<ce-slug>-<post_start>-to-<post_end>/
 ```
 
-Refer to this as `<run_dir>`. Open `<run_dir>/_run_log.md` (the orchestrator's
-own internal run log for debugging/audit — never surfaced to the user) and log the
-run start. **Do not write to `<run_dir>/transcript.md`** — that filename belongs to
-CVR-RCA's investigation transcript, which the composer surfaces verbatim in the
-**Transcript** tab; keeping the orchestrator's log in `_run_log.md` keeps that tab
-clean (the underscore name is also excluded from the Transcript tab's `transcript*`
-collection).
+Refer to this as `<run_dir>`. Create the `logs/` subfolder and open
+`<run_dir>/logs/_run_log.md` (the orchestrator's own internal run log for
+debugging/audit — never surfaced to the user) and log the run start:
+
+```bash
+mkdir -p "<run_dir>/logs"
+```
+
+Write all run-log lines to `<run_dir>/logs/_run_log.md` throughout the run.
+**Do not write to `<run_dir>/transcript.md`** — that filename belongs to CVR-RCA's
+investigation transcript, which the composer surfaces verbatim in the **Transcript**
+tab; keeping the orchestrator's log in `logs/_run_log.md` keeps that tab clean (the
+underscore name is also excluded from the Transcript tab's `transcript*` collection).
+The final **Organize** step (Step 4f) tidies every other artifact into subfolders;
+`logs/_run_log.md` is written there from the start so the actively-appended log never
+needs moving.
 
 **Do not write `meta.json` here.** Its *only* consumer is `compose.py`'s header
 builder (CE name / dates / market / pills / Omni pill / landing-page link) — a
@@ -402,7 +411,7 @@ its fixed bundle path (`$SKILL_DIR/skills/cvr-rca/SKILL.md`,
 
 Wait for **all** sub-agents to finish before synthesising.
 
-Log each spawn in `_run_log.md`. If a sub-skill fails, note it and continue —
+Log each spawn in `logs/_run_log.md`. If a sub-skill fails, note it and continue —
 the composite simply won't carry that tab.
 
 ---
@@ -424,7 +433,7 @@ blocks). It is **pure synthesis** — it weaves existing findings and never runs
 queries or computes new numbers.
 
 Wait for `summary_report.html`. **Graceful degradation:** if the Summary agent
-fails or doesn't produce the file, log it in `_run_log.md` and proceed to
+fails or doesn't produce the file, log it in `logs/_run_log.md` and proceed to
 compose — the composite simply won't carry a Summary tab (the deep-dive tabs are
 unaffected).
 
@@ -528,6 +537,15 @@ mv "<run_dir>/report.html" "<run_dir>/cvr_rca_report.html"
 (Only if cvr-rca ran and wrote `report.html`. perf-audit, CE Health, and the
 Summary write artifacts that need no rename.)
 
+CVR-RCA also writes its own self-evaluation as a bare `evaluation.md`. Namespace it
+to its owner — so it reads as CVR-RCA's and never collides with the CE-level
+`ce_rca_evaluation.md` a maintainer may later write on demand (see `evals/evaluator.md`)
+— again only if cvr-rca ran and wrote it:
+
+```bash
+mv "<run_dir>/evaluation.md" "<run_dir>/cvr_rca_evaluation.md"
+```
+
 **4c. Render the beautified CE Health tab.** Re-render CE Health's structured
 output into visual_kit chrome (the structured-re-render mode of the cardinal
 rule):
@@ -545,7 +563,7 @@ step errors or the file isn't produced, `compose.py` falls back to the verbatim
 markdown render of `ce_health_report.md` (the CE Health tab still appears, just
 unbeautified). If Query 1 itself fails, the renderer keeps the tab and renders
 CE Health's §7 table verbatim instead of the waterfall. Log the outcome in
-`_run_log.md`.
+`logs/_run_log.md`.
 
 **4d. Run the composer:**
 
@@ -566,15 +584,47 @@ The **Transcript** tab is built automatically and is **always last**: `compose.p
 collects every transcript file in the run dir and renders each verbatim (monospace)
 as its own sub-tab, so stakeholders can read what each skill actually did. You do
 **not** assemble it by hand. The collection contract is scalable and registry-driven:
-- CVR-RCA's generic `<run_dir>/transcript.md` → the **CVR-RCA** sub-tab (by convention).
-- Any skill that writes `<run_dir>/transcript_<skill>.md` auto-appears as a sub-tab
-  (label humanized from the suffix) — no code change needed.
-- The orchestrator's own `_run_log.md` is deliberately excluded (no `transcript` name),
+- CVR-RCA's `transcript.md` (renamed to `transcripts/transcript_cvr_rca.md` at Step 4f)
+  → the **CVR-RCA** sub-tab.
+- Any skill that writes `transcript_<skill>.md` auto-appears as a sub-tab (label humanized
+  from the suffix) — no code change needed. `compose.py` looks in `transcripts/` first, then
+  the run-dir root (older / standalone runs).
+- The orchestrator's own `logs/_run_log.md` is deliberately excluded (no `transcript` name),
   so it never shows.
 
 **4e. Report the result.** Tell the user where the composite landed and which
 tabs it contains. Keep it short — the report is the deliverable, not a chat recap.
 Then invite follow-ups (Step 5).
+
+**4f. Organize the run folder (silent tidy).** A finished run leaves ~25 files in
+`<run_dir>`. Tidy them so **`report.html` is the only top-level file** and everything
+else lives in by-type subfolders — the deliverable is unmistakable, and the run
+folder is navigable. Run this once, after compose; it is **idempotent** (only moves
+what exists) and uses **paths relative to `<run_dir>`** (so it works on any machine).
+Use `find` for globbed names (a bare `*.md` glob errors under zsh when nothing matches):
+
+```bash
+cd "<run_dir>"
+mkdir -p transcripts tabs reports data        # logs/ already created at Step 0c
+# tabs/ — the HTML fragments compose inlines
+for f in summary_report.html ce_health_tab.html cvr_rca_report.html; do [ -f "$f" ] && mv "$f" tabs/; done
+# reports/ — human-readable artifacts (incl. evaluations)
+for f in ce_health_report.md findings.md perf_audit_report.md perf_audit_skeleton.md \
+         cvr_rca_evaluation.md ce_rca_evaluation.md slack_context.md user_context.md ce_history.md; do
+  [ -f "$f" ] && mv "$f" reports/; done
+find . -maxdepth 1 -name 'user_data_*.md' -exec mv {} reports/ \;
+# data/ — machine JSON
+for f in summary.json ce_health_report.json meta.json orchestration.json; do [ -f "$f" ] && mv "$f" data/; done
+find . -maxdepth 1 \( -name 'stage*.json' -o -name 'batch_*.json' -o -name '_*.json' \) -exec mv {} data/ \;
+# transcripts/ — rename CVR-RCA's generic transcript to its owner name
+[ -f transcript.md ] && mv transcript.md transcripts/transcript_cvr_rca.md
+[ -f transcript_perf_audit.md ] && mv transcript_perf_audit.md transcripts/
+```
+
+`report.html` stays at root. `compose.py` is **layout-aware** (it resolves every input
+subfolder-first, root-fallback), so the Step-5 follow-up re-compose still finds
+everything, and older flat runs still compose unchanged. Do this quietly — it is
+plumbing, not something to narrate.
 
 ---
 
@@ -586,15 +636,17 @@ handle each one per **`references/followup_guide.md`**. Read that guide now if y
 haven't; the essentials:
 
 - **Answer in chat first, always.** Route each question: *reinterpret* (from
-  `findings.md`/`transcript.md`) → *re-aggregate from disk* (daily rows in
-  `stage3/stage7`, segment/channel in `summary.json`, **TGID revenue/traffic from
-  `ce_health_report.json` §6**) → *bounded re-query* (a small, scoped query using the
-  bundled `skills/cvr-rca/references/q{2,4,5,6}.sql` patterns when the cut — per-TGID
-  funnel, device, geo, URL, price — isn't on disk) → *cross-tab synthesis*. Stay within
-  the run's **fixed segment + window**.
+  `reports/findings.md`/`transcripts/transcript_cvr_rca.md`) → *re-aggregate from disk*
+  (daily rows in `data/stage3.json`/`data/stage7.json`, segment/channel in
+  `data/summary.json`, **TGID revenue/traffic from `data/ce_health_report.json` §6**) →
+  *bounded re-query* (a small, scoped query using the bundled
+  `skills/cvr-rca/references/q{2,4,5,6}.sql` patterns when the cut — per-TGID funnel,
+  device, geo, URL, price — isn't on disk) → *cross-tab synthesis*. (Run-dir artifacts
+  live in the by-type subfolders after Step 4f; fall back to the run-dir root for older
+  runs.) Stay within the run's **fixed segment + window**.
 - **Promote only on an explicit ask.** After a substantive answer, offer to add it to the
   report. On yes, append an **audited `.analysis-block` card** (question · answer ·
-  how-answered tag pill · date · `↗` citations — **no SQL**) to `<run_dir>/followups.html`
+  how-answered tag pill · date · `↗` citations — **no SQL**) to `<run_dir>/tabs/followups.html`
   (a visual-kit HTML fragment, authored like the Summary tab — see `followup_guide.md`),
   then re-run the composer so the **Follow-ups & Q&A** tab refreshes:
 
@@ -671,6 +723,14 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 |---|------|---------|
+| m030 | 2026-06-09 | **CE Health Wave B — engine data layer (v2.6.0).** Adds the data CE Health couldn't show before, across `ce-health-skill-main` (re-vendored via `scripts/vendor.sh`) + `scripts/render_ce_health.py`. **(1) Multi-year trajectory:** monthly lookback 13→36 months + new `fetch_monthly_cvr` (CVR-RCA's CVR) → Revenue Trajectory gains a Predicted-Revenue × CVR YoY pivot; engine emits `history_months`/`has_ly`. **(2) Vendor Breakdown (new display §7):** `fetch_vendor_breakdown` from `fct_orders` (Omni measures — revenue=`amount_revenue_usd`, TR=rev/completed-gross, CR=completed/gross), vendor attributed to each order's **primary booking** (`fct_bookings_v2.vendor_id`, lowest `booking_id` — avoids fan-out) + `dim_vendors.fulfilment_type`; renderer block bumps Lead-time/Historical/Countries to 8/9/10. **(3) Funnel by dimension:** §5 gains a "Break funnel down by" dropdown — Landing page (existing) + new Channel + Language cuts (`_fetch_funnel_by_dim` on `mixpanel_user_page_funnel_progression`, per-user MAX-flag dedup). **(4) TGID corrections:** all deltas now **MoM (pre/post)**, not YoY (fixes the unlabeled "+142%") — added prior-window aggregates to `fetch_top_tgids` (`gbv_pri`/`completed_gbv_pri`→`aov_pri`/`tr_pri`/`cr_pri`) + `fetch_tgid_funnel` (prior window + true `s2o`); **RPC redefined to S2O×AOV×TR** (interim per-select-view); experience names emitted **untruncated** (renderer ellipsis+hover); **Predicted/Actual Revenue** labels on the §1 note + §7. **(5) Renderer hardening:** `section()` header match made single-line (`[^\n]*`) so same-prefix sections ("Funnel" vs "Funnel by Language") don't collide. **Blast radius:** ce-health engine (re-vendored) + `render_ce_health.py`; no compose/template/other-sub-skill change. Verified end-to-end on CE 243 + CE 3593 via the **vendored** engine. **Deferred:** exact RPC, funnel platform/page-type cuts, historical-context memory (Wave C). |
+| m029 | 2026-06-09 | **CE Health tab — Driver Diagnosis promoted to position 3 + Shapley waterfall un-truncated (v2.5.4).** Two presentation tweaks in `scripts/render_ce_health.py`. **(1) Reorder:** the §ordered list moves **Driver Diagnosis (Shapley)** to **right after Revenue Trajectory** — new display order **1 CE Vitals · 2 Revenue Trajectory · 3 Driver Diagnosis · 4 Channel Breakdown · 5 Funnel · 6 Top TGIDs · 7 Lead Time Cohorts · 8 Historical Context · 9 Customer Countries** (block titles renumbered to match; **anchor `bid`s unchanged**, so cross-tab `↗` links still resolve). **(2) Waterfall fix:** the Plotly revenue waterfall was clipping on the right (last bar's `$` label + the long "Post (dates)" x-tick). The first/last x-ticks are shortened to **Pre / Post** (the full dates remain in the chart subtitle), and the layout widens to `margin r:80, b:104, height:440, autosize:true`. **Blast radius: `render_ce_health.py` only** — no compose/template/sub-skill/engine change. Verified on ce-243 + ce-3593: titles read 1..9 in the new order, 9 `cehealth-*` anchors unchanged, waterfall renders Pre/Post ticks with the wider margins. |
+| m028 | 2026-06-09 | **CE Health tab — reverted the non-functional TGID metric selector (v2.5.3).** Reverted **only** the v2.5.2 part-(C) TGID metric selector from `scripts/render_ce_health.py` — it rendered the column checkboxes **unchecked** and the show/hide toggle **did not work**, so it's removed and **parked for a later wave**; **all other CE Health table changes are retained**. **Removed:** the `_tgid_metric_selector` function (the `.ceh-msel` checkbox bar above the TGID main table, its scoped CSS, and its toggle `<script>`) and its wiring in `build_tgid_main` (the `col_data`/`metric_cols` slug loop + the `selector` in the return). The supporting `styled_table` additions were also removed **cleanly** rather than left inert, since nothing else used them: the `table_id` + `col_data` params, the `_dcol` helper, the `#ceh-tgid-main` id, and the `data-col="<slug>"` stamping on `<th>`/`<td>`. **No inert leftovers.** **Retained unchanged:** section titles 1..9 in display order (Vitals="1."), the derived **S2O = S2C × C2O** colour-scaled column inside Funnel Metrics, the **CR<80% red** highlight (`td.ceh-cr-low`), blue group dividers (`ceh-gdiv`), grouped header bands (`ceh-group`), sticky/frozen identity columns, landing-URL ellipsis + hover (`ceh-lpurl`), collapsible sections, all Plotly charts. **Verified** on ce-243 + ce-3593 → `report_v2.html`: `ast.parse` OK; **zero `ceh-msel` / `_tgid_metric_selector` / `ceh-tgid-main` / `data-col` / `Columns` residue** in the rendered tab; S2O colour-scaled column, CR<80% red, blue dividers (37), grouped headers (5), sticky columns (44) all present; titles read 1..9 with Vitals="1."; landing-URL `title=` present; collapse JS (`ceh-toggle`) + 3 Plotly plots intact; other tabs unaffected (selector-related diff vs prior reports = 0 lines). **Blast radius: `scripts/render_ce_health.py` only.** |
+| m027 | 2026-06-09 | **CE Health tab — four presentation refinements (v2.5.2).** Presentation-only polish on `scripts/render_ce_health.py` — **no `compose.py` / template / shared `visual_kit` / sub-skill / engine change**. **(A) Section titles renumbered to display order.** The page was reordered in Wave A but `block()` titles still carried CE Health's original section numbers. The visible leading "N." in each title is now sequential **1..9 in `build_fragment`'s actual return order**, CE Vitals = "1.": Vitals 2→1, Revenue Trajectory (L12M) (was unnumbered)→2, Channels 3→3, Funnel 4→4, Top TGIDs 6→5, Lead Time Cohorts 9→6, Historical 8→7, Driver Diagnosis (Shapley) 7→8, Customer Countries 11→9. **Anchor `bid`s are unchanged** (`cehealth-vitals`/`-l12m`/`-channels`/`-funnel`/`-tgids`/`-leadtime`/`-history`/`-shapley`/`-countries`) so cross-tab `↗` links keep working — only the human-readable number changes. **(B) Derived S2O column in the TGID main table.** S2O is not in source data; it's derived **S2O = S2C × C2O** per row (new `_lead_rate` parses the leading rate, ignoring the trailing delta), inserted right after C2O so it lands in the **Funnel Metrics** group, and given the **same green→amber→red colour scale** as S2C/C2O (`_scale_bg`). Note added that S2O is presentation-derived (S2C×C2O), pending an exact engine figure (Wave B). The existing **CR<80% red** highlight (`td.ceh-cr-low`) and high-traffic-low-S2O flag still fire. **(C) TGID metric-selector toggle** (the deferred "optional"): a compact `.ceh-msel` checkbox bar above the main table, one checkbox per non-identity metric column (TGID/Experience frozen, excluded), **all checked by default**. `styled_table` gained `table_id` + `col_data` params; the main table is `#ceh-tgid-main` and every metric `<th>`/`<td>` carries `data-col="<slug>"`. A small `<script>` scoped to that table flips `display` on the matching `data-col` cells — does not touch the collapse JS, sticky columns, grouped header bands, or blue dividers. **(D) Landing-page URL ellipsis + hover.** URL cell in the (Funnel-folded) Landing Pages table wrapped in `<span class="ceh-lpurl" title="<full url>">…</span>` with scoped `max-width`/`overflow:hidden`/`text-overflow:ellipsis`/`white-space:nowrap` — source URLs are full (unlike experience names) so the hover recovers the whole URL. **Not attempted:** experience-name full-text-on-hover — the name is truncated in source `ce_health_report.md` (literal "…"), unrecoverable by the renderer; left as-is for an engine/Wave B fix. **Verified** on ce-243 + ce-3593: ast.parse OK; titles read 1..9 in display order with Vitals="1."; anchor-id set byte-identical to before (9 ids); S2O column inside Funnel Metrics band (band span 5→6) with colour-scale backgrounds on all rows; CR<80% red rule present; metric selector renders all-checked above the table and the toggle JS passes `node --check`; landing-URL cells carry `title=`; collapse/sticky/blue-dividers/grouped-headers intact; 5 Plotly plots present; non-CE-Health source artifacts byte-identical. **Blast radius: `scripts/render_ce_health.py` only.** |
+| m026 | 2026-06-09 | **CE Health tab — seven presentation refinements (v2.5.1).** Targeted polish on `scripts/render_ce_health.py` only — **no `compose.py` / template / shared `visual_kit` / sub-skill / engine change**. **(1) Primary driver from the §7 Shapley, not the largest vitals Δ.** The old `vitals_primary_mover` picked the vitals row with the largest \|Δ vs Prior\|, which mislabelled **Revenue** as the mover. The 6-factor Shapley `contrib` is now computed **once** near the top of `build_fragment` (via `query_raw`, reused by `build_shapley_block` — no double-query); the top driver is the factor with the largest \|contribution\| (`shapley_top_driver`). A **"Primary driver (Shapley): {label} ({±$})"** note renders under the 4-window vitals table; if the factor maps to a vitals row (AOV/Take Rate/Completion/Orders via `shapley_top_vitals_row`) that row is also bolded with a "primary driver" pill — Traffic/CVR have no vitals row so they render note-only, and **Revenue is never auto-bolded** (not a Shapley factor). On Query-1 failure: no note (no fallback to the largest-Δ guess), §7 verbatim table intact. **(2) Collapsible headers read as real section headers** — `CEH_COLLAPSE_STYLE` `.ceh-toggle` gets a 16px/700 `.block-title`, 16px chevron, vertical padding, subtle hover background, light bottom divider (scoped to `#tab-cehealth`; toggle JS unchanged). **(3) Cryptic "step down" funnel flag** replaced with **"↓ X.Xpp vs prior"**, firing only when a rate stage is materially below prior (>1pp). **(4) Funnel cards** relabelled `LP→Select`/`Select→Cart`/`Cart→Order` → **LP2S / S2C / C2O** (LP Users volume card kept). **(5) TGID Experience column** truncates with ellipsis but exposes the full name on hover via `<span class="ceh-exp" title="…">` + scoped `max-width`/`overflow`/`text-overflow` CSS. **(6) "new"/"—" cell clutter** cleaned in `_cell_split`: trailing lone em-dash ("no prior") → dropped (bare value); trailing `new` → value + a small muted `.ceh-new` badge — normal `±x%`/`pp` deltas still split into the two-line coloured cell, §3 Channels unaffected. **(7) Window-agnostic delta label** — one `period_label` derived once in `build_fragment` from the sidecar's `range` (`"month"` → "MoM", else **"vs prior"**), substituted into the vitals cards, funnel cards (`build_funnel_cards(..., period_label)`), and the vitals note; the hardcoded literal "MoM" is gone from rendered output (columns/Shapley/4-window table stay date-driven). **Verified** on ce-243 + ce-3593 (both `range: custom`): ast.parse OK; Shapley primary-driver note present (ce-243 → "Orders / User +$56.6K" bolds the Orders row; ce-3593 → "Traffic −$131.3K" note-only); Revenue never auto-bolded; headers larger/clickable; no "step down" literal; LP2S/S2C/C2O cards; `title=` on experience cells; 0 `"K new"`/`"% —"` literals (new=badge, —=dropped); **rendered deltas read "vs prior", no "MoM" on either custom-window run**; Plotly intact (3 charts); CE-health fragment embedded verbatim, other tabs unaffected by construction. **Blast radius: `scripts/render_ce_health.py` only.** |
+| m025 | 2026-06-09 | **CE Health revamp — Wave A (presentation-only) (v2.5.0).** Reorganised the CE Health tab around how a BGM reads a CE's contours, entirely in `scripts/render_ce_health.py` (+ fragment-scoped CSS/JS) — **no engine / new query / `compose.py` / template / sub-skill change**. **(1) Collapsible sections** via a central `block(title, bid, inner, verdict=None, summary=None, collapsed=False)`: each title is a `<button class="ceh-toggle">` (not an `<a>`, so the template's anchor router never eats the click) with a chevron, `inner` wrapped in `.ceh-body`, and an optional `.ceh-summary` rendered **between header and body** so it stays visible while collapsed. Fragment-scoped `<style>` (`.ceh-collapsed .ceh-body{display:none}`, chevron rotate) + `<script>` scoped to `#tab-cehealth` toggles on header click **and auto-expands a block when targeted** — a doc-level listener on `a[href^="#cehealth-"]` clicks plus an initial/`hashchange` `location.hash` check (the router `preventDefault()`s cross-tab links, so `:target` CSS alone won't fire). **Default open: Vitals + Revenue-trajectory; everything else collapsed** — set centrally in `CEH_DEFAULT_OPEN`. **(2) Page reorder:** Vitals → Revenue trajectory → Channels → Funnel (Landing Pages folded in) → TGID (+ separate TGID×Lead-time table) → Lead-time cohorts → Historical → Driver diagnosis → Customer countries. **(3) Vitals** cards reordered Revenue·Orders·AOV·Take Rate·Completion·ROI; the 4-window table bolds the largest-magnitude MoM mover with a "primary mover" marker. **(4) Revenue trajectory** moved up; the L12M revenue chart's Plotly `hovertemplate` now shows Revenue·Orders·ROI·TR·CR·AOV on hover. **(5) Channels:** Revenue + Share moved left, rule-based benchmark flag chips on Share (Google Search top/~50%, PMax/Bing ~10%, Organic ~5%, Google+Bing cross-sell >10% leakage) and a deterministic 2–3 line `summary` shown while collapsed. **(6) Funnel:** 4 KPI cards (LP→Select·Select→Cart·Cart→Order·LP Users, MoM Δ) over the 4-window YoY table, the §10 Landing Pages table folded in, and a "step down" flag on the worst rate stage. **(7) TGID:** single main table keeps the Order/Funnel groups with **blue vertical dividers**, RPC moved into the Funnel group, lead-time buckets split into a **separate TGID×Lead-time table**, rows sorted desc by Share with **~80%-cumulative concentration highlighted green**, a CE classification pill (Concentrated/Normal/Fragmented), CR<80% red + S2C/C2O colour scale, and a derived **S2O = S2C×C2O** high-traffic-low-S2O flag (presentation approximation, exact engine value deferred). **(8) Lead-time** cohorts table kept by the TGID block with a rule-based dominant-band callout shown collapsed. Preserved verbatim: §7 Shapley + Query-1 path and its fallback, §5 charts, `styled_table`'s m018 `split_deltas` + `groups`. **Verified** on ce-243 (growth/leakage) and ce-3593 (decline) — composed reports show collapsible sections, correct default-open set, correct order, blue dividers, separate lead-time table, folded Landing Pages, funnel KPI cards, channel/lead-time summaries, no leftover raw `$X -Y%` literals, all charts intact, and **non-CE-Health tabs byte-identical** (apples-to-apples compose). **Deferred (Waves B/C):** multi-year YoY, funnel by-dimension, vendor breakdown, exact S2O/RPC, the "+142%" fix, historical-context memory subsystem. **Blast radius: `ce-rca` CE-Health renderer only.** |
+| m024 | 2026-06-09 | **Structured run folder — `report.html` at top, everything else in by-type subfolders (v2.4.0).** A finished run dumped ~25 files flat into `<run_dir>`, burying the deliverable. New **Step 4f (Organize)** — a silent, idempotent, run-dir-relative tidy the orchestrator runs after compose — leaves **`report.html` as the only top-level file** and groups the rest: `transcripts/` (CVR-RCA's `transcript.md` **renamed `transcript_cvr_rca.md`**, `transcript_perf_audit.md`), `tabs/` (the HTML fragments compose inlines), `reports/` (`ce_health_report.md`, `findings.md`, `perf_audit_report.md`, `*_evaluation.md`, `slack_context.md`, …), `data/` (`summary.json`, `stage*.json`, `ce_health_report.json`, `meta.json`, `orchestration.json`), `logs/` (`_run_log.md`, now written there from Step 0c so the actively-appended log never moves). `compose.py` is made **layout-aware** — a new `resolve()` + `_SUBDIR` map resolve every input **subfolder-first, root-fallback** (TAB_SPECS sources, `meta.json`, and `collect_transcripts()` which now globs `transcripts/` and maps `transcript_cvr_rca.md → "CVR-RCA"`, keeping `transcript.md` for back-compat) — so the Step-5 follow-up re-compose finds everything and **older flat / standalone runs still compose byte-identically** (verified A/B: flat vs organized compose produce identical `report.html`). `followup_guide.md` + `composition_rules.md` updated to the subfolder paths (Follow-ups card now appended to `tabs/followups.html`). **Blast radius: `ce-rca` master only** — no sub-skill edit (CVR-RCA / perf-audit / CE-Health standalone output unchanged; their flat files are reorganized only inside a CE-RCA run), no `templates/`/CSS change. Ships in versioned skill files (relative paths, no machine config), so every install gets the identical structure on every run. |
+| m023 | 2026-06-09 | **CE-RCA-level evaluator — maintainer on-demand tool (v2.3.0).** A way to score the *whole* orchestrated RCA (not just each sub-skill's own investigation, which already self-evaluates). New rubric **`evals/evaluator.md`** — 7 orchestration-level themes × 1–5 → **/35** (Direction & Dispatch · Cross-Tab Synthesis & Corroboration · CE-Level Diagnostic Correctness · Coverage · Actionability & Ownership · Report Integrity & Navigability · Evidence Integrity) with the CVR-style failure-mode tags (`MISSING_INSTRUCTION`/`AMBIGUOUS_INSTRUCTION`/`EXEC_ERROR`/`DATA_LIMIT`) grounded in CE-RCA file citations. **Deliberately NOT wired into the GM run flow** — it is a quality-tracking tool for *maintainers*, run **on demand** against any finished run-dir by a dedicated sub-agent (it reads only on-disk artifacts, so it needs no live context); writes **`<run_dir>/ce_rca_evaluation.md`**, never a tab, never shown to the GM. Keeping it off the auto path avoids spending ~150K tokens + minutes on every GM run for a record the GM never sees. Invocation + rubric are self-contained in `evals/evaluator.md`. **Naming hygiene:** CVR-RCA's bare `evaluation.md` is renamed at Step 4b → **`cvr_rca_evaluation.md`** (orchestrator `mv`, mirroring `report.html → cvr_rca_report.html`) so each eval reads as its owner's and the CE-level eval never collides. **Blast radius: `ce-rca` master only** — no `compose.py` / `templates/` / sub-skill change; Follow-ups stays Step 5. |
 | m022 | 2026-06-08 | **Follow-ups delta colouring made automatic (v2.2.3).** v2.1.1 relied on Claude hand-classing each delta cell in Follow-ups tables — fragile: a real run coloured the first table but left a later `−0.14pp` table plain (the "near-flat → plain" nuance made it look broken). Now deterministic: new **`helpers.py:autocolor_delta_cells()`** colours any `<td>` whose value starts with a sign (`−3.13pp`→red, `+0.6pp`→green, `+$111.3K`, `(−$708.8K)`); plain counts/levels/`—` stay neutral; **author-set `.neg`/`.pos`/`.delta-flat` is never overridden** (semantic loss columns like a positive "lost checkouts" count stay author-red). `compose.py` applies it to the **Follow-ups `html-fragment` only** (`spec["id"]=="followups"`). `followup_guide.md` relaxed: don't hand-class signed deltas (composer does it, consistently), only hand-class semantic exceptions; the brittle near-flat threshold removed. **Blast radius: `ce-rca` master only** — no template / shared CSS / sub-skill change (uses shared `.neg`/`.pos`). Verified: 12-case unit test + integration compose (both tables coloured incl. the previously-plain `−0.14pp`, loss cols author-red, counts/levels neutral, no double-class, idempotent). |
 | m021 | 2026-06-08 | **Colour-coded deltas across all CE Health tables + §8 prompt removed (v2.1.2).** Extends the v1.8.2 delta-colouring (which only covered §3 Channel Breakdown + §6 Top TGIDs) to **every** CE Health table: `split_deltas=True` now also applies to **§2 Full 4-window comparison, §4 Funnel, §9 Lead Time Cohorts, §10 Landing Pages, §11 Customer Countries** and the §7 verbatim-fallback table — so all `Δ (MOM / YoY / LY)` and `pp` columns render green (up) / red (down) / amber (near-flat) consistently. **Bug fix in `_cell_split`:** a lone-delta cell with a trailing parenthetical (e.g. `+31% (+$32.1K)`) dropped the parenthetical when coloured; it now colours the whole token, preserving the figure. **§8 fix:** CE Health's interactive `> **Add your context:** …` CLI prompt was leaking into the rendered §8 — `_clean_history_md` now drops it (with the existing "None found" placeholders) and runs **unconditionally** (Slack/user context is surfaced below via the user-context subsection). **Blast radius: `scripts/render_ce_health.py` only** — the scoped `#tab-cehealth .ceh-chg` CSS already existed (v1.8.2); no `compose.py`/template/shared-`visual_kit.md`/sub-skill change; non-delta cells degrade plainly. Verified on CE 243 + CE 3593. |
 | m020 | 2026-06-08 | **Colour-coded delta cells in Follow-ups tables (v2.1.1).** Follow-up answer tables rendered delta / lost-checkout columns in plain black, unlike the CE Health tables. `followup_guide.md`'s entry-card table template + a new rule now instruct Claude to colour every directional cell when authoring a Follow-ups card: **`.neg`** (red) for declines/losses (negative Δ, "lost checkouts", drops), **`.pos`** (green) for gains, plain text for near-flat, plus **`.num`** for right-aligned numerics. The sign convention follows business-outcome direction (more lost checkouts / falling rate = red). **No code change** — `.neg`/`.pos`/`.num` already live unscoped in `visual_kit.md`, so they render in the Follow-ups `.md-table` exactly as in the CE Health tab (verified: classes + red/green CSS reach the composite). Guide-only; no `compose.py`/template/sub-skill change. |

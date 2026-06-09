@@ -34,6 +34,9 @@ from engine.sources.bq import (
     fetch_ce_health,
     _fetch_channel_window_v2,
     _fetch_monthly_summary,
+    fetch_monthly_cvr,
+    fetch_vendor_breakdown,
+    fetch_funnel_by_dimension,
     fetch_customer_country_distribution,
     fetch_lp_funnel,
     PROJECT_ID,
@@ -300,6 +303,11 @@ def fetch_top_tgids(ce_id, cur, pri, ly_cur, ly_pri, top_n=10):
                 THEN ord.amount_revenue_usd ELSE 0 END) AS rev_pri,
             COUNT(DISTINCT CASE WHEN DATE(ord.created_at) BETWEEN '{p_s}' AND '{p_e}'
                 THEN ord.order_id END) AS orders_pri,
+            SUM(CASE WHEN DATE(ord.created_at) BETWEEN '{p_s}' AND '{p_e}'
+                THEN ord.order_value_usd ELSE 0 END) AS gbv_pri,
+            SUM(CASE WHEN DATE(ord.created_at) BETWEEN '{p_s}' AND '{p_e}'
+                AND ord.order_status = 'Completed'
+                THEN ord.order_value_usd ELSE 0 END) AS completed_gbv_pri,
             -- LY window
             SUM(CASE WHEN DATE(ord.created_at) BETWEEN '{ly_s}' AND '{ly_e}'
                 THEN ord.amount_revenue_usd ELSE 0 END) AS rev_ly,
@@ -341,6 +349,10 @@ def fetch_top_tgids(ce_id, cur, pri, ly_cur, ly_pri, top_n=10):
             -- CR = completed gross bookings / total gross bookings
             SAFE_DIVIDE(t.completed_gbv_cur, NULLIF(t.gbv_cur, 0)) AS cr_cur,
             SAFE_DIVIDE(t.completed_gbv_ly, NULLIF(t.gbv_ly, 0)) AS cr_ly,
+            -- Prior-window derived metrics (for MoM/pre-post deltas, not YoY)
+            SAFE_DIVIDE(t.gbv_pri, t.orders_pri) AS aov_pri,
+            SAFE_DIVIDE(t.rev_pri, NULLIF(t.completed_gbv_pri, 0)) AS tr_pri,
+            SAFE_DIVIDE(t.completed_gbv_pri, NULLIF(t.gbv_pri, 0)) AS cr_pri,
             ROUND(SAFE_DIVIDE(t.rev_cur, ct.total_rev_cur) * 100, 1) AS rev_share_pct,
             ROW_NUMBER() OVER (ORDER BY t.rev_cur DESC) AS rn
         FROM tgid_data t
@@ -364,8 +376,10 @@ def fetch_top_tgids(ce_id, cur, pri, ly_cur, ly_pri, top_n=10):
 # TGID FUNNEL (per-experience funnel from mixpanel)
 # ============================================================================
 
-def fetch_tgid_funnel(ce_id, cur, ly_cur):
+def fetch_tgid_funnel(ce_id, cur, pri):
     # type: (int, Tuple[date,date], Tuple[date,date]) -> List[Dict[str, Any]]
+    # Per-experience funnel for the current + PRIOR window (pre/post MoM deltas).
+    # s2o = order-completers / select-viewers (true select->order). s2c/c2o as before.
     query = """
     SELECT
         experience_id,
@@ -387,28 +401,34 @@ def fetch_tgid_funnel(ce_id, cur, ly_cur):
         ) AS c2o_cur,
         SAFE_DIVIDE(
             COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
-                AND has_checkout_started THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
-                THEN user_id END), 0)
-        ) AS s2o_cur,
-        COUNT(DISTINCT CASE WHEN session_date BETWEEN '{ly_s}' AND '{ly_e}'
-            AND has_select_page_viewed THEN user_id END) AS select_users_ly,
-        SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{ly_s}' AND '{ly_e}'
-                AND has_checkout_started THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{ly_s}' AND '{ly_e}'
-                AND has_select_page_viewed THEN user_id END), 0)
-        ) AS s2c_ly,
-        SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{ly_s}' AND '{ly_e}'
                 AND has_order_completed THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{ly_s}' AND '{ly_e}'
+            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+                AND has_select_page_viewed THEN user_id END), 0)
+        ) AS s2o_cur,
+        COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+            AND has_select_page_viewed THEN user_id END) AS select_users_pri,
+        SAFE_DIVIDE(
+            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+                AND has_checkout_started THEN user_id END),
+            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+                AND has_select_page_viewed THEN user_id END), 0)
+        ) AS s2c_pri,
+        SAFE_DIVIDE(
+            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+                AND has_order_completed THEN user_id END),
+            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
                 AND has_checkout_started THEN user_id END), 0)
-        ) AS c2o_ly
+        ) AS c2o_pri,
+        SAFE_DIVIDE(
+            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+                AND has_order_completed THEN user_id END),
+            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+                AND has_select_page_viewed THEN user_id END), 0)
+        ) AS s2o_pri
     FROM `{project}.{dataset}.mixpanel_user_funnel_progression`
     WHERE combined_entity_id = '{ce_id}'
         AND (session_date BETWEEN '{c_s}' AND '{c_e}'
-             OR session_date BETWEEN '{ly_s}' AND '{ly_e}')
+             OR session_date BETWEEN '{p_s}' AND '{p_e}')
     GROUP BY 1
     HAVING COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
         AND has_select_page_viewed THEN user_id END) > 0
@@ -416,7 +436,7 @@ def fetch_tgid_funnel(ce_id, cur, ly_cur):
     """.format(
         project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
         c_s=cur[0].strftime("%Y-%m-%d"), c_e=cur[1].strftime("%Y-%m-%d"),
-        ly_s=ly_cur[0].strftime("%Y-%m-%d"), ly_e=ly_cur[1].strftime("%Y-%m-%d"),
+        p_s=pri[0].strftime("%Y-%m-%d"), p_e=pri[1].strftime("%Y-%m-%d"),
     )
     return run_bq_query(query)
 
@@ -731,6 +751,62 @@ def render_channels(data, w):
     return "\n".join(lines)
 
 
+def render_funnel_by_dimension(data, w):
+    # type: (Dict[str, List], Dict) -> str
+    """Funnel cut by channel + language (current window). Two sections the
+    renderer folds into §4's dimension dropdown alongside Landing Pages."""
+    def _tbl(title, rows):
+        if not rows:
+            return "## {}\n\n*No data.*".format(title)
+        lines = [
+            "## {}".format(title),
+            "",
+            "| {} | LP Users | LP2S | S2C | C2O | CVR |".format(title.split(" by ")[-1]),
+            "|---|---|---|---|---|---|",
+        ]
+        for r in rows:
+            lines.append("| {} | {} | {} | {} | {} | {} |".format(
+                r.get("dim_value") or "(unknown)", fi(_g(r, "lp_users")),
+                fp1(_g(r, "lp2s")), fp1(_g(r, "s2c")), fp1(_g(r, "c2o")), fp(_g(r, "cvr"))))
+        return "\n".join(lines)
+    return _tbl("Funnel by Channel", data.get("channel") or []) + "\n\n" + \
+        _tbl("Funnel by Language", data.get("language") or [])
+
+
+def render_vendors(data, w):
+    # type: (Dict[str, List], Dict) -> str
+    """Vendor breakdown — the supply/sales landscape. Current-window economics
+    (Share/Orders/AOV/CR/TR) with a MoM revenue delta; sorted by revenue."""
+    cur = data.get("current") or []
+    pri_list = data.get("prior") or []
+    if not cur:
+        return "## Vendor Breakdown\n\n*No vendor data available.*"
+    pri_map = {r["vendor"]: r for r in pri_list}
+    cur_total = sum(_g(r, "revenue", 0) for r in cur)
+    cur_sorted = sorted(cur, key=lambda r: _g(r, "revenue", 0), reverse=True)
+    cc, cp, sl = w["col_cur"], w["col_pri"], w["seq_label"]
+    lines = [
+        "## Vendor Breakdown",
+        "",
+        "| Vendor | Fulfilment | {} Rev | Δ {} ({}) | Share | Orders | AOV | CR | TR |".format(cc, cp, sl),
+        "|--------|-----------|---|---|---|---|---|---|---|",
+    ]
+    for v in cur_sorted:
+        name = v["vendor"]
+        rev = _g(v, "revenue", 0)
+        pri_v = pri_map.get(name, {})
+        share = rev / cur_total * 100 if cur_total else 0
+        share_str = "<1%" if 0 < share < 1 else "{:.0f}%".format(share)
+        d_pri = dp(rev, _g(pri_v, "revenue")) if pri_v else "new"
+        lines.append("| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            name, v.get("fulfilment_type") or "—", fm(rev), d_pri, share_str,
+            fi(_g(v, "orders")), fd(_g(v, "aov")), fp(_g(v, "cr")), fp(_g(v, "tr"))))
+    cur_total_orders = sum(_g(r, "orders", 0) for r in cur)
+    lines.append("| **TOTAL** | | **{}** | | **100%** | **{}** | | | |".format(
+        fm(cur_total), fi(cur_total_orders)))
+    return "\n".join(lines)
+
+
 def render_funnel(data, w):
     # type: (Dict[str, Dict], Dict) -> str
     c = data.get("current") or {}
@@ -764,26 +840,54 @@ def render_funnel(data, w):
 def render_l12m(monthly):
     # type: (List[Dict]) -> str
     if not monthly:
-        return "## 5. L12M Trajectory\n\n*L12M data unavailable.*"
+        return "## 5. Multi-Year Trajectory\n\n*Trajectory data unavailable.*"
 
     lines = [
-        "## 5. L12M Trajectory",
+        "## 5. Multi-Year Trajectory",
         "",
         "### CE Health (Monthly)",
         "",
-        "| Month | Revenue | Orders | ROI(1) | TR | CR | AOV |",
-        "|-------|---------|--------|--------|----|----|-----|",
+        "| Month | Revenue | Orders | ROI(1) | TR | CR | AOV | CVR |",
+        "|-------|---------|--------|--------|----|----|-----|-----|",
     ]
     for m in monthly:
         roi = _g(m, "roi_1")
         tr = _g(m, "tr")
         cr = _g(m, "cr")
-        lines.append("| {} | {} | {} | {} | {} | {} | {} |".format(
+        cvr = _g(m, "cvr")
+        lines.append("| {} | {} | {} | {} | {} | {} | {} | {} |".format(
             m.get("month", "\u2014"), fm(_g(m, "revenue")), fi(_g(m, "orders")),
             fp1(roi * 100 if roi else None),
             fp1(tr * 100 if tr else None),
             fp1(cr * 100 if cr else None),
-            fd(_g(m, "aov"))))
+            fd(_g(m, "aov")),
+            fp1(cvr * 100 if cvr is not None else None)))
+
+    # YoY pivot: rows = Jan..Dec, columns = each year present, cells = Predicted Revenue.
+    by_yr = {}  # type: Dict[str, Dict[str, Any]]
+    years = []  # type: List[str]
+    for m in monthly:
+        mo = str(m.get("month") or "")
+        if len(mo) < 7:
+            continue
+        yr, mm = mo[:4], mo[5:7]
+        if yr not in by_yr:
+            by_yr[yr] = {}
+            years.append(yr)
+        by_yr[yr][mm] = _g(m, "revenue")
+    years.sort()
+    month_names = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]
+    name_map = {"01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May",
+                "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct",
+                "11": "Nov", "12": "Dec"}
+    if years:
+        lines.extend(["", "### Predicted Revenue (YoY)", "",
+            "| Month | " + " | ".join(years) + " |",
+            "|-------|" + "|".join(["---"] * len(years)) + "|"])
+        for mm in month_names:
+            cells = [fm(by_yr[yr].get(mm)) if by_yr[yr].get(mm) is not None else "\u2014"
+                     for yr in years]
+            lines.append("| {} | {} |".format(name_map[mm], " | ".join(cells)))
 
     lines.extend(["", "### Paid Performance (Monthly)", "",
         "| Month | Ad Spend | CPC | Clicks | CVR | CM1 | Paid ROI |",
@@ -927,36 +1031,38 @@ def render_tgids_enriched(tgid_data, tgid_funnel, tgid_lt, w):
         "|------|-----------|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for t in tgid_data:
+        # Full experience name \u2014 the renderer truncates with ellipsis + hover.
         name = str(t.get("experience_name") or "\u2014")
-        if len(name) > 30:
-            name = name[:27] + "..."
         eid = str(t.get("experience_id") or "")
         rev_cur = _g(t, "rev_cur", 0)
         share = _g(t, "rev_share_pct")
         share_str = "{:.0f}%".format(share) if share is not None else "\u2014"
 
-        rpc_cur, rpc_ly = _g(t, "rpc_cur"), _g(t, "rpc_ly")
-        aov_cur, aov_ly = _g(t, "aov_cur"), _g(t, "aov_ly")
-        cr_cur, cr_ly = _g(t, "cr_cur"), _g(t, "cr_ly")
-        tr_cur, tr_ly = _g(t, "tr_cur"), _g(t, "tr_ly")
-
-        d_rev = dp(rev_cur, _g(t, "rev_ly"))
-        d_rpc = dp(rpc_cur, rpc_ly) if rpc_ly else "\u2014"
-        d_aov = dp(aov_cur, aov_ly) if aov_ly else "\u2014"
-        d_cr = dpp(cr_cur * 100 if cr_cur else None, cr_ly * 100 if cr_ly else None)
-        d_tr = dpp(tr_cur * 100 if tr_cur else None, tr_ly * 100 if tr_ly else None)
+        aov_cur, aov_pri = _g(t, "aov_cur"), _g(t, "aov_pri")
+        cr_cur, cr_pri = _g(t, "cr_cur"), _g(t, "cr_pri")
+        tr_cur, tr_pri = _g(t, "tr_cur"), _g(t, "tr_pri")
 
         f = funnel_map.get(eid, {})
         sel = _g(f, "select_users_cur", 0)
         sel_str = "{:.1f}K".format(sel / 1000) if sel >= 1000 else fi(sel)
         sel_pct = sel / total_select * 100 if total_select else None
         pct_str = "{:.0f}%".format(sel_pct) if sel_pct is not None else "\u2014"
-        s2c = _g(f, "s2c_cur")
-        c2o = _g(f, "c2o_cur")
-        s2c_ly = _g(f, "s2c_ly")
-        c2o_ly = _g(f, "c2o_ly")
-        d_s2c = dpp(s2c * 100 if s2c else None, s2c_ly * 100 if s2c_ly else None)
-        d_c2o = dpp(c2o * 100 if c2o else None, c2o_ly * 100 if c2o_ly else None)
+        s2c, c2o = _g(f, "s2c_cur"), _g(f, "c2o_cur")
+        s2c_p, c2o_p = _g(f, "s2c_pri"), _g(f, "c2o_pri")
+        s2o, s2o_p = _g(f, "s2o_cur"), _g(f, "s2o_pri")
+
+        # RPC = S2O x AOV x TR (interim per select-view; no revenue term, per the
+        # agreed proxy). Deltas are MoM (pre/post), not YoY.
+        rpc_cur = (s2o * aov_cur * tr_cur) if (s2o and aov_cur and tr_cur) else None
+        rpc_pri = (s2o_p * aov_pri * tr_pri) if (s2o_p and aov_pri and tr_pri) else None
+
+        d_rev = dp(rev_cur, _g(t, "rev_pri"))
+        d_rpc = dp(rpc_cur, rpc_pri) if rpc_pri else "\u2014"
+        d_aov = dp(aov_cur, aov_pri) if aov_pri else "\u2014"
+        d_cr = dpp(cr_cur * 100 if cr_cur else None, cr_pri * 100 if cr_pri else None)
+        d_tr = dpp(tr_cur * 100 if tr_cur else None, tr_pri * 100 if tr_pri else None)
+        d_s2c = dpp(s2c * 100 if s2c else None, s2c_p * 100 if s2c_p else None)
+        d_c2o = dpp(c2o * 100 if c2o else None, c2o_p * 100 if c2o_p else None)
 
         lt = lt_map.get(eid, {})
         lt_02d = lt.get("0-2D")
@@ -1119,9 +1225,16 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None)
         "ly_prior": fetch_ce_funnel(ce_id, ly_pri[0], ly_pri[1]),
     }
 
-    sys.stderr.write("5. Fetching L12M trajectory...\n")
+    sys.stderr.write("5. Fetching multi-year trajectory...\n")
     sys.stderr.flush()
     monthly = _fetch_monthly_summary(ce_id)
+    # Merge CVR-RCA monthly CVR onto each month (match on the 'month' key).
+    cvr_by_month = {r["month"]: r.get("cvr") for r in fetch_monthly_cvr(ce_id)}
+    for m in monthly:
+        m["cvr"] = cvr_by_month.get(m.get("month"))
+    # History flags for the renderer's "(new)" pill.
+    history_months = sum(1 for m in monthly if _g(m, "revenue"))
+    has_ly = history_months >= 13
 
     sys.stderr.write("6. Fetching top TGIDs...\n")
     sys.stderr.flush()
@@ -1129,11 +1242,19 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None)
 
     sys.stderr.write("6b. Fetching TGID funnel...\n")
     sys.stderr.flush()
-    tgid_funnel = fetch_tgid_funnel(ce_id, cur, ly_cur)
+    tgid_funnel = fetch_tgid_funnel(ce_id, cur, pri)
 
     sys.stderr.write("6c. Fetching TGID lead time...\n")
     sys.stderr.flush()
     tgid_lt = fetch_tgid_lead_time(ce_id, cur, ly_cur)
+
+    sys.stderr.write("6d. Fetching vendor breakdown...\n")
+    sys.stderr.flush()
+    vendors = fetch_vendor_breakdown(ce_id, cur, pri)
+
+    sys.stderr.write("6e. Fetching funnel by dimension (channel, language)...\n")
+    sys.stderr.flush()
+    funnel_dims = fetch_funnel_by_dimension(ce_id, cur)
 
     sys.stderr.write("7. Computing Shapley decomposition...\n")
     sys.stderr.flush()
@@ -1182,9 +1303,13 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None)
         "",
         render_funnel(funnel, w),
         "",
+        render_funnel_by_dimension(funnel_dims, w),
+        "",
         render_l12m(monthly),
         "",
         render_tgids_enriched(tgids, tgid_funnel, tgid_lt, w),
+        "",
+        render_vendors(vendors, w),
         "",
         render_shapley(shapley, w),
         "",
@@ -1222,6 +1347,8 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None)
             "metadata": {k: str(v) for k, v in meta.items()} if meta else {},
             "vitals": vitals,
             "shapley": shapley,
+            "history_months": history_months,
+            "has_ly": has_ly,
         }
         with open(json_path, "w") as f:
             json.dump(sidecar, f, default=str, indent=2)

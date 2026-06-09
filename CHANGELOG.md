@@ -5,6 +5,144 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.6.0] — 2026-06-09 — CE Health Wave B: new data (multi-year, vendor, funnel-by-dimension, MoM TGIDs)
+
+**Summary:** Wave A reorganised CE Health on the data it already had; **Wave B adds the data it was missing** — multi-year trajectory, a vendor breakdown, funnel cuts by channel/language, and correct month-over-month TGID economics. Engine work lives in `ce-health-skill-main` (re-vendored into the bundle); the renderer presents it.
+
+### What changed
+- **Multi-year trajectory + CVR.** Monthly lookback extended 13 → 36 months, plus a new monthly **CVR** series (CVR-RCA's definition). The Revenue Trajectory section gains a **Predicted-Revenue × CVR YoY pivot**; a `history_months` / `has_ly` flag drives a compact "(new)" treatment for young CEs.
+- **Vendor Breakdown (new section).** Per-vendor revenue, share, orders, AOV, CR, take rate + **fulfilment type** — the supply/sales landscape. Uses Omni's measure definitions (`amount_revenue_usd`; TR = rev/completed-gross; CR = completed/gross); since vendor is booking-grain, each order is attributed to its **primary booking's vendor** to avoid fan-out double-counting.
+- **Funnel by dimension.** The Funnel section gains a **"Break funnel down by"** dropdown — Landing page (existing) plus new **Channel** and **Language** cuts (LP2S/S2C/C2O/CVR per value).
+- **TGID corrections.** Every TGID delta is now **MoM (pre/post)**, not YoY — fixing the unlabeled, confusing "+142%". **RPC** is redefined to **S2O × AOV × TR** (interim per-select-view proxy). Experience names are emitted **untruncated** (full name on hover). Revenue is labelled **Predicted Revenue** (headline) vs **Actual Revenue** (Driver Diagnosis).
+- **Renderer hardening.** `section()`'s header match is now single-line, so same-prefix sections (e.g. "Funnel" vs "Funnel by Language") can't collide. New display order inserts **Vendor Breakdown at position 7** (Lead Time / Historical / Countries → 8/9/10).
+
+### Blast radius
+- `ce-health-skill-main` engine (`ce_health.py` + `engine/sources/bq.py`), re-vendored via `scripts/vendor.sh`, **+** `ce-rca/scripts/render_ce_health.py`. No `compose.py` / template / other-sub-skill change. Verified end-to-end on CE 243 + CE 3593 through the **vendored** engine.
+
+### Deferred
+- Exact RPC formula (interim S2O×AOV×TR in place); funnel **platform** + **page-type** cuts; the historical-context per-CE memory subsystem (Wave C).
+
+---
+
+## [v2.5.4] — 2026-06-09 — CE Health tab: Driver Diagnosis to position 3 + waterfall un-truncated
+
+**Summary:** Two presentation tweaks. **(1)** The Shapley **Driver Diagnosis** moves up to **position 3** (right after Revenue Trajectory) so "what drove revenue" reads early — new order: CE Vitals → Revenue Trajectory → Driver Diagnosis → Channel Breakdown → Funnel → Top TGIDs → Lead Time → Historical → Customer Countries (titles renumbered; anchor ids unchanged, so all `↗` links still work). **(2)** The revenue **waterfall was clipping on the right** — the first/last x-ticks are shortened to **Pre / Post** (dates stay in the chart subtitle) and the margins widened, so the last bar's label and the x-axis labels render fully.
+
+### Blast radius
+- `scripts/render_ce_health.py` only — no compose/template/sub-skill/engine change. Verified on ce-243 + ce-3593.
+
+---
+
+## [v2.5.3] — 2026-06-09 — CE Health tab: reverted the non-functional TGID metric selector
+
+**Summary:** Reverted **only** the TGID "metric selector" feature (one of the four v2.5.2 refinements) from `scripts/render_ce_health.py`. It rendered the column checkboxes unchecked and the show/hide toggle didn't work, so it's been removed and **parked for a later wave**. **All other CE Health table changes are retained** — nothing else was touched.
+
+### What changed
+- **Removed the TGID metric selector.** Deleted the `_tgid_metric_selector` function (the checkbox bar above the TGID main table), its `.ceh-msel` CSS, and its toggle `<script>`, plus the selector wiring in `build_tgid_main`. The supporting `styled_table` additions (`table_id` / `col_data` params, the `#ceh-tgid-main` id, and the `data-col` attributes) were also removed cleanly since nothing else used them — no inert leftovers.
+
+### Retained (unchanged)
+- Section titles 1..9 in display order (Vitals = "1."); the derived **S2O = S2C × C2O** colour-scaled column inside the Funnel Metrics group; the **CR<80% red** highlight; blue group dividers; grouped header bands; sticky/frozen identity columns; landing-page URL ellipsis + hover; collapsible sections; all Plotly charts.
+
+### Validation
+- Re-rendered + recomposed ce-243 and ce-3593 into `report_v2.html`. Confirmed: `ast.parse` clean; **no `COLUMNS`/`Columns` checkbox bar, no `.ceh-msel`, no `_tgid_metric_selector`, no `ceh-tgid-main`/`data-col` residue** in the output; the TGID table still has the S2O colour-scaled column, the CR<80% red rule, blue dividers, grouped headers, and sticky columns; section titles still read 1..9 with Vitals = "1."; landing-URL `title=` hover intact; collapse JS + Plotly charts intact; other tabs unaffected (selector-related diff against the prior reports = 0 lines). Ran both CEs.
+
+### Deferred (later wave)
+- A working TGID column show/hide control — parked until the toggle behaviour can be implemented correctly.
+
+---
+
+## [v2.5.2] — 2026-06-09 — CE Health tab: four presentation refinements
+
+**Summary:** A second small polish pass on the CE Health tab — four targeted, presentation-only refinements, all in `scripts/render_ce_health.py`. **No `compose.py` / template / shared-`visual_kit` / sub-skill / engine change.**
+
+### What changed
+1. **Section titles renumbered to display order.** The tab was reordered in Wave A, but the section headers still showed CE Health's original numbers (so the reader saw "2." at the top, then "3", "4", "6", "9", "8", "7", "11"). The visible numbers now run a clean **1..9 in the order the sections actually appear** — CE Vitals = "1.", then Revenue Trajectory, Channels, Funnel, Top TGIDs, Lead Time Cohorts, Historical Context, Driver Diagnosis, Customer Countries. The underlying anchor ids are untouched, so every cross-tab "↗" jump still lands correctly.
+2. **A derived S2O column in the TGID table.** S2O isn't in the source data, so it's computed per row as **S2C × C2O** and shown inside the Funnel Metrics group with the same green→amber→red colour scale already used for S2C and C2O. A note flags that this is a presentation approximation pending an exact engine figure (Wave B). The existing "CR below 80% → red" highlight still works.
+3. **A column selector for the TGID table.** A compact checkbox bar above the table lets the reader hide/show individual metric columns (the TGID and Experience identity columns stay frozen). Everything starts visible; toggling is instant and doesn't disturb the collapsible sections, frozen columns, grouped header bands, or dividers.
+4. **Landing-page URLs truncate with hover.** Long landing-page URLs now show with an ellipsis but reveal the full URL on hover. (This works because landing URLs are complete in the source — unlike experience names, which are truncated upstream and left for a later engine fix.)
+
+### Validation
+- Re-rendered + recomposed ce-243 and ce-3593 into `report_v2.html`. Confirmed: parses clean; section titles read 1..9 in display order with CE Vitals = "1." and the anchor-id set byte-identical to before; the TGID table has an S2O column inside Funnel Metrics with a colour scale; the CR<80% red rule is intact; the all-checked column selector renders above the TGID table and its toggle script is syntactically valid (`node --check`); landing-URL cells carry hover titles; collapsible sections, frozen columns, dividers, and grouped headers all intact; all Plotly charts present; other tabs unaffected (non-CE-Health source artifacts byte-identical).
+- **Not attempted (left for Wave B):** experience-name full-text-on-hover — the name is truncated in the CE Health source itself (a literal "…"), so the renderer cannot recover it.
+
+---
+
+## [v2.5.1] — 2026-06-09 — CE Health tab: seven presentation refinements
+
+**Summary:** A follow-up polish pass on the CE Health tab requested after Wave A — seven targeted, presentation-only refinements, all in `scripts/render_ce_health.py`. **No `compose.py` / template / shared-`visual_kit` / sub-skill / engine change.**
+
+### What changed
+1. **Primary driver from the Shapley, not the largest vitals Δ.** The renderer used to label the metric with the biggest change as the "primary mover", which kept flagging *Revenue* (the outcome, not a cause). It now reads the §7 six-factor Shapley decomposition — computed once and shared with the §7 waterfall, so no extra query — and names the factor with the largest contribution. A "Primary driver (Shapley): {factor} ({±$})" note appears under the vitals comparison; if that factor is one of AOV / Take Rate / Completion / Orders, that row is also bolded. Traffic and CVR (which have no vitals row) show the note only. Revenue is never auto-bolded. If the supporting query fails, the note is simply omitted (no guessing).
+2. **Collapsible section headers** now read as real, clickable headers — larger bold title, bigger chevron, vertical padding, a subtle hover highlight, and a light divider.
+3. **Cryptic "step down" funnel flag** replaced with a plain "↓ X.Xpp vs prior", shown only when a funnel stage is materially below the prior period.
+4. **Funnel cards** relabelled to the standard shorthand **LP2S / S2C / C2O** (the LP Users volume card is unchanged).
+5. **TGID Experience names** truncate with an ellipsis but show the full name on hover.
+6. **"new" / "—" cell clutter cleaned up.** A trailing "—" ("no prior") is dropped to show just the value; a trailing "new" becomes a small muted badge instead of inline text. Normal up/down deltas still render as the two-line coloured cell.
+7. **Window-agnostic period label.** The change badges hardcoded "MoM", which is wrong for a custom date window. The label is now derived from the run's window type — "MoM" for a calendar month, "vs prior" otherwise — and used on the vitals cards, funnel cards, and the vitals note.
+
+### Validation
+- Re-rendered + recomposed ce-243 and ce-3593 (both custom-window runs, both with a new experience) into `report_v2.html`. Confirmed: parses clean; Shapley primary-driver note present (ce-243 → "Orders / User" bolds the Orders row; ce-3593 → "Traffic" note-only); Revenue never auto-bolded; headers larger/clickable; no "step down" text; LP2S/S2C/C2O cards; experience cells carry hover titles; zero "K new" / "% —" literals; **rendered deltas read "vs prior" — no "MoM" on either custom-window run**; all Plotly charts intact; other tabs unaffected.
+
+---
+
+## [v2.5.0] — 2026-06-09 — CE Health revamp, Wave A (presentation-only)
+
+**Summary:** BGMs reading the CE Health tab wanted it reorganised around a CE's *contours* — vitals → revenue trajectory → channels → funnel → supply/sales landscape — and asked for collapsible sections so a long tab is navigable. Wave A delivers everything achievable **on the data CE Health already produces**, entirely in the renderer (`scripts/render_ce_health.py` + fragment-scoped CSS/JS). **No engine, no new BigQuery queries, no `compose.py` / template / shared-`visual_kit` / sub-skill change.**
+
+### What changed
+- **Collapsible sections (central, via `block()`).** Every section now has a clickable header (a `<button>`, so the cross-tab anchor router never intercepts it) with a chevron; the body collapses/expands. A small fragment-scoped script — scoped to `#tab-cehealth` — toggles on header click and **auto-expands a section when a link targets it** (e.g. a `↗` from the Summary tab) on both click and page-load, since the template's router otherwise swallows `:target`. **Vitals and Revenue-trajectory open by default; everything else starts collapsed.**
+- **Page reorder.** Vitals → Revenue trajectory → Channels → Funnel → TGID → Lead-time → Historical → Driver diagnosis → Customer countries.
+- **Vitals.** Cards reordered to lead with Revenue (Revenue · Orders · AOV · Take Rate · Completion · ROI); the comparison table marks the metric that moved most as the "primary mover".
+- **Revenue trajectory** moved up, and the monthly revenue chart now shows Revenue, Orders, ROI, TR, CR and AOV together on hover.
+- **Channels.** Revenue and Share moved to the left (current state first), automatic benchmark flags on Share (Google Search should lead at ~50%; PMax/Bing ~10%; Organic ~5%; combined cross-sell over 10% flags keyword leakage), and a 2–3 line plain-English summary that stays visible while the section is collapsed.
+- **Funnel.** Four KPI cards (LP→Select, Select→Cart, Cart→Order, LP Users, with month-over-month change) over the year-over-year detail table; the Landing Pages table is folded in as a funnel lens; the worst-moving step is flagged.
+- **TGID.** One main table with blue dividers between the Order-Metrics and Funnel-Metrics groups (RPC moved into Funnel), lead-time-bucket columns split into a separate "TGID × Lead-time mix" table, the ~80%-of-revenue concentration highlighted green, a Concentrated/Normal/Fragmented classification label, low-completion and conversion-rate conditional shading, and a high-traffic-low-conversion flag.
+- **Lead-time** cohorts kept beside the TGID block with a one-line callout on the dominant booking window (e.g. long-lead skew).
+
+### Decisions
+- **Presentation-only and rule-based.** Every summary/flag is deterministic Python on data already on disk — no new queries, no LLM text. Summaries are shown only for Channels and Lead-time (per stakeholder ask); all other sections are collapsible with no summary.
+- **Deferred to Waves B/C:** multi-year YoY table, funnel by-dimension/platform, vendor breakdown, exact S2O/RPC from orders, the "+142%" fix, and the historical-context memory subsystem.
+
+### Validation
+- Re-rendered + recomposed ce-243 (a growing CE with cross-sell leakage) and ce-3593 (a declining CE) into `report_v2.html`. Programmatic checks confirm collapsible sections, the correct default-open set and page order, blue group dividers, the separate lead-time table, folded-in Landing Pages, funnel KPI cards, channel/lead-time summaries, no leftover raw "$X -Y%" cells, all Plotly charts intact, and **non-CE-Health tabs byte-identical** to the prior renderer (apples-to-apples compose).
+
+---
+
+## [v2.4.0] — 2026-06-09 — Structured run folder (report.html at top, everything else in subfolders)
+
+**Summary:** A finished CE-RCA run left ~25 files dumped flat in the run folder — the deliverable (`report.html`) buried among transcripts, JSON stages, fragments, logs, and machine plumbing. Opening the folder, you couldn't tell what mattered. v2.4.0 makes the run folder self-evident: **`report.html` is the only top-level file; everything else is grouped into by-type subfolders.**
+
+### What changed
+- **New orchestrator step — "Organize" (SKILL.md Step 4f):** after composing the report, a silent, idempotent tidy moves intermediates into `transcripts/ · tabs/ · reports/ · data/ · logs/`, leaving `report.html` at the top. The CVR-RCA transcript is renamed `transcript.md → transcripts/transcript_cvr_rca.md` so it reads as its owner's. Commands are run-dir-relative and glob-safe (use `find` for `*` patterns).
+- **`compose.py` is now layout-aware:** a `resolve()` helper + `_SUBDIR` map resolve every input **subfolder-first, root-fallback** (tab fragments, `meta.json`, and transcript collection). The report composes identically whether the run is organized or flat — **older runs and standalone sub-skill runs are unaffected** (verified A/B: flat vs organized compose produce a byte-identical `report.html`).
+- **`logs/_run_log.md` from the start** (Step 0c) so the actively-appended orchestrator log never needs moving.
+- **Docs/paths updated:** `references/followup_guide.md` (reads from the subfolders; Follow-ups card appended to `tabs/followups.html`) and `references/composition_rules.md` (documents the layout + layout-aware resolution).
+
+### Decisions
+- **Orchestrator owns the layout** — zero edits to CVR-RCA / perf-audit / CE-Health, so their **standalone** behavior is unchanged; their flat outputs are reorganized only inside a CE-RCA run.
+- **Backward-compatible** — flat/older run folders still compose correctly (root fallback).
+- **Portable** — all logic lives in versioned skill files (relative paths, no per-machine config), so every install produces the identical structure on every run.
+- **Blast radius: `ce-rca` master only** — no `templates/` / CSS / sub-skill change.
+
+---
+
+## [v2.3.0] — 2026-06-09 — CE-RCA-level evaluator (maintainer on-demand quality tool)
+
+**Summary:** CVR-RCA already grades its own investigation every run; the CE-RCA orchestrator had no equivalent — nothing scored how well the *whole* RCA came together (right direction, right skills dispatched, faithful cross-tab synthesis, complete coverage, actionable next steps). v2.3.0 adds that rubric. It is a **quality-tracking tool for maintainers**, run **on demand** against any finished run-dir — **deliberately NOT wired into the GM run flow** (GMs never see it, and we don't want to spend ~150K tokens + minutes on every GM run for a record the GM never consumes).
+
+### What changed
+- **New `evals/evaluator.md`** — the CE-RCA rubric. 7 orchestration-level themes (Direction & Dispatch · Cross-Tab Synthesis & Corroboration · CE-Level Diagnostic Correctness · Coverage & Completeness · Actionability & Ownership · Report Integrity & Navigability · Evidence Integrity), each 1–5 → **/35**, with grounded failure-mode tags (`MISSING_INSTRUCTION`/`AMBIGUOUS_INSTRUCTION`/`EXEC_ERROR`/`DATA_LIMIT`) and a meta-review note. It scores the **orchestration seams**, not any sub-skill's internal investigation (each self-evaluates).
+- **On-demand usage** — a maintainer spawns a dedicated evaluation sub-agent against any finished run-dir; it reads only on-disk artifacts (no live context needed) and writes `<run_dir>/ce_rca_evaluation.md`. `SKILL.md` documents this under "Maintainer tool — on-demand CE-RCA evaluation." The GM run flow is unchanged (Follow-ups stays Step 5).
+- **Naming hygiene.** CVR-RCA's bare `evaluation.md` is renamed at Step 4b → **`cvr_rca_evaluation.md`** (orchestrator `mv`, exactly like the existing `report.html → cvr_rca_report.html`), so each eval reads as its owner's and the CE-level eval never collides.
+
+### Decisions
+- **Off the GM auto-path** — the eval's value accrues to maintainers from a *sample* of runs, not to GMs on every run; and because it reads only persisted artifacts it can run after the fact, losing nothing by being decoupled.
+- **Dedicated sub-agent**, not inline — keeps it self-contained and reusable against any run-dir.
+- **Not a tab** — internal artifact only; `compose.py`, `templates/`, `composition_rules.md` untouched.
+- **Blast radius: `ce-rca` master only** — no sub-skill change (the CVR eval rename is an orchestrator `mv`).
+
+---
+
 ## [v2.2.4] — 2026-06-08 — Install-time BigQuery access check (verify auth, not just `bq`)
 
 **Summary:** The installer checked that `bq` *exists* but not that the user could actually *run a query* — so someone with `bq` installed but no `gcloud` auth (or no `headout-analytics` access) got a clean install and a confusing failure on their first `/ce-rca`. v2.2.4 adds a real 1-row BigQuery smoke query at install time and tells the user exactly how to fix auth if it fails.

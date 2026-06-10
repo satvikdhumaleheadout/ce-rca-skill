@@ -84,6 +84,11 @@ Render the Omni link on every CVR-RCA report — the row itself is unconditional
 
 Five cards in this order: **CVR · LP2S · S2C · C2O · Traffic (users_lp)**
 
+**Basis label (required):** the funnel is computed **excluding PERFORMANCE_MAX** (matches the Omni
+dashboard) across **all landing page types** (no page-type whitelist). Render a small **"excludes
+PMax"** pill on the funnel section heading — reuse the existing badge styling (`delta-flat` grey),
+no new CSS — so the basis is explicit and never reads as a discrepancy vs a PMax-inclusive table.
+
 Each card shows: pre value (grey, smaller), post value (large bold), delta badge on its own line.
 Delta format: `Δ −0.33pp / −7.0%` — absolute pp change and percentage change together.
 Badge color: `delta-neg` (red) for drops, `delta-pos` (green) for gains, `delta-flat` (grey) for near-zero.

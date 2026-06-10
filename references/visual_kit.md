@@ -684,28 +684,20 @@ When any of those fail, write the report as a single-tab flat layout — no `.ta
     -webkit-overflow-scrolling: touch;
   }
   .md-table-wrap .md-table { width: auto; min-width: 100%; margin: 0; }
-  /* keep cells on one line so the table takes its natural width and scrolls */
+  /* Cells wrap at a READABLE width; the wrapper scrolls horizontally only if the
+     columns together still exceed the container. No positional column-freeze — the
+     old "freeze first two columns at 150px/84px" rule crushed any prose column that
+     happened to be column 2 (e.g. a Recommended-Actions ACTION cell) to one word
+     per line. Shape-agnostic: short cells (numbers) stay compact at min-width;
+     long prose wraps at <=340px instead of collapsing. */
   .md-table-wrap .md-table th,
-  .md-table-wrap .md-table td { white-space: nowrap; }
-  /* freeze the first two columns */
-  .md-table-wrap .md-table th:nth-child(1),
-  .md-table-wrap .md-table td:nth-child(1) {
-    position: sticky; left: 0; z-index: 2;
-    white-space: normal; min-width: 150px; max-width: 150px;
+  .md-table-wrap .md-table td {
+    white-space: normal;
+    vertical-align: top;
+    min-width: 80px;
+    max-width: 340px;
+    overflow-wrap: break-word;
   }
-  .md-table-wrap .md-table th:nth-child(2),
-  .md-table-wrap .md-table td:nth-child(2) {
-    position: sticky; left: 150px; z-index: 2;
-    white-space: normal; min-width: 84px; max-width: 84px;
-    box-shadow: 1px 0 0 #e0e4ef;            /* boundary line at the freeze edge */
-  }
-  /* solid backgrounds so scrolling cells don't show through the frozen ones */
-  .md-table-wrap .md-table td:nth-child(1),
-  .md-table-wrap .md-table td:nth-child(2) { background: #fff; }
-  .md-table-wrap .md-table th:nth-child(1),
-  .md-table-wrap .md-table th:nth-child(2) { background: #f5f6fa; z-index: 3; }
-  .md-table-wrap .md-table tr:hover td:nth-child(1),
-  .md-table-wrap .md-table tr:hover td:nth-child(2) { background: #fafbfd; }
 
   /* Fallback for the rare case the markdown contains a construct our conversion
      mapping doesn't cover — we embed the raw markdown text directly inside this

@@ -177,15 +177,30 @@ _TRAIL_NEW = re.compile(r'^(?P<main>.*\S)\s+new$')
 _TRAIL_NOPRIOR = re.compile(r'^(?P<main>.*\S)\s+[—–-]$')
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Tunable presentation thresholds — heuristics for flags/labels, NOT category-
+# specific truths. Centralised here so they can be retuned in one place.
+# ─────────────────────────────────────────────────────────────────────────────
+# Cumulative-Share % up to which TGIDs are counted "concentrated" (the green band
+# in §8, and the Concentrated/Normal/Fragmented label). ~80% is a Pareto heuristic.
+TGID_CONCENTRATION_PCT = 80.0
+# Derived-S2O (S2C×C2O) % below which a high-traffic TGID is flagged "low S2O" in §8.
+TGID_LOW_S2O_PCT = 8.0
+# Near-flat delta band: a delta whose magnitude is below this is treated as "flat"
+# (amber) rather than up/down. Separate thresholds for pp vs % deltas.
+NEAR_FLAT_PP = 1.0   # |Δ| < 1pp → flat
+NEAR_FLAT_PCT = 5.0  # |Δ| < 5%  → flat
+
+
 def _delta_dir(delta):
     """Classify a delta token like '+3.7pp' / '-63%' → 'up' | 'down' | 'flat'.
-    Near-flat band (amber): |Δ| < 1pp or < 5%. Tunable."""
+    Near-flat band (amber): |Δ| < NEAR_FLAT_PP (pp) or < NEAR_FLAT_PCT (%). Tunable."""
     m = re.match(r'^([+\-−])([\d.,]+)(pp|%)$', delta.replace('−', '-').strip())
     if not m:
         return 'flat'
     sign, num, unit = m.groups()
     val = float(num.replace(',', '')) * (-1 if sign == '-' else 1)
-    thr = 1.0 if unit == 'pp' else 5.0
+    thr = NEAR_FLAT_PP if unit == 'pp' else NEAR_FLAT_PCT
     return 'flat' if abs(val) < thr else ('up' if val > 0 else 'down')
 
 
@@ -342,7 +357,12 @@ CEH_COLLAPSE_SCRIPT = (
     "<script>(function(){"
     "var root=document.getElementById('tab-cehealth');if(!root)return;"
     "function setOpen(b,open){if(!b)return;b.classList.toggle('ceh-collapsed',!open);"
-    "var t=b.querySelector('.ceh-toggle');if(t)t.setAttribute('aria-expanded',open?'true':'false');}"
+    "var t=b.querySelector('.ceh-toggle');if(t)t.setAttribute('aria-expanded',open?'true':'false');"
+    # On expand, resize any Plotly chart inside — it was drawn at ~700px default while the
+    # section was display:none; without this it stays stuck at that width on first open.
+    "if(open&&window.Plotly){setTimeout(function(){"
+    "b.querySelectorAll('.js-plotly-plot').forEach(function(el){"
+    "try{window.Plotly.Plots.resize(el);}catch(e){}});},30);}}"
     "root.addEventListener('click',function(e){"
     "var t=e.target.closest('.ceh-toggle');if(!t||!root.contains(t))return;"
     "var b=t.closest('.analysis-block');setOpen(b,b.classList.contains('ceh-collapsed'));});"
@@ -584,39 +604,157 @@ def card(label, post_val, delta_txt, delta_cls, pre_val=None):
             f'<div class="delta {delta_cls}">{delta_txt}</div></div>')
 
 
+# §8 user-context slot ordering + labels. Each tuple is
+# (canonical-slot-name-as-written-in-user_context.md, display-label-in-report).
+# Render order is the BGM reading order: orient (About) → bounds (Constraints,
+# Failure modes) → analyst intent (priors/focus) → facts (events) → references.
+_UCTX_SLOT_ORDER = [
+    ("About this CE", "About this CE"),
+    ("Constraints", "Constraints"),
+    ("Known failure modes", "Known failure modes"),
+    ("Hypothesis priors", "Analyst priors & focus"),
+    ("Focus / direction", "Analyst priors & focus"),
+    ("Known events", "Known events"),
+    ("Important links", "Important links"),
+]
+# Slots we never surface as their own block (provenance / lens bookkeeping).
+_UCTX_SLOT_SKIP = {"Sources"}
+
+
+def _split_user_context_slots(md: str) -> dict:
+    """Parse user_context.md into {slot-heading: body-markdown}. Slot headings are
+    the `## ...` lines; the leading `# User Context ...` title is ignored. Returns
+    {} if no `##` slots are found (caller then falls back to a verbatim embed)."""
+    slots = {}
+    cur = None
+    buf = []
+    for ln in md.splitlines():
+        m = re.match(r'^##\s+(.*?)\s*$', ln)
+        if m:
+            if cur is not None:
+                slots[cur] = "\n".join(buf).strip()
+            cur = m.group(1).strip()
+            buf = []
+        elif cur is not None:
+            buf.append(ln)
+    if cur is not None:
+        slots[cur] = "\n".join(buf).strip()
+    return slots
+
+
+def _uctx_constraints_block(body: str) -> str:
+    """Render Constraints as warning chips/callout. Each bullet → a chip; non-bullet
+    prose falls back to a single callout line."""
+    items = [re.sub(r'^[-*]\s+', '', ln).strip()
+             for ln in body.splitlines() if ln.strip()]
+    items = [i for i in items if i]
+    if not items:
+        return ""
+    chips = "".join(
+        '<span style="display:inline-block;background:#fff4e5;color:#8a5200;'
+        'border:1px solid #f0c890;border-radius:12px;padding:3px 11px;margin:3px 6px 3px 0;'
+        f'font-size:12.5px;font-weight:600;">⚠ {c}</span>'
+        for c in items
+    )
+    return ('<div style="background:#fffaf2;border-left:3px solid #e0a030;border-radius:4px;'
+            f'padding:9px 12px;margin:2px 0 4px;">{chips}</div>')
+
+
+def _uctx_links_block(body: str) -> str:
+    """Render Important links as a small 2-col table (link · what it gives). Each
+    bullet is parsed as 'link · description' or '[label](url) · description'."""
+    rows = []
+    for ln in body.splitlines():
+        t = re.sub(r'^[-*]\s+', '', ln).strip()
+        if not t:
+            continue
+        # Split on the first ' · ' (or ' - ' / ' — ') into link | description.
+        parts = re.split(r'\s+[·\-—]\s+', t, maxsplit=1)
+        link_raw = parts[0].strip()
+        desc = parts[1].strip() if len(parts) > 1 else ""
+        # Bare URLs become anchors; existing markdown links pass through the renderer.
+        if re.match(r'^https?://\S+$', link_raw):
+            link_html = f'<a class="ref-link" href="{link_raw}">{link_raw}</a>'
+        else:
+            link_html = render_markdown_to_html(link_raw)
+        desc_html = render_markdown_to_html(desc) if desc else ""
+        rows.append(f"<tr><td>{link_html}</td><td>{desc_html}</td></tr>")
+    if not rows:
+        return ""
+    return ('<div class="md-content"><table><thead><tr><th>Link</th>'
+            f'<th>What it gives</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+
+
 def user_context_subsection(run_dir: Path) -> str:
     """Fill §8 with user-provided + recent context if any was captured this run.
 
     Deterministic embed of already-distilled markdown (user_context.md +
-    user_data_*.md + slack_context.md) — no synthesis, no new sub-agent. 'What the
-    RCA found against it' lives in the Summary; we just link there. Returns '' when
-    nothing is present, so §8 renders exactly as before. Never fatal.
+    user_data_*.md + slack_context.md) — no synthesis, no new sub-agent. The
+    user_context.md is SPLIT by its `## ...` slot headings and each slot rendered as
+    its own labelled sub-block (Constraints as warning chips, Important links as a
+    small table); a file with no recognizable slots falls back to the verbatim
+    embed. 'What the RCA found against it' lives in the Summary; we just link there.
+    Returns '' when nothing is present, so §8 renders exactly as before. Never fatal.
     """
     pieces = []
     has_provided = False  # true if the analyst actually supplied something (vs auto-Slack)
     try:
         uc = run_dir / "user_context.md"
         if uc.exists() and uc.read_text().strip():
-            pieces.append(("Analyst context (focus · priors · known events)", uc.read_text().strip()))
-            has_provided = True
+            raw = uc.read_text().strip()
+            slots = _split_user_context_slots(raw)
+            rendered_any = False
+            if slots:
+                seen_labels = set()
+                for slot_name, label in _UCTX_SLOT_ORDER:
+                    body = slots.get(slot_name, "").strip()
+                    if not body or slot_name in _UCTX_SLOT_SKIP:
+                        continue
+                    # Multiple source slots can map to one label (priors + focus);
+                    # accumulate under the first occurrence, render once.
+                    if slot_name == "Constraints":
+                        block_html = _uctx_constraints_block(body)
+                    elif slot_name == "Important links":
+                        block_html = _uctx_links_block(body)
+                    else:
+                        block_html = f'<div class="md-content">{render_markdown_to_html(body)}</div>'
+                    if not block_html:
+                        continue
+                    # If we've already emitted this label (priors then focus), append
+                    # the body without repeating the subhead.
+                    if label in seen_labels:
+                        pieces.append((None, block_html))
+                    else:
+                        pieces.append((label, block_html))
+                        seen_labels.add(label)
+                    rendered_any = True
+            if rendered_any:
+                has_provided = True
+            else:
+                # No recognizable slots — fall back to the verbatim embed (as before).
+                pieces.append(("Analyst context (focus · priors · known events)",
+                               f'<div class="md-content">{render_markdown_to_html(raw)}</div>'))
+                has_provided = True
         for p in sorted(run_dir.glob("user_data_*.md")):
             t = p.read_text().strip()
             if t:
-                pieces.append((f"User data — {p.stem.replace('user_data_', '')}", t))
+                pieces.append((f"User data — {p.stem.replace('user_data_', '')}",
+                               f'<div class="md-content">{render_markdown_to_html(t)}</div>'))
                 has_provided = True
         sc = run_dir / "slack_context.md"
         if sc.exists():
             t = sc.read_text().strip()
             if t and "0 signals" not in t:
-                pieces.append(("Recent Slack signals", t))
+                pieces.append(("Recent Slack signals",
+                               f'<div class="md-content">{render_markdown_to_html(t)}</div>'))
     except Exception:  # noqa: BLE001 — never let context embedding break the tab
         return ""
     if not pieces:
         return ""
-    # Flat: each piece carries its own subhead — no redundant parent wrapper.
+    # Each piece carries its own subhead (or None to continue the prior label).
     inner = "".join(
-        f'{_subhead(title)}<div class="md-content">{render_markdown_to_html(body)}</div>'
-        for title, body in pieces
+        (f'{_subhead(title)}{body_html}' if title else body_html)
+        for title, body_html in pieces
     )
     if has_provided:  # the Summary link only makes sense for analyst-supplied context
         inner += ('<p style="font-size:12px;color:#666;margin-top:10px;">What the RCA found '
@@ -739,7 +877,7 @@ def _tgid_groups(hdr):
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Default-open sections (every other block ships collapsed). One obvious place.
-CEH_DEFAULT_OPEN = {"cehealth-vitals", "cehealth-l12m"}
+CEH_DEFAULT_OPEN = {"cehealth-vitals", "cehealth-l12m", "cehealth-shapley", "cehealth-funnel"}
 
 
 def _col_idx(hdr, *names):
@@ -768,7 +906,9 @@ def channel_flags_and_summary(hdr, rows):
     """Return ({row_idx: chip_html}, summary_html) for the channel table, from
     rule-based Share benchmarks. Deterministic; degrades to ({}, '') on odd shapes."""
     share_i = _col_idx(hdr, "share")
-    name_i = 0
+    name_i = _col_idx(hdr, "channel")
+    if name_i < 0:
+        name_i = 0  # fall back to the identity column if no "Channel" header
     if share_i < 0:
         return {}, ""
     shares = {}
@@ -790,48 +930,59 @@ def channel_flags_and_summary(hdr, rows):
     if not shares:
         return {}, ""
     chips = {}
-    lead_note = ""        # the Google Search headline (always first)
+    lead_note = ""        # the primary-channel headline (always first)
     flag_notes = []       # deviations / leakage (surfaced first within the cap)
     ok_notes = []         # in-range channels (used only to pad the 2–3 lines)
-    # Google Search should be the top channel and ~50%.
-    gs = shares.get("Google Search")
-    top_name = max(shares, key=shares.get) if shares else None
-    if gs is not None:
-        if top_name != "Google Search":
-            ki = next((k for k, n, _ in order if n == "Google Search"), None)
+
+    def _ki(name):
+        return next((k for k, n, _ in order if n == name), None)
+    # Primary channel = the highest-share channel (generalised — no hardcoded leader).
+    # A healthy market is typically search-led, so flag only when search is NOT the
+    # top channel; a "search" channel is any whose name mentions search.
+    top_name = max(shares, key=shares.get)
+    top_v = shares[top_name]
+    search_names = [n for n in shares if "search" in n.lower()]
+    top_is_search = "search" in top_name.lower()
+    if search_names and not top_is_search:
+        for sn in search_names:
+            ki = _ki(sn)
             if ki is not None:
                 chips[ki] = _flag_chip("bad", "not top")
-            lead_note = (f"Google Search is not the top channel ({top_name} leads at "
-                         f"{shares[top_name]:.0f}%) — investigate.")
-        elif gs < 45:
-            ki = next((k for k, n, _ in order if n == "Google Search"), None)
-            if ki is not None:
-                chips[ki] = _flag_chip("warn", f"low ({gs:.0f}%)")
-            lead_note = f"Google Search leads but at {gs:.0f}% (below the ~50% norm)."
-        else:
-            lead_note = f"Google Search leads at {gs:.0f}% (healthy)."
+        lead_note = (f"Primary channel is {top_name} ({top_v:.0f}%), not search-led "
+                     f"(top search channel is below it) — investigate.")
+    elif top_is_search and top_v < 45:
+        ki = _ki(top_name)
+        if ki is not None:
+            chips[ki] = _flag_chip("warn", f"low ({top_v:.0f}%)")
+        lead_note = f"{top_name} leads but at {top_v:.0f}% (below the ~50% norm)."
+    else:
+        lead_note = f"{top_name} leads at {top_v:.0f}% (primary channel)."
+    # Known-channel Share benchmarks. Channels NOT in the dict degrade silently
+    # (no false flag) — the dict is the allow-list of channels we have a norm for.
     for name, (tgt, tol) in _CHAN_BENCH.items():
         if name not in shares:
             continue
         v = shares[name]
         if abs(v - tgt) > tol:
-            ki = next((k for k, n, _ in order if n == name), None)
+            ki = _ki(name)
             if ki is not None:
                 chips[ki] = _flag_chip("warn", f"{v:.0f}% vs ~{tgt:.0f}%")
             flag_notes.append(f"{name} {v:.0f}% (vs ~{tgt:.0f}% benchmark).")
         else:
             ok_notes.append(f"{name} {v:.0f}% in range.")
-    # Cross-sell leakage: Google + Bing cross-sell combined > 10%.
-    xs = shares.get("Google Cross-sell", 0) + shares.get("Bing Cross-sell", 0)
+    # Cross-sell leakage: sum of EVERY channel whose name ends in "Cross-sell"
+    # (generalised beyond Google/Bing) — combined > 10% is flagged.
+    xs_names = [n for n in shares if n.strip().lower().endswith("cross-sell")]
+    xs = sum(shares[n] for n in xs_names)
     if xs > 10:
-        for nm in ("Google Cross-sell", "Bing Cross-sell"):
-            ki = next((k for k, n, _ in order if n == nm), None)
+        for nm in xs_names:
+            ki = _ki(nm)
             if ki is not None:
                 chips[ki] = _flag_chip("bad", "leakage")
         flag_notes.append(f"Cross-sell combined {xs:.0f}% (>10%) — watch for keyword leakage.")
     elif xs > 0:
         ok_notes.append(f"Cross-sell combined {xs:.0f}% — within tolerance.")
-    # Lead with the Google Search verdict, then problems, padding with in-range notes
+    # Lead with the primary-channel verdict, then problems, padding with in-range notes
     # up to 3 lines so the material flags are never crowded out.
     notes = ([lead_note] if lead_note else []) + flag_notes + ok_notes
     summary = " ".join(notes[:3])
@@ -842,7 +993,9 @@ def channel_flags_and_summary(hdr, rows):
 def leadtime_summary(hdr, rows):
     """2–3 line callout comparing the dominant lead-time band's Share to the typical
     0–2D-led pattern. '' on odd shapes."""
-    band_i = 0
+    band_i = _col_idx(hdr, "band")
+    if band_i < 0:
+        band_i = 0  # fall back to the identity column if no "Band" header
     share_i = _col_idx(hdr, "share")
     if share_i < 0:
         return ""
@@ -1015,19 +1168,19 @@ def build_tgid_main(hdr, rows):
             continue
         if k == 0:
             top_share = sv
-        if cum < 80:
+        if cum < TGID_CONCENTRATION_PCT:
             row_classes[k] = 'ceh-conc'
             conc_rows += 1
         cum += sv
-    if top_share > 80:
+    if top_share > TGID_CONCENTRATION_PCT:
         cls_label = "Concentrated"
         cls_note = f"one TGID is {top_share:.0f}% of revenue"
     elif conc_rows <= 3:
         cls_label = "Normal"
-        cls_note = f"top {conc_rows} TGIDs carry ~80% of revenue"
+        cls_note = f"top {conc_rows} TGIDs carry ~{TGID_CONCENTRATION_PCT:.0f}% of revenue"
     else:
         cls_label = "Fragmented"
-        cls_note = f"~{conc_rows} TGIDs needed to reach 80% of revenue"
+        cls_note = f"~{conc_rows} TGIDs needed to reach {TGID_CONCENTRATION_PCT:.0f}% of revenue"
 
     # Conditional formatting + derived S2O flag.
     cell_classes = {}
@@ -1086,8 +1239,8 @@ def build_tgid_main(hdr, rows):
             s2c = numparse(r[s2c_i]); c2o = numparse(r[c2o_i]); tf = numparse(r[traf_i])
             if None not in (s2c, c2o, tf):
                 s2o = s2c / 100.0 * c2o / 100.0 * 100  # %
-                # high traffic vs median, low S2O (< 8% ≈ 0.08 product) → flag.
-                if tf >= traf_med and s2o < 8 and traf_i < len(r):
+                # high traffic vs median, low S2O (< TGID_LOW_S2O_PCT) → flag.
+                if tf >= traf_med and s2o < TGID_LOW_S2O_PCT and traf_i < len(r):
                     base = cell_html.get((k, traf_i))
                     chip = _flag_chip("warn", f"low S2O ~{s2o:.0f}%")
                     if base:
@@ -1132,7 +1285,13 @@ def build_funnel_cards(hdr, rows, period_label="MoM"):
     """4 KPI cards from the §4 funnel table: LP2S · S2C · C2O · LP Users, period Δ
     (current vs prior columns). `period_label` is the window-agnostic delta label
     ("MoM" for a calendar month, else "vs prior"). '' if expected stages aren't found."""
-    cur_i, pri_i = 1, 2  # 'Apr06-Jun04' (current) and 'Feb05-Apr05' (prior)
+    # Locate the current/prior window columns by header rather than fixed position:
+    # they're the first two value columns (skip the Stage label col 0 and any Δ / LY /
+    # YoY columns). Falls back to positions 1, 2 if the header shape is unexpected.
+    val_cols = [i for i, h in enumerate(hdr)
+                if i > 0 and not re.search(r'^\s*[Δ∆]|\bly\b|yoy|vs prior|prior',
+                                           h.strip().lower())]
+    cur_i, pri_i = (val_cols + [1, 2])[:2] if len(val_cols) >= 2 else (1, 2)
     by = {}
     for r in rows:
         if not r:
@@ -1197,10 +1356,23 @@ def build_fragment(run_dir: Path) -> str:
     rev_d = pct_delta(cur["revenue"], pri["revenue"]); roi_d = pp_delta(cur["roi_1"], pri["roi_1"])
     tr_d = pp_delta(cur["tr"], pri["tr"]); cr_d = pp_delta(cur["cr"], pri["cr"])
     aov_d = pct_delta(cur["aov"], pri["aov"]); ord_d = pct_delta(cur["orders"], pri["orders"])
-    # Card order (Wave A): Revenue · Orders · AOV · Take Rate · Completion · ROI. Tunable.
+    # CVR = funnel CVR (orders/users) from vitals[*].cvr (added by the engine). It's
+    # the SAME metric as the Shapley CVR factor. Rendered as a rate card (pp delta);
+    # cards are added per-window grid width below. None-safe (older sidecars omit it).
+    cvr_cur, cvr_pri = cur.get("cvr"), pri.get("cvr")
+    has_cvr = cvr_cur is not None and cvr_pri is not None
+    cvr_card = ""
+    n_cards = 6
+    if has_cvr:
+        cvr_d = pp_delta(cvr_cur, cvr_pri)
+        cvr_card = card("CVR", f"{cvr_cur:.2f}%", f"Δ {cvr_d[0]} {period_label}", cvr_d[1], f"{cvr_pri:.2f}%")
+        n_cards = 7
+    # Card order: Revenue · Orders · CVR · AOV · Take Rate · Completion · ROI. CVR
+    # sits with the rate cards (right after Orders, leading the conversion metrics).
     cards = "".join([
         card("Revenue", money(cur["revenue"]), f"Δ {rev_d[0]} {period_label}", rev_d[1], money(pri["revenue"])),
         card("Orders", f"{cur['orders']:,}", f"Δ {ord_d[0]} {period_label}", ord_d[1], f"{pri['orders']:,}"),
+        cvr_card,
         card("AOV", f"${cur['aov']:.0f}", f"Δ {aov_d[0]} {period_label}", aov_d[1], f"${pri['aov']:.0f}"),
         card("Take Rate", f"{cur['tr']:.1f}%", f"Δ {tr_d[0]} {period_label}", tr_d[1], f"{pri['tr']:.1f}%"),
         card("Completion", f"{cur['cr']:.1f}%", f"Δ {cr_d[0]} {period_label}", cr_d[1], f"{pri['cr']:.1f}%"),
@@ -1257,7 +1429,7 @@ def build_fragment(run_dir: Path) -> str:
                 v_cellhtml[(pm_k, 0)] = (f'<strong>{_html.escape(nm)}</strong>'
                                          '<span class="ceh-prime">primary driver</span>')
     s2 = block("1. CE Vitals", "cehealth-vitals",
-               f'<div class="metric-cards" style="grid-template-columns:repeat(6,1fr);">{cards}</div>'
+               f'<div class="metric-cards" style="grid-template-columns:repeat({n_cards},1fr);">{cards}</div>'
                + _subhead("Full 4-window comparison")
                + styled_table(vh, vr, split_deltas=True, row_classes=v_rowcls, cell_html=v_cellhtml)
                + driver_note
@@ -1346,17 +1518,42 @@ def build_fragment(run_dir: Path) -> str:
     l12 = section(md, "Trajectory")
     _l12_tables = tables_in(l12)
     t_health, t_paid = _l12_tables[0], _l12_tables[-1]
-    hr = t_health[1]; months = [r[0] for r in hr]
-    rev = [numparse(r[1]) for r in hr]; orders = [numparse(r[2]) for r in hr]
+    h_hdr = t_health[0]; hr = t_health[1]
+    p_hdr = t_paid[0]; pr_ = t_paid[1]
+
+    # Locate monthly-table columns by header name (robust to column reorders / a market
+    # that omits a column). A missing column → that series/hover field is omitted, not
+    # crashed. The Month label is the first column.
+    def _cell_at(r, idx):
+        return r[idx] if 0 <= idx < len(r) else ""
+
+    def _series(rows, idx):
+        # Parsed numeric series for an axis; idx<0 (absent column) → all-None series.
+        return [numparse(_cell_at(r, idx)) if idx >= 0 else None for r in rows]
+
+    def _custom(rows, idxs):
+        # Per-row customdata: raw cell text for each requested column (absent → "").
+        return [[_cell_at(r, i) for i in idxs] for r in rows]
+
+    h_month_i = _col_idx(h_hdr, "month")
+    h_rev_i = _col_idx(h_hdr, "revenue", "rev")
+    h_ord_i = _col_idx(h_hdr, "orders", "order")
+    h_roi_i = _col_idx(h_hdr, "roi")
+    h_tr_i = _col_idx(h_hdr, "tr", "take rate")
+    h_cr_i = _col_idx(h_hdr, "cr", "completion")
+    h_aov_i = _col_idx(h_hdr, "aov")
+    months = [_cell_at(r, max(h_month_i, 0)) for r in hr]
+    rev = _series(hr, h_rev_i); orders = _series(hr, h_ord_i)
     # Per-month metric strings for the enriched hover (Revenue·Orders·ROI·TR·CR·AOV —
     # all already in the monthly table). customdata feeds the hovertemplate.
-    h_custom = [[r[1] if len(r) > 1 else "", r[2] if len(r) > 2 else "",
-                 r[3] if len(r) > 3 else "", r[4] if len(r) > 4 else "",
-                 r[5] if len(r) > 5 else "", r[6] if len(r) > 6 else ""] for r in hr]
+    h_custom = _custom(hr, [h_rev_i, h_ord_i, h_roi_i, h_tr_i, h_cr_i, h_aov_i])
     rev_hover = ("<b>%{x}</b><br>Revenue %{customdata[0]}<br>Orders %{customdata[1]}"
                  "<br>ROI %{customdata[2]}<br>TR %{customdata[3]}<br>CR %{customdata[4]}"
                  "<br>AOV %{customdata[5]}<extra></extra>")
-    pr_ = t_paid[1]; clicks = [numparse(r[3]) for r in pr_]; paidroi = [numparse(r[6]) for r in pr_]
+    p_clicks_i = _col_idx(p_hdr, "clicks")
+    p_roi_i = _col_idx(p_hdr, "paid roi", "roi")
+    p_cvr_i = _col_idx(p_hdr, "cvr")
+    clicks = _series(pr_, p_clicks_i); paidroi = _series(pr_, p_roi_i)
     c_rev = ('<div id="chart-cehealth-l12m-rev" class="chart-container" style="width:100%"></div>'
              f'''<script>Plotly.newPlot('chart-cehealth-l12m-rev',[{{type:'bar',name:'Revenue',x:{json.dumps(months)},y:{json.dumps(rev)},customdata:{json.dumps(h_custom)},hovertemplate:{json.dumps(rev_hover)},marker:{{color:'#6c8ebf'}}}},{{type:'scatter',mode:'lines+markers',name:'Orders',x:{json.dumps(months)},y:{json.dumps(orders)},customdata:{json.dumps(h_custom)},hovertemplate:{json.dumps(rev_hover)},line:{{color:'#c62828',width:2}},yaxis:'y2'}}],{{height:300,autosize:true,margin:{{l:62,r:55,t:14,b:55}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},legend:{{orientation:'h',y:-0.25}},yaxis:{{title:'Revenue',tickprefix:'$',gridcolor:'#eef'}},yaxis2:{{title:'Orders',overlaying:'y',side:'right',showgrid:false}}}},{{responsive:true,displayModeBar:false}});</script>''')
     c_paid = ('<div id="chart-cehealth-l12m-paid" class="chart-container" style="width:100%"></div>'
@@ -1407,20 +1604,26 @@ def build_fragment(run_dir: Path) -> str:
                 f'''{{responsive:true,displayModeBar:false}});</script>''')
 
     # Enriched YoY hovers built from the same monthly table rows as the linear charts.
-    # Revenue YoY: reuse the health-table per-month metrics (Revenue·Orders·ROI·TR·CR·AOV).
-    rev_cmap = {r[0]: [r[1] if len(r) > 1 else "", r[2] if len(r) > 2 else "",
-                       r[3] if len(r) > 3 else "", r[4] if len(r) > 4 else "",
-                       r[5] if len(r) > 5 else "", r[6] if len(r) > 6 else ""] for r in hr}
+    # Revenue YoY: reuse the health-table per-month metrics (Revenue·Orders·ROI·TR·CR·AOV),
+    # indexed by header name (same maps as the linear charts above).
+    p_month_i = _col_idx(p_hdr, "month")
+
+    def _mkey(r, idx):
+        return _cell_at(r, idx) if idx >= 0 else _cell_at(r, 0)
+    rev_cmap = {_mkey(r, h_month_i): [_cell_at(r, h_rev_i), _cell_at(r, h_ord_i),
+                                      _cell_at(r, h_roi_i), _cell_at(r, h_tr_i),
+                                      _cell_at(r, h_cr_i), _cell_at(r, h_aov_i)] for r in hr}
     yoy_rev_hover = ("<b>%{x} %{data.name}</b><br>Revenue %{customdata[0]}<br>Orders %{customdata[1]}"
                      "<br>ROI %{customdata[2]}<br>TR %{customdata[3]}<br>CR %{customdata[4]}"
                      "<br>AOV %{customdata[5]}<extra></extra>")
     yoy_html = yoy_chart("chart-cehealth-yoy-rev", "Revenue YoY", "Revenue",
                          months, rev, tickprefix="$",
                          cmap=rev_cmap, hovertemplate=yoy_rev_hover)
-    # CVR lives in the paid table (column index 4, e.g. "3.1%"); show CVR + clicks/paid-ROI context.
-    cvr_keys = [r[0] for r in pr_]; cvr_vals = [numparse(r[4]) if len(r) > 4 else None for r in pr_]
-    cvr_cmap = {r[0]: [r[4] if len(r) > 4 else "", r[3] if len(r) > 3 else "",
-                       r[6] if len(r) > 6 else ""] for r in pr_}
+    # CVR lives in the paid table; show CVR + clicks/paid-ROI context (all by header name).
+    cvr_keys = [_mkey(r, p_month_i) for r in pr_]
+    cvr_vals = _series(pr_, p_cvr_i)
+    cvr_cmap = {_mkey(r, p_month_i): [_cell_at(r, p_cvr_i), _cell_at(r, p_clicks_i),
+                                      _cell_at(r, p_roi_i)] for r in pr_}
     yoy_cvr_hover = ("<b>%{x} %{data.name}</b><br>CVR %{customdata[0]}"
                      "<br>Clicks %{customdata[1]}<br>Paid ROI %{customdata[2]}<extra></extra>")
     yoy_html += yoy_chart("chart-cehealth-yoy-cvr", "CVR YoY", "CVR %",

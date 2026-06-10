@@ -18,6 +18,11 @@ You **weave findings the tabs already reached**. You do **not**:
 - contradict a tab on your own authority, or
 - re-investigate anything.
 
+**Copy numbers exactly — provenance over polish:**
+- **Don't relabel a metric** — an ROI delta stays ROI, a session count stays sessions; never swap one metric's number onto another's name.
+- **Attribute to the tab it came from** — the Source / `↗` must be the tab that produced that exact figure on that basis, not another tab discussing the same entity.
+- **Keep the source's precision** — `6.47%` stays `6.47%`, never re-rounded into a new value.
+
 If two tabs appear to disagree (e.g. CVR-RCA says page-issue, perf-audit says
 traffic-issue), **present both and frame the tension** — do not adjudicate.
 (Resolving contradictions with a tie-break query is a future "arbiter" upgrade —
@@ -73,7 +78,7 @@ views and next steps. It is **not a rigid template** (see "Freedom to adapt").
 | # | Block | What it carries | Source |
 |---|---|---|---|
 | 1 | Vitals cards | current state at a glance (pre→post) | CE Health vitals (verbatim) |
-| 2 | Long-term context | is the move real? (pre→post Δ + YoY Δ) | CE Health vitals + L12M |
+| 2 | Short-term vs long-term context | pre→post Δ + YoY Δ | CE Health vitals + L12M |
 | 3 | Headline callout | TL;DR — the story + the single top action | synthesized |
 | 4 | What we set out to check *(if user context)* | the analyst's intent + whether the RCA answered it | `user_context.md` |
 | 5 | **Per-tab conclusion digests** | each tab's conclusions/callouts **in full** | CE Health · CVR-RCA · perf-audit |
@@ -90,27 +95,43 @@ do not write your own CSS). Every number you show must already appear in a sourc
 ```
 
 ### 2. Vitals cards row
-Use the `metric-cards` grid — the whole-CE state at a glance. Cards (typically **Revenue ·
-Traffic · CVR · AOV · Completion · Take Rate**) show CE Health's vitals **verbatim** (pre → post
-+ delta badge). Pick the set that matters for this CE.
+Use the `metric-cards` grid — the whole-CE state at a glance. **Mirror the CE Health tab's §2
+vitals cards exactly** so the two tabs read identically — same cards, **same order, same labels,
+same decimal places** (7 cards when CVR is present; CVR is conditional — see below):
+
+| # | Label (verbatim) | Format | Example |
+|---|---|---|---|
+| 1 | **Revenue** | money — `$NNN.NK` / `$N.NM` | `$286.5K` |
+| 2 | **Orders** | comma integer | `4,872` |
+| 3 | **CVR** | **2 decimals** + `%` | `6.06%` |
+| 4 | **AOV** | `$` + **0 decimals** | `$335` |
+| 5 | **Take Rate** | **1 decimal** + `%` | `21.7%` |
+| 6 | **Completion** | **1 decimal** + `%` | `86.2%` |
+| 7 | **ROI(1)** | **0 decimals** + `%` | `160%` |
+
+Values are CE Health's vitals (pre → post + delta badge). Use labels **"CVR"**, **"Completion"**
+(not "CR") and **"ROI(1)"** exactly, matching CE Health's decimals (ROI `160%` not `159.7%`; AOV
+`$335`; Take Rate `21.7%`; CVR `6.06%`). **Omit the CVR card when CE Health's sidecar has no `cvr`**
+(drop to 6 cards), mirroring CE Health. Grid columns = card count.
 ```html
-<div class="metric-cards">
+<div class="metric-cards" style="grid-template-columns:repeat(7,1fr);">
   <div class="metric-card">
     <div class="label">Revenue</div>
-    <div class="values"><span class="pre">$1.4M</span><span class="post">$1.2M</span></div>
-    <div class="delta delta-neg">Δ −14%</div>
+    <div class="values"><span class="pre">$421.9K</span><span class="post">$286.5K</span></div>
+    <div class="delta delta-neg">Δ −32%</div>
   </div>
-  <!-- same shape per metric; delta-neg / delta-pos / delta-flat -->
+  <!-- then Orders · CVR · AOV · Take Rate · Completion · ROI(1), same shape, same order as CE Health §2;
+       delta-neg / delta-pos / delta-flat by direction. Use repeat(6,1fr) if CVR is absent. -->
 </div>
 ```
 Omit this row if CE Health didn't run.
 
-### 3. Long-term context — *is the move real?*
+### 3. Short-term vs long-term context
 A compact `analysis-block` that frames the pre→post move against the long-term and last-year
 picture, so a sequential swing isn't read in isolation (a +64% pre→post can sit inside a −43%
 YoY hole — the frame is what makes the move interpretable).
 
-A **distilled table** — the headline metrics that answer "real or not", each with its
+A **distilled table** — the headline metrics, each with its
 **pre→post Δ and YoY Δ**. Choose the metrics that matter (typically Revenue, Orders, CVR or
 CR, AOV, ROI/Take Rate). You do **not** need CE Health's full column set — the complete
 4-window table and the monthly L12M trajectory are one `↗` away at `#cehealth-vitals` and
@@ -129,9 +150,12 @@ short follow or a tight bullet list — never a dense block of prose.
 `callout improve` (green) for an improvement, `callout neutral` (blue) for a flat/benign move.
 Two–three `callout-item`s — *What moved revenue?* / *Why?* / *What's the action?* — each with `↗`.
 
+Give the callout a **plain heading** — just `The Story`, or a one-line factual headline of the
+move (e.g. "Revenue −28%, traffic-led"). No clever metaphors or themed phrasings.
+
 ```html
 <div class="callout improve">
-  <h2>The Story — Conversion-led recovery</h2>
+  <h2>The Story</h2>
   <div class="callout-item">
     <div class="q">What moved revenue?</div>
     <div class="a">Revenue <span class="delta delta-pos">+64%</span> ($118.6K → $194.3K), led by
@@ -141,7 +165,7 @@ Two–three `callout-item`s — *What moved revenue?* / *Why?* / *What's the act
   <div class="callout-item">
     <div class="q">Why?</div>
     <div class="a">A real lower-funnel rate gain — S2C <span class="delta delta-pos">+2.35pp</span>
-      and C2O <span class="delta delta-pos">+4.95pp</span> on flagship TGID 3909
+      and C2O <span class="delta delta-pos">+4.95pp</span> on <top-TGID>
       <a class="ref-link" href="#block-shapley">↗</a></div>
   </div>
   <div class="callout-item">
@@ -216,7 +240,7 @@ detailed cuts (every dimension, every table) stay in the tab.
       <tr>
         <td class="aspect">Primary driver</td>
         <td class="concl">S2C <span class="delta delta-pos">+2.35pp</span> · C2O
-          <span class="delta delta-pos">+4.95pp</span>, on flagship TGID 3909
+          <span class="delta delta-pos">+4.95pp</span>, on <top-TGID>
           <a class="ref-link" href="#block-shapley">↗</a></td>
       </tr>
       <tr>
@@ -254,7 +278,7 @@ One scannable `analysis-block` table, **one row per material driver**:
         <td><strong>CVR</strong></td>
         <td class="num"><span class="delta delta-pos">+$8.5K · 38%</span></td>
         <td>▲</td>
-        <td>S2C+C2O step-up, concentrated on flagship TGID 3909 — a real rate gain, not a mix shift</td>
+        <td>S2C+C2O step-up, concentrated on <top-TGID> — a real rate gain, not a mix shift</td>
         <td><a class="ref-link" href="#cehealth-shapley">↗</a> <a class="ref-link" href="#block-shapley">↗</a></td>
       </tr>
       <!-- one row per material driver; collapse the rest into a single "others net negligible" line if useful -->
@@ -294,7 +318,7 @@ stay in their tabs. Omit this block if no tab produced actions.
   <div class="action-card">
     <div class="ac-header">
       <div class="priority-badge p2">P2</div>
-      <div class="cause">Trace and protect the C2O step-up on flagship TGID 3909
+      <div class="cause">Trace and protect the C2O step-up on <top-TGID>
         <a class="ref-link" href="#tab-cvr-rca">↗</a></div>
     </div>
     <div class="dri-row"><span class="dri-badge">Product</span><span>+ Payments</span></div>
@@ -324,7 +348,7 @@ where relevant):
     <thead><tr><th>Finding</th><th>Source</th><th>Corroborated by</th><th>Implication</th></tr></thead>
     <tbody>
       <tr>
-        <td>CVR +0.73pp, driven by S2C and C2O on flagship TGID 3909</td>
+        <td>CVR +0.73pp, driven by S2C and C2O on <top-TGID></td>
         <td>CVR-RCA <a class="ref-link" href="#block-shapley">↗</a></td>
         <td>CE Health: CVR is the #1 Shapley driver <a class="ref-link" href="#cehealth-shapley">↗</a></td>
         <td>Conversion is the largest contributor — protect the C2O step-up</td>

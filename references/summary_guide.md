@@ -112,16 +112,21 @@ same decimal places** (7 cards when CVR is present; CVR is conditional — see b
 Values are CE Health's vitals (pre → post + delta badge). Use labels **"CVR"**, **"Completion"**
 (not "CR") and **"ROI(1)"** exactly, matching CE Health's decimals (ROI `160%` not `159.7%`; AOV
 `$335`; Take Rate `21.7%`; CVR `6.06%`). **Omit the CVR card when CE Health's sidecar has no `cvr`**
-(drop to 6 cards), mirroring CE Health. Grid columns = card count.
+(drop to 6 cards), mirroring CE Health.
+
+**Grid: use `class="metric-cards summary-vitals"` and do NOT set an inline
+`grid-template-columns`.** The `summary-vitals` class caps the row at **6 equal-width columns**,
+so the 7-card set lays out **6 on the first row and ROI(1) on the second** — every card the same
+size, never overshooting the tab. (A 6-card set, CVR absent, fills a single row.)
 ```html
-<div class="metric-cards" style="grid-template-columns:repeat(7,1fr);">
+<div class="metric-cards summary-vitals">
   <div class="metric-card">
     <div class="label">Revenue</div>
     <div class="values"><span class="pre">$421.9K</span><span class="post">$286.5K</span></div>
     <div class="delta delta-neg">Δ −32%</div>
   </div>
-  <!-- then Orders · CVR · AOV · Take Rate · Completion · ROI(1), same shape, same order as CE Health §2;
-       delta-neg / delta-pos / delta-flat by direction. Use repeat(6,1fr) if CVR is absent. -->
+  <!-- then Orders · CVR · AOV · Take Rate · Completion · ROI(1), same shape, same order as CE Health §2
+       (CVR inserted 3rd); delta-neg / delta-pos / delta-flat by direction. No inline grid style. -->
 </div>
 ```
 Omit this row if CE Health didn't run.

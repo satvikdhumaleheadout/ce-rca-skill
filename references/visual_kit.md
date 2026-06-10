@@ -736,6 +736,14 @@ When any of those fail, write the report as a single-tab flat layout — no `.ta
     display: inline-block;
   }
 
+  /* Summary vitals grid — cap at 6 equal columns so a 7th card (e.g. CVR added
+     to CE Health's six) wraps to the next line instead of overshooting the
+     Summary tab's narrower container. Two-class selector beats base .metric-cards
+     (repeat(5,…)); author must NOT set an inline grid-template-columns (inline
+     would override this). 6 cards → one row; 7 → 6 + ROI(1) on row 2. */
+  .metric-cards.summary-vitals { grid-template-columns: repeat(6, 1fr); }
+  @media (max-width: 800px) { .metric-cards.summary-vitals { grid-template-columns: repeat(3, 1fr); } }
+
   /* Callout direction variants (default .callout stays red = decline) */
   .callout.improve  { border-left-color: #2e7d32; }
   .callout.improve h2 { color: #2e7d32; }

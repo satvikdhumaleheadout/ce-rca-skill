@@ -5,6 +5,19 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.11.1] — 2026-06-10 — Summary vitals wrap to 6/row (ROI to next line, no overshoot)
+
+**Summary:** With the CVR card added (v2.11.0) the Summary had **7** vitals cards forced onto one row (`repeat(7,1fr)` inline), overshooting the Summary tab's narrower container. They now cap at **6 equal columns** so the 7th (ROI(1)) wraps to a second row — every card the same size, nothing clipped.
+
+### What changed
+- **`references/visual_kit.md`** (additive block) — new `.metric-cards.summary-vitals { grid-template-columns: repeat(6, 1fr); }` (＋ a `max-width:800px` → 3-col rule). Two-class selector, so it beats base `.metric-cards`; additive-only, no existing class touched.
+- **`references/summary_guide.md`** (block #2) — the vitals grid now uses `class="metric-cards summary-vitals"` with **no inline `grid-template-columns`** (inline would override the cap). 7 cards → 6 on row 1 + ROI(1) on row 2; 6 cards (CVR absent) → one row.
+
+### Blast radius
+- **`ce-rca` master only** — additive CSS + guide; no `compose.py`/template/sub-skill change. Verified the `.summary-vitals` rule reaches the composite's injected `<style>` and the guide carries no inline 7-col override.
+
+---
+
 ## [v2.11.0] — 2026-06-10 — Omni metric reconciliation (funnel parity) · Summary provenance guard · Summary CVR card
 
 **Summary:** Aligns the report's funnel/metric definitions with the **Omni dashboard** (the source of truth) so the same metric reads the same number across tabs and matches Omni. Verified on CE 3593 (Apr10–Jun08): the CVR-RCA funnel now lands at **LP 50,548 / CVR 6.14% / LP2S 42.9% / S2C 34.5% / C2O 41.52%** vs Omni's 50,543 / 6.1% / 42.89% / 34.48% / 41.52% (the ~5-user residual is the deliberately-skipped 30-day completion window — negligible). Five changes:

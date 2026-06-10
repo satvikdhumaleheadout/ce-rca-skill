@@ -5,6 +5,20 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.11.2] — 2026-06-10 — CE Health funnel → within-session (matches Omni) · transient-404 resilience · deterministic PMax pill
+
+**Summary:** Closes the last funnel mismatch and hardens the engine against a transient BigQuery failure. The CE Health funnel now matches the Omni dashboard and the CVR-RCA tab exactly; a clone-refresh 404 no longer crashes a run; and the "EXCLUDES PMAX" basis pill now renders deterministically on the CE Health funnel.
+
+### What changed
+- **CE Health funnel → within-session basis** (`skills/ce-health/ce_health.py`): `fetch_ce_funnel` (§ funnel) and `fetch_tgid_funnel` (§6) now query the within-session `mixpanel_user_page_funnel_progression` on `event_date` (was the cross-session `mixpanel_user_funnel_progression` on `session_date`). The CE Health funnel now reads the same numbers as the CVR-RCA tab + Omni — verified on CE 3593 (Mar12–Jun09): **89,268 → 82,520 LP** (matches Omni 82,507; LP2S 44.5 / S2C 33.4 / C2O 41.3). No page-type whitelist; PMax excluded. The funnel-CVR feeds the Shapley, so the §7 Shapley basis is now consistent too.
+- **Deterministic "EXCLUDES PMAX" pill** (`scripts/render_ce_health.py`): the §5 Funnel header now renders the pill in code (a prior markdown note was dropped by the renderer). Also removed a stale `page_type` whitelist from `_FUNNEL_SQL` (the Shapley traffic input) so it matches the §4 funnel cards.
+- **Transient NotFound (clone-refresh 404) resilience**: `run_bq_query` in `skills/ce-health/engine/sources/bq.py` and `skills/perf-audit/engine/sources/bq.py` now retry `NotFound` (4×, 10/20/30s backoff) then re-raise — the `analytics_reporting` tables are zero-copy CLONE tables that briefly 404 mid-refresh, and the BQ client does not retry NotFound by default. `skills/cvr-rca/scripts/run_analysis.sh` gains a `bq_q` CLI wrapper that retries the four query stages on "Not found".
+
+### Blast radius
+- `ce-health` engine (`ce_health.py`, `engine/sources/bq.py`) + `scripts/render_ce_health.py` + `perf-audit/engine/sources/bq.py` + `cvr-rca/scripts/run_analysis.sh`. No `compose.py` / template change. VERSION 2.11.1 → 2.11.2.
+
+---
+
 ## [v2.11.1] — 2026-06-10 — Summary vitals wrap to 6/row (ROI to next line, no overshoot)
 
 **Summary:** With the CVR card added (v2.11.0) the Summary had **7** vitals cards forced onto one row (`repeat(7,1fr)` inline), overshooting the Summary tab's narrower container. They now cap at **6 equal columns** so the 7th (ROI(1)) wraps to a second row — every card the same size, nothing clipped.

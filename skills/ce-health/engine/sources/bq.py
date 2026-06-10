@@ -52,9 +52,11 @@ Aggregation invariant (critical):
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 
 logger = logging.getLogger(__name__)
@@ -65,13 +67,38 @@ DATASET = "analytics_reporting"
 _bq_client = None
 
 
-def run_bq_query(query):
-    # type: (str) -> list[dict]
+def run_bq_query(query, _max_retries=4, _base_delay=10.0):
+    # type: (str, int, float) -> list[dict]
+    """Run a BigQuery query and return rows as dicts.
+
+    Retries transient **NotFound (404)** errors. The `analytics_reporting` tables are
+    zero-copy CLONE tables that are dropped + recreated during refresh; a query landing
+    mid-refresh raises "Table ... not found in location EU" for a few seconds. The
+    BigQuery client does NOT retry NotFound by default (it treats 404 as permanent), so
+    without this a single mid-refresh query would crash the whole run. NotFound fails
+    fast (no data scanned), so retrying is cheap. Linear backoff; re-raise after the last
+    attempt so a genuinely-missing table still surfaces (just ~a minute later).
+    """
     global _bq_client
     if _bq_client is None:
         _bq_client = bigquery.Client(project=PROJECT_ID, location="EU")
-    rows = _bq_client.query(query).result()
-    return [dict(row) for row in rows]
+    last_exc = None
+    for attempt in range(1, _max_retries + 1):
+        try:
+            rows = _bq_client.query(query).result()
+            return [dict(row) for row in rows]
+        except NotFound as exc:
+            last_exc = exc
+            if attempt == _max_retries:
+                break
+            delay = _base_delay * attempt
+            logger.warning(
+                "run_bq_query: transient NotFound (likely a clone-refresh window) on "
+                "attempt %d/%d; retrying in %.0fs. Detail: %s",
+                attempt, _max_retries, delay, exc,
+            )
+            time.sleep(delay)
+    raise last_exc
 
 
 def fetch_campaign_level_cm1_roi(

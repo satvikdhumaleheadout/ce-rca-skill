@@ -257,9 +257,9 @@ def fetch_ce_funnel(ce_id, start, end):
         COUNT(DISTINCT IF(has_select_page_viewed, user_id, NULL)) AS select_viewers,
         COUNT(DISTINCT IF(has_checkout_started, user_id, NULL)) AS checkout_starters,
         COUNT(DISTINCT IF(has_order_completed, user_id, NULL)) AS order_completers
-    FROM `{project}.{dataset}.mixpanel_user_funnel_progression`
+    FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
     WHERE combined_entity_id = '{ce_id}'
-        AND session_date BETWEEN '{start}' AND '{end}'
+        AND event_date BETWEEN '{start}' AND '{end}'
         AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
     """.format(
         project=PROJECT_ID, dataset=DATASET,
@@ -392,55 +392,55 @@ def fetch_tgid_funnel(ce_id, cur, pri):
     query = """
     SELECT
         experience_id,
-        COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+        COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
             AND has_select_page_viewed THEN user_id END) AS select_users_cur,
-        COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+        COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
             THEN user_id END) AS total_users_cur,
         SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+            COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
                 AND has_checkout_started THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+            NULLIF(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
                 AND has_select_page_viewed THEN user_id END), 0)
         ) AS s2c_cur,
         SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+            COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
                 AND has_order_completed THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+            NULLIF(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
                 AND has_checkout_started THEN user_id END), 0)
         ) AS c2o_cur,
         SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+            COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
                 AND has_order_completed THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+            NULLIF(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
                 AND has_select_page_viewed THEN user_id END), 0)
         ) AS s2o_cur,
-        COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+        COUNT(DISTINCT CASE WHEN event_date BETWEEN '{p_s}' AND '{p_e}'
             AND has_select_page_viewed THEN user_id END) AS select_users_pri,
         SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+            COUNT(DISTINCT CASE WHEN event_date BETWEEN '{p_s}' AND '{p_e}'
                 AND has_checkout_started THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+            NULLIF(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{p_s}' AND '{p_e}'
                 AND has_select_page_viewed THEN user_id END), 0)
         ) AS s2c_pri,
         SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+            COUNT(DISTINCT CASE WHEN event_date BETWEEN '{p_s}' AND '{p_e}'
                 AND has_order_completed THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+            NULLIF(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{p_s}' AND '{p_e}'
                 AND has_checkout_started THEN user_id END), 0)
         ) AS c2o_pri,
         SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+            COUNT(DISTINCT CASE WHEN event_date BETWEEN '{p_s}' AND '{p_e}'
                 AND has_order_completed THEN user_id END),
-            NULLIF(COUNT(DISTINCT CASE WHEN session_date BETWEEN '{p_s}' AND '{p_e}'
+            NULLIF(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{p_s}' AND '{p_e}'
                 AND has_select_page_viewed THEN user_id END), 0)
         ) AS s2o_pri
-    FROM `{project}.{dataset}.mixpanel_user_funnel_progression`
+    FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
     WHERE combined_entity_id = '{ce_id}'
         AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
-        AND (session_date BETWEEN '{c_s}' AND '{c_e}'
-             OR session_date BETWEEN '{p_s}' AND '{p_e}')
+        AND (event_date BETWEEN '{c_s}' AND '{c_e}'
+             OR event_date BETWEEN '{p_s}' AND '{p_e}')
     GROUP BY 1
-    HAVING COUNT(DISTINCT CASE WHEN session_date BETWEEN '{c_s}' AND '{c_e}'
+    HAVING COUNT(DISTINCT CASE WHEN event_date BETWEEN '{c_s}' AND '{c_e}'
         AND has_select_page_viewed THEN user_id END) > 0
     ORDER BY select_users_cur DESC
     """.format(
@@ -864,9 +864,8 @@ def render_funnel(data, w):
     lines = [
         "## 4. Funnel",
         "",
-        "_Basis: **cross-session** funnel (steps may span multiple sessions) \u00b7 **excludes "
-        "PERFORMANCE_MAX**. The within-session funnel that matches the Omni dashboard and the "
-        "CVR-RCA tab is reported there; this view differs by grain, not error._",
+        "_Within-session funnel \u00b7 **excludes PERFORMANCE_MAX** \u2014 matches the Omni dashboard and the "
+        "CVR-RCA funnel tab._",
         "",
         "| Stage | {} | {} | \u0394 {} ({}) | {} | {} | \u0394 {} ({} LY) | \u0394 LY (YoY) |".format(
             cc, cp, cp, sl, clc, clp, clp, sl),

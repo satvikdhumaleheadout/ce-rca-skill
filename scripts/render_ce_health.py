@@ -433,10 +433,7 @@ WITH base AS (
   FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
   WHERE combined_entity_id = '{ce_id}'
     AND event_date BETWEEN '{pre_start}' AND '{post_end}'
-    AND page_type IN (
-      'Collection','ShoulderPage','Cruises Landing Page','Hop-On Hop-Off',
-      'Airport Transfers','Content Page','Theme','Collection Page','Experience Page'
-    )
+    -- No page_type whitelist: matches the Omni dashboard funnel + §4 funnel cards (all LP types).
     AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
   GROUP BY 1, 3
 )
@@ -1511,7 +1508,12 @@ def build_fragment(run_dir: Path) -> str:
                 + styled_table(fn_h, fn_r, split_deltas=True, cell_html=fn_cellhtml)
                 + _subhead("Funnel by dimension")
                 + build_fdim_dropdown(fdim_panels))
-    s4 = block("5. Funnel", "cehealth-funnel", s4_inner)
+    s4 = block(
+        '5. Funnel'
+        '<span style="font-size:11px;font-weight:600;color:#6b7280;background:#eef0f2;'
+        'border-radius:10px;padding:2px 8px;margin-left:10px;letter-spacing:.04em;'
+        'vertical-align:middle;">EXCLUDES PMAX</span>',
+        "cehealth-funnel", s4_inner)
 
     # §5 Multi-Year Trajectory — charts replace the two monthly tables (same data),
     # plus a YoY pivot (Predicted Revenue, month × year) rendered beneath the chart.

@@ -65,14 +65,34 @@ substitute_sql() {
     "$sql_file"
 }
 
+# ── Helper: run bq with retry on transient clone-refresh "Not found" 404s ──────
+# analytics_reporting tables are zero-copy CLONE tables (dropped+recreated during a
+# refresh); a query landing mid-refresh briefly returns "Table ... not found in
+# location EU". Retry a few times with backoff, then surface the real error.
+bq_q() {
+  local out="$1"
+  local sql; sql="$(cat)"
+  local attempt
+  for attempt in 1 2 3 4; do
+    if printf '%s' "$sql" | $BQ > "$out" 2>"$out.err"; then
+      rm -f "$out.err"; return 0
+    fi
+    if grep -qi "not found" "$out.err" && [ "$attempt" -lt 4 ]; then
+      echo "      transient 'Not found' (clone-refresh?) — retry $attempt/3 in $((attempt*10))s" >&2
+      sleep "$((attempt * 10))"; continue
+    fi
+    cat "$out.err" >&2; rm -f "$out.err"; return 1
+  done
+}
+
 # ── Stage 0: CE metadata + top page URL (serial — populates report header) ────
 echo "[0/4] Fetching CE metadata..."
-substitute_sql "$REFS_DIR/q0_meta.sql" | $BQ > "$OUTPUT_DIR/stage0.json"
+substitute_sql "$REFS_DIR/q0_meta.sql" | bq_q "$OUTPUT_DIR/stage0.json"
 echo "      Done. $(python3 -c "import json; d=json.load(open('$OUTPUT_DIR/stage0.json')); print(d[0].get('combined_entity_name', '(unknown)') if d else '(no rows)')")"
 
 # ── Stage 1: Base funnel (always runs next, determines primary segment) ────────
 echo "[1/4] Running base funnel query..."
-substitute_sql "$REFS_DIR/q1_base.sql" | $BQ > "$OUTPUT_DIR/stage1.json"
+substitute_sql "$REFS_DIR/q1_base.sql" | bq_q "$OUTPUT_DIR/stage1.json"
 echo "      Done. $(python3 -c "import json; d=json.load(open('$OUTPUT_DIR/stage1.json')); print(len(d), 'rows')")"
 
 # ── Determine primary MB/HO from Stage 1 results ──────────────────────────────
@@ -97,12 +117,12 @@ echo "      Primary MB/HO: $PRIMARY_MBHO"
 echo "[2/4] Running daily trend and 90-day rolling trend + LY in parallel..."
 
 substitute_sql "$REFS_DIR/q3_trend.sql" "$PRIMARY_MBHO" \
-  | $BQ > "$OUTPUT_DIR/stage3.json" &
+  | bq_q "$OUTPUT_DIR/stage3.json" &
 PID_Q3=$!
 
 # Q7: 90-day rolling CVR trend + last-year equivalent (POST_END drives both windows)
 substitute_sql "$REFS_DIR/q7_trend_and_ly.sql" \
-  | $BQ > "$OUTPUT_DIR/stage7.json" &
+  | bq_q "$OUTPUT_DIR/stage7.json" &
 PID_Q7=$!
 
 wait $PID_Q3 && echo "      Daily trend done."

@@ -166,7 +166,7 @@ select page.
 Run pricing analysis — `final_price_usd` from `product_rankings_features` pre vs post for top experiences. Did prices increase, and does the timing align with the LP2S drop? A CE-wide price uplift will depress LP2S broadly with no dimension cut showing concentration.
 
 **If pricing is also flat:**
-The drop is broad, no pricing explanation, no concentrated locus. Session recordings are the next tool — look for a UX pattern that affects all users equally (e.g., slow page load, broken image carousel, changed CTA placement). Note in the transcript that no quantitative locus was found; session recordings are the primary evidence. (Event-level analysis is a future addition for this tier.)
+The drop is broad, no pricing explanation, no concentrated locus. Shift to alternative evidence paths that can catch a uniform UX or platform regression: check APM / front-end performance dashboards for a page-load or error-rate regression that began at the post-period onset; cross-reference deployment / release timestamps for a front-end change (slow page load, broken image carousel, changed CTA placement); check vendor / availability-service status for a CE-wide outage; and run event-level analysis on the affected funnel step where available. Note in the transcript that no quantitative locus was found and which alternative path was used.
 
 ### S2C — first-pass branches
 
@@ -270,9 +270,6 @@ Four hypotheses to run in parallel:
 3. **Checkout UX change** — a form field change, CTA relabelling, coupon code
    breakage, or trust signal removal. Concentrate investigation on device ×
    C2A — mobile users are most sensitive to checkout form friction.
-4. **Session recordings** — once any of the above narrows to a locus (device,
-   language, or experience), pull recordings on the checkout page to confirm the
-   pattern.
 
 **Optional — if C2A drop is broad with no device/experience concentration:**
 Run the Geo/Non-Geo cut (`context.md → "Geo vs Non-Geo"`). A checkout

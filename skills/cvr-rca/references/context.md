@@ -1529,26 +1529,6 @@ supply signal.
 
 ---
 
-## Session Recordings
-
-Once a specific locus is confirmed (URL, experience, device, page type, or
-cross-cut), pull recordings with the Mixpanel MCP (`Get-User-Replays-Data`).
-
-**What to look for:** patterns in what users actually experienced — an empty
-availability calendar, a broken date picker, a slow page load, a confusing
-layout change, a checkout form error. Use what you observe as direct evidence.
-It converts "S2C dropped on the Paris river cruise select page" into "users
-consistently encountered an empty date picker on the Paris river cruise select
-page after Apr 8, likely because availability for that period was not loaded."
-
-**In the report:** present session recordings as a structured table (one row per
-recording) with columns: Recording | Steps observed | Inference. The inference
-column states in one sentence what the recording proves or rules out. Do not
-write session recording evidence as a prose block — the table forces structured
-thinking and makes the inference scannable.
-
----
-
 ## Changelog
 
 | # | Date | Changes |

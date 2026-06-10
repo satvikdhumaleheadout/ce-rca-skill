@@ -174,17 +174,8 @@ and stayed zero through the full post period — while near-term (0–7d) bucket
 flat. HO users with planned trip dates reach the select page and find no available
 dates, driving S2C from 24% to 9% on 1,840 users — a loss of ~276 checkouts and 83%
 of the ΔCVR. Lead time distribution confirms the behavior side: 8+ day bookings down
-75–83%. Session recordings: users consistently see an empty date picker beyond the
-current week on the 8821 page.
+75–83%.
 ```
-
----
-
-### Session recordings
-
-Pulled `Get-User-Replays-Data` for CE id, TGID 8821, HO, post period after the
-L2 leaf was confirmed. Users consistently encountered an empty date picker beyond
-7 days. Finding upgraded from "consistent with" to "directly observed."
 
 ---
 
@@ -195,7 +186,7 @@ Shapley bar, S2C daily trend (break on Apr 14), experience-level S2C table
 (TGID 8821 highlighted), TID snapshot table (current-state, 8–30d near-zero as
 scoping signal), inventory daily time-series charts (4 line charts — pre vs post,
 sharp Apr 14 break in 8–30d buckets is the primary supply verdict), lead time
-distribution chart (pre vs post), session recordings table. Action cards:
+distribution chart (pre vs post). Action cards:
 Supply/Ops (reopen 8821 inventory), Growth/BDM (alert affected users).
 
 Sections not present: LP2S deep-dive, C2O section (each <10% of ΔCVR).

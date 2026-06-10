@@ -35,7 +35,7 @@ Per-phase reads:
   both fully.
 - **Step 3** (write the report) — read `references/actions.md` and
   `references/report_structure.md`, both fully.
-- **Step 4** (evaluation) — read `evals/evaluator.md`.
+- **Quality evaluation** (on-demand, not part of the run) — read `evals/evaluator.md`.
 
 ### Version check
 
@@ -185,8 +185,7 @@ At any point a query may fail or return empty. When this happens:
 4. **Adjust confidence language** in the root cause callout if the missing data
    was material. Use "consistent with" rather than "confirmed by" for that claim.
 
-**Scope:** applies to all data pulls — BQ queries, the baseline pipeline, and
-Mixpanel MCP calls.
+**Scope:** applies to all data pulls — BQ queries and the baseline pipeline.
 
 ---
 
@@ -712,37 +711,6 @@ SQL
 
 ---
 
-### Session recordings — required once a locus is confirmed
-
-Once a specific locus is confirmed (URL, experience, device, page type, or any
-concentrated cross-cut), pull session recordings using the Mixpanel MCP
-(`Get-User-Replays-Data`). Any single confirmed dimension is sufficient — you
-do not need all dimensions locked simultaneously. **Applies to both directions
-of CVR movement** — decline loci and improvement loci both warrant recordings,
-though what you look for differs:
-
-- **Decline locus:** look for the failure pattern — an empty date picker, a
-  broken form field, a slow load, a confusing layout change. The recording
-  converts "S2C dropped on experience X" into "users consistently encountered
-  an empty calendar."
-- **Improvement locus:** look for confirmation that the flow is smooth, and
-  surface any new UI element introduced since the prior period (new badge,
-  reordered variants, new pricing display) that could be a structural lever.
-  Recordings on a working flow are not noise — they verify the data finding
-  AND surface what changed.
-
-Recordings move a finding from "consistent with" to "directly observed." They
-are not optional once a locus exists.
-
-If recordings are skipped, the report must explicitly state why (volume too low
-or no concentrated locus found). Do not pull recordings speculatively before a
-locus is identified.
-
-See `context.md` → "Session Recordings" for what to look for and how to
-interpret results.
-
----
-
 ## Step 2b — Synthesise findings and review
 
 Before writing HTML, write a structured findings summary. This is not a draft
@@ -1212,79 +1180,39 @@ cosmetic pass; resolve the findings, then finalize.
 For a concrete walkthrough of how an investigation unfolds end-to-end, see
 `references/worked_example.md`.
 
+**End-of-run footer.** Once the report is written, print exactly one line to the
+user and stop:
+
+```
+Report → <run_dir>/report.html
+```
+
+That single pointer is the **only** chat output at the end of the run. Do not
+narrate the analysis, summarise the report, recap the Slack reconciliation, or
+provide a "highlights" block in chat. The HTML report, the findings.md, and the
+transcript.md are the records — the footer just points the user to them.
+
 ---
 
-## Step 4 — Evaluate the analysis
+## Quality Evaluation — Maintainer Tool (On-Demand)
 
-**Purpose:** pure scoring and quality tracking. Investigation gaps should have
-been closed in Step 2b — the evaluator is not a patch mechanism, it is a record.
+> **Not part of the run.** The quality evaluator is **not** executed on
+> analyst-facing runs — scoring would cost tokens and time for a record the
+> analyst never sees. It is a maintainer tool, run **on demand** against any
+> finished run-dir.
 
-Run this after the report is written. Read the rubric first:
+A maintainer evaluates a finished run by spawning a sub-agent: *"read
+`$SKILL_DIR/evals/evaluator.md` and follow it; run dir `<run_dir>`; write
+`<run_dir>/evaluation.md`."* The sub-agent reads only the on-disk artifacts
+(the HTML report, `transcript.md`, `summary.json`), so it needs no live session
+context. The rubric covers **7 themes**, each scored 1–5.
 
-```bash
-cat "$SKILL_DIR/evals/evaluator.md"
-```
-
-The rubric covers 7 themes. To evaluate, re-read:
-1. The HTML report — as if you've never seen this CE before
-2. Your investigation transcript — what you looked at, why, what you decided
-3. The `summary.json` — to verify claims against actual numbers
-
-Score each theme 1–5. Write the evaluation into the run folder:
-
-```bash
-EVAL_FILE=<run_dir>/evaluation.md
-```
-
-**Evaluation file structure:**
-
-```markdown
-# CVR-RCA Evaluation
-CE [id] · [CE name] | [pre period] vs [post period] | [date]
-
-## Overall verdict
-[3–4 sentences: what did this RCA get right, what was the main failure mode,
-what would a senior analyst say after reading the report?]
-
-## Theme scores
-
-### 1. Narrative Coherence — [score]/5
-### 2. Hypothesis Specificity & Quality — [score]/5
-### 3. Investigation Effort & Adaptivity — [score]/5
-### 4. Branch Decision Quality — [score]/5
-### 5. Evidence Strength — [score]/5
-### 6. Output Appropriateness — [score]/5
-### 7. DRI & Actionability — [score]/5
-
-## Top improvements for next run
-1. [Most impactful concrete improvement]
-2. [Second most impactful]
-3. [Third if applicable]
-```
-
-After writing the evaluation file, print two lines to the user:
-
-```
-Evaluation → [EVAL_FILE]
-[Total X/35] · Strongest: [theme name] ([score]) · Watch: [theme name] ([score])
-```
-
-**These two lines are the ONLY chat output at the end of the run.** Do not
-narrate the full evaluation, summarise the report, recap the Slack
-reconciliation, or provide a "highlights" block in chat. The HTML report, the
-findings.md, the transcript.md, and the evaluation.md are the records — the
-chat footer just points the user to them. If you find yourself wanting to add
-context after the two lines, that context belongs in one of the files instead.
-
-Each run folder in `~/Documents/RCA skill/Test Runs/` accumulates three files:
-`report.html`, `transcript.md`, and `evaluation.md`. Evaluations are the signal
-for improving the skill over time — not for patching individual reports.
-
-When the same improvement appears across multiple evaluations (e.g., session
-recordings consistently not pulled, seasonal events never quantified with a
-controlled comparison), that is a signal to update the skill files —
-`context.md`, `hypothesis.md`, or `SKILL.md` — so the investigation logic
-catches it earlier next time, rather than adding more loops within the skill.
+Run it on a sample of runs while tuning the skill. The signal is not any single
+score — it is the **meta-review**: when the same gap recurs across multiple
+evaluations (e.g., seasonal events never quantified with a controlled
+comparison), that is the cue to update the skill files (`context.md`,
+`hypothesis.md`, or `SKILL.md`) so the investigation logic catches it earlier,
+rather than adding more loops within the skill.
 
 ---
 

@@ -41,8 +41,8 @@ Path A, Path B, L0, L1, L2, Case A, Case B, Step 1, Step 2 are internal investig
 - ❌ "This is likely an extraction artefact."
 
 **3. No speculative user behavior without a data signal.**
-Do not describe what users were thinking, planning, or intending unless there is a data point to ground it — session recordings, a traffic source shift, a lead-time distribution change. Phrases like "high-intent families planning trips" or "students booking spring break" are not findings.
-- ✅ "Session recordings show users encountering an empty date picker beyond 7 days — consistent with the 8+ day booking drop."
+Do not describe what users were thinking, planning, or intending unless there is a data point to ground it — a traffic source shift, a lead-time distribution change, a price move. Phrases like "high-intent families planning trips" or "students booking spring break" are not findings.
+- ✅ "The lead-time bucket query shows the 8+ day booking share dropping from 31% to 9% post — consistent with availability not loading beyond 7 days."
 - ❌ "High-intent families planning Hawaii trips may no longer be converting at the same rate."
 
 **4. External context only when paired with a data signal.**
@@ -709,7 +709,6 @@ Every `.analysis-block` in Section 3 carries an `id` attribute so Sections 1, 2,
 | Experience-level breakdown | `block-experience` |
 | URL-level breakdown | `block-url` |
 | Inventory TID summary | `block-inventory` |
-| Session recordings | `block-recordings` |
 | Lead-time distribution | `block-leadtime` |
 | Price analysis | `block-price` |
 | Weekday composition | `block-weekday` |

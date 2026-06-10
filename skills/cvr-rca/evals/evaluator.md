@@ -1,10 +1,19 @@
 # CVR-RCA Quality Evaluator
 
+> **Maintainer tool — on-demand, not part of the run flow.** This evaluator is **not** run
+> automatically on analyst-facing runs (it would cost tokens + time for a record the analyst never
+> sees). A maintainer runs it on demand against any finished run-dir — it reads only on-disk
+> artifacts, so it needs no live session context. To run: spawn a sub-agent with *"read this file and
+> follow it; run dir `<run_dir>`; write `<run_dir>/evaluation.md`."* Use it on a sample of runs while
+> tuning; recurring gaps across evaluations are the signal to fix the named CVR-RCA skill file (see
+> Meta-review).
+
 ## Your role
 
-You just completed a CVR Root Cause Analysis. Now step back and grade your own work honestly.
+A CVR Root Cause Analysis has just finished. Step back and grade the work honestly, reading only the
+on-disk artifacts as if you were a senior analyst seeing this CE for the first time.
 
-This is not a formality. The purpose is to surface where the analysis fell short of what a sharp analyst would have done — not to ratify the choices made. Be harder on yourself than a colleague would be. If something was vague when it should have been specific, say so. If you ran a section that didn't contribute to the finding, name it.
+This is not a formality. The purpose is to surface where the analysis fell short of what a sharp analyst would have done — not to ratify the choices made. Be harder on it than a colleague would be. If something was vague when it should have been specific, say so. If a section was run that didn't contribute to the finding, name it.
 
 ---
 
@@ -36,7 +45,7 @@ The 7 themes apply to **both** CVR-decline and CVR-improvement RCAs, but the "Sc
 
 The structural criteria are identical — the report must still commit to a specific finding, the hypotheses must still be falsifiable, the evidence must still be tied to data, and the DRIs must still be specific. The semantic flavour just inverts.
 
-**One direction-specific exception — Theme 3 (Investigation Effort).** For decline RCAs, depth is unambiguously good — running session recordings, supply queries, cross-cuts all strengthen the score. For improvement RCAs, depth is good only if proportionate to the structural delta:
+**One direction-specific exception — Theme 3 (Investigation Effort).** For decline RCAs, depth is unambiguously good — running supply queries, URL-level drill-downs, cross-cuts all strengthen the score. For improvement RCAs, depth is good only if proportionate to the structural delta:
 - If `structural_delta_cvr` is small (<+0.15pp after seasonal subtraction), exhaustive deep-dive queries lower the score — they're over-investigating a noise-level structural gain.
 - If `structural_delta_cvr` is meaningful (≥+0.20pp), the depth standard matches decline RCAs.
 
@@ -70,7 +79,7 @@ Every gap gets a **`Why`** line. Use exactly one of these four tags:
 | `[MISSING_INSTRUCTION]` | The skill files contain no instruction for this behaviour. Claude had no way to know it was expected. |
 | `[AMBIGUOUS_INSTRUCTION]` | An instruction exists but is vague, incomplete, or conflicting enough that Claude reasonably interpreted it differently. |
 | `[EXEC_ERROR]` | The instruction was clear and present. Claude attempted to follow it but reasoned incorrectly (wrong formula, misread data, faulty inference). |
-| `[DATA_LIMIT]` | The data needed to do this correctly was unavailable (no session recordings, no LY series, no availability table access). Skipping or noting the absence was the right call — not a skill flaw. |
+| `[DATA_LIMIT]` | The data needed to do this correctly was unavailable (no LY series, no availability table access). Skipping or noting the absence was the right call — not a skill flaw. |
 
 ### Grounding requirement
 
@@ -117,7 +126,7 @@ Score low if:
 Score high if:
 - Hypotheses are falsifiable: "LP2S dropped on Apr 8 because the mobile deploy that day broke the date-picker loading on iOS" is falsifiable; "LP2S dropped on mobile" is just an observation
 - The report names the most likely explanation and distinguishes it from alternatives considered
-- Session recordings or URL-level data were used to sharpen or eliminate a hypothesis
+- URL-level or event-level data was used to sharpen or eliminate a hypothesis
 - The root cause names something specific: a campaign, a page URL, an experience, a date, a deploy — not a generic funnel step
 
 Score low if:
@@ -135,13 +144,11 @@ Score low if:
 Score high if:
 - A custom query was written when the standard queries couldn't confirm the hypothesis
 - The investigation drilled to page-URL level when a dimension cut pointed there
-- Session recordings were pulled once a specific URL or cut was identified (not as a fishing exercise)
 - The investigation stopped when evidence was conclusive — it didn't keep running analyses "just in case"
 
 Score low if:
 - The standard queries were treated as sufficient even when they left a hypothesis unconfirmed
 - A dimension cut showed a concentrated signal but no follow-up query was run to confirm the URL
-- Session recordings were not used despite a specific URL being identified as the locus
 - Unnecessary analyses were run (e.g., a full language breakdown when a single broken deploy explains everything)
 
 ---
@@ -169,14 +176,12 @@ Score low if:
 *Are callouts backed by real evidence, or are they inferences without support?*
 
 Score high if:
-- Every claim in the report is tied to a specific data point (a number, a date, a URL, a recording observation)
-- Session recordings, when used, produce a specific observation ("users consistently saw an empty calendar on the Paris river cruise page after Apr 3") not a vague one
+- Every claim in the report is tied to a specific data point (a number, a date, a URL, a lead-time bucket shift)
 - Confidence qualifiers are appropriate: sample sizes are noted when small, signals are described as "consistent with" rather than "proven" when the evidence is indirect
 - There is a clear distinction between "confirmed" findings and "hypothesis to investigate"
 
 Score low if:
 - Claims are made without citing a number from the data (e.g., "LP2S dropped significantly" without stating the actual delta)
-- Session recordings are referenced but produced no specific finding
 - The report presents inferences as facts without noting they're inferences
 - Small-sample data points are stated with false confidence
 
@@ -207,14 +212,12 @@ Score low if:
 Score high if:
 - DRI assignments name a specific team and a clear reason: "Supply team — the availability configuration for 'Seine River Cruise Premium' needs to be checked for dates Apr 1–14"
 - Action items are scoped and testable: "Check whether the Apr 8 mobile deploy changed the date-picker rendering on iOS Safari" is testable; "Investigate the mobile UX" is not
-- If session recordings were used, they produced at least one specific action
 - The GM reading the report could forward the action card directly to the DRI without additional interpretation
 
 Score low if:
 - DRI is "Product team" without specifying what they should look at
 - Action items say "investigate further" or "monitor the situation"
 - The same action card could have been written for any LP2S drop on any CE
-- Session recordings were mentioned but produced no actionable output
 
 ---
 

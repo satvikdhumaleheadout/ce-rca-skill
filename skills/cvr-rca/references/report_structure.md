@@ -1,6 +1,6 @@
 # CVR-RCA Report Structure
 
-Read `visual_kit.md` first for CSS, HTML patterns, and styling rules. This file describes the **CVR-RCA-specific** report structure on top of those primitives: the fixed three-section macro-structure (Section 1/2/3), the "What belongs in Section 3" table, and the CVR-RCA-specific HTML patterns (Mix cascade analysis block, Fixed Segment banner, Geo / Non-Geo overview, External Signals block, Shapley decomposition flex bar, URL-level breakdown, Inventory section format, Session recordings, Ruled-out dimensions, Hypotheses explored, Report length calibration).
+Read `visual_kit.md` first for CSS, HTML patterns, and styling rules. This file describes the **CVR-RCA-specific** report structure on top of those primitives: the fixed three-section macro-structure (Section 1/2/3), the "What belongs in Section 3" table, and the CVR-RCA-specific HTML patterns (Mix cascade analysis block, Fixed Segment banner, Geo / Non-Geo overview, External Signals block, Shapley decomposition flex bar, URL-level breakdown, Inventory section format, Ruled-out dimensions, Hypotheses explored, Report length calibration).
 
 **The principle:** By the time the GM finishes reading Section 2, they know exactly what happened and what to do. Section 3 is for anyone who needs to verify the conclusion. The analysis is not the report — the analysis is the evidence behind the report.
 
@@ -214,7 +214,7 @@ Include only analyses that directly support or rule out a claim made in Sections
 7. Ruled-out dimensions block
 8. Hypotheses explored (always last)
 
-Conditional blocks (inventory, session recordings, price analysis, weekday composition) slot between items 5 and 6 within the relevant funnel step's evidence. The External Signals block sits *after* secondary driver evidence (item 6.5) so the data-driven story leads — external lenses are supporting evidence, not the primary lens.
+Conditional blocks (inventory, price analysis, weekday composition) slot between items 5 and 6 within the relevant funnel step's evidence. The External Signals block sits *after* secondary driver evidence (item 6.5) so the data-driven story leads — external lenses are supporting evidence, not the primary lens.
 
 The list below covers most CEs. **When the investigation surfaces a finding that doesn't match any of the standard blocks, add a custom `.analysis-block` for it** — Claude writes the report in HTML directly, so there is no rendering-pipeline constraint on what can ship. The visual guardrails come from following the `.analysis-block` HTML pattern in the Visual Spec section (rounded card, title, optional verdict line, body content); the content inside the block is freeform.
 
@@ -232,7 +232,6 @@ The list below covers most CEs. **When the investigation surfaces a finding that
 | Inventory TID summary table | When S2C drop is confirmed at a specific TGID — one row per TID, columns: TID · TID Name · Tickets 0–2d · Tickets 3–7d · Tickets 8–13d · Tickets 14–30d. Snapshot from the latest available `extracted_date`. |
 | Inventory daily time-series charts | When S2C drop is confirmed at a specific TGID — always run alongside the TID snapshot. Four line charts (one per lead-time bucket), `extracted_date` on x-axis, total tickets on y-axis. Path B: pre and post as overlaid series. Path A: post series only. Path X: omit entirely — add an inline note in the S2C evidence block: *"Inventory data unavailable — post period ended more than 30 days ago. Supply mechanism cannot be confirmed or ruled out from data."* |
 | Price analysis | When price changed and timing correlates with LP2S onset. |
-| Session recordings | When recordings were pulled — present as a structured table (see below). |
 | Weekday composition | When pre vs post differs materially in weekday/weekend mix AND the report attributes any portion of the move to that imbalance. Render only when material — otherwise the check stays in the transcript. Two-row table: pre weekdays/weekends, post weekdays/weekends; subtext explains the implied calibration on the headline metric. |
 | External signals & corroboration | When **any** external lens (Slack, perf-audit, CE Health, future siblings) contributed a signal you actually used (Pattern A/B/C in the Step 2b reconciliation). Three-column table: Signal · What it tells us about this report · Source ↗. One row per *used* signal, regardless of which lens it came from. Renders whenever at least one lens contributed a used signal — even if other lenses were unavailable. This is the report's "sources cited" panel. See HTML pattern below. |
 | Custom analysis block | When the investigation surfaced a finding that doesn't match any of the standard rows above but should still look visually consistent with the rest of Section 3. Write a `<div class="analysis-block">` with a `<div class="block-title">`, optional `<div class="verdict-line">`, and freeform body HTML inside. **Default home for novel findings.** |
@@ -606,12 +605,6 @@ For multiple TGIDs: apply this logic independently per TGID → one trace per TG
   </p>
 </div>
 ```
-
-### Session recordings format
-
-Present as a `.analysis-block` with the locus described in the verdict line, then a table with columns: Recording | Steps observed | Inference. Each recording gets one row. The inference column (one sentence) states what the recording proves or rules out.
-
-**Anti-pattern:** Writing session recording evidence as a multi-paragraph text block. The table forces structured thinking and makes the inference scannable.
 
 ### Ruled-out dimensions section
 
@@ -1007,7 +1000,7 @@ reached a data boundary; it invites the stakeholder to pick it up.
       </tr>
       <tr>
         <td>[Hypothesis — what was proposed and why]</td>
-        <td>[What you would have checked — e.g. "session recordings on select page"]</td>
+        <td>[What you would have checked — e.g. "lead-time bucket query on select page"]</td>
         <td class="num">⚠️ Data gap</td>
         <td>[One sentence: what data or tool is missing and who could provide it]</td>
       </tr>

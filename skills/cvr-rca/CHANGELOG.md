@@ -4,6 +4,36 @@ This file tracks every meaningful change pushed to this repository. Each entry c
 
 ---
 
+## [v1.30] — 2026-06-10 — Eval → on-demand maintainer tool; session recordings removed
+
+**Sync note.** Applied to the vendored copy first, then mirrored to the standalone source
+(`~/Documents/RCA skill/cvr-rca`) — the two are **back in sync** on these files (the 7 edited files
+are byte-identical, both at v1.30.0).
+
+Two changes:
+
+**1. Auto-evaluation → on-demand.** The run flow no longer scores itself. The auto "Step 4 — Evaluate
+the analysis" section (which ran the rubric and wrote `evaluation.md` at the end of every run) is
+removed. In its place is a concise **"Quality Evaluation — Maintainer Tool (On-Demand)"** section:
+a maintainer spawns a sub-agent against any finished run-dir (read `$SKILL_DIR/evals/evaluator.md`,
+run dir `<run_dir>`, write `<run_dir>/evaluation.md`). It reads only on-disk artifacts, is not part
+of the run, and is never shown to the analyst. The 7-theme rubric and the meta-review note are kept.
+The run now ends with a single chat line — `Report → <run_dir>/report.html` — no eval, no narration.
+`evals/evaluator.md` gains an on-demand maintainer-tool preamble (rubric unchanged). Saves tokens +
+time on every analyst-facing run for a record the analyst never sees. Companion: ce-rca SKILL.md
+Step 4b doc reworded to "*if* a maintainer ran CVR-RCA's on-demand eval" (the `[ -f ]`-guarded
+organize move is unchanged).
+
+**2. Mixpanel session-recording pulls removed.** Every active instruction/callout to fetch or cite
+session recordings (the `Get-User-Replays-Data` MCP) is excised from `SKILL.md`, `references/`
+(context, hypothesis, report_structure, visual_kit, worked_example), and `evals/evaluator.md`. The
+LP2S broad-drop hypothesis fallback is reworded to alternative evidence paths (APM / deployment
+timestamps / vendor status / event-level) so the branch keeps a non-empty fallback. Ruled-out and
+anti-pattern examples now use quantitative checks (lead-time bucket queries) instead of recordings.
+Historical CHANGELOG entries are left as-is.
+
+---
+
 ## [v1.29] — 2026-06-08 — Transcript tree-map fenced (markdown-safe)
 
 The investigation transcript's `## Tree map` is now wrapped in a ` ```text ` code fence; the detail

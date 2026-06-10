@@ -16,12 +16,14 @@ Python 3.9 compatible.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import glob as glob_mod
 import itertools
 import json
 import math
 import os
 import sys
+import tempfile
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -150,10 +152,12 @@ def compute_windows(range_str=None, start=None, end=None):
         span = (cur_end - cur_start).days + 1
         prior_end = cur_start - timedelta(days=1)
         prior_start = prior_end - timedelta(days=span - 1)
-        ly_cur_start = date(cur_start.year - 1, cur_start.month, cur_start.day)
-        ly_cur_end = date(cur_end.year - 1, cur_end.month, cur_end.day)
-        ly_prior_end = ly_cur_start - timedelta(days=1)
-        ly_prior_start = ly_prior_end - timedelta(days=span - 1)
+        # LY = 52-week (364-day) DOW-aligned shift — matches the range path below and
+        # CVR-RCA q7 / perf-audit. (Was a calendar-year shift, which drifted LY by ~1 day.)
+        ly_cur_start = cur_start - timedelta(days=364)
+        ly_cur_end = cur_end - timedelta(days=364)
+        ly_prior_start = prior_start - timedelta(days=364)
+        ly_prior_end = prior_end - timedelta(days=364)
         seq = _seq_label(span)
         prefix_cur = "{}-{}".format(cur_start.strftime("%b%d"), cur_end.strftime("%b%d"))
         prefix_pri = "{}-{}".format(prior_start.strftime("%b%d"), prior_end.strftime("%b%d"))
@@ -256,6 +260,7 @@ def fetch_ce_funnel(ce_id, start, end):
     FROM `{project}.{dataset}.mixpanel_user_funnel_progression`
     WHERE combined_entity_id = '{ce_id}'
         AND session_date BETWEEN '{start}' AND '{end}'
+        AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
     """.format(
         project=PROJECT_ID, dataset=DATASET,
         ce_id=ce_id,
@@ -278,6 +283,10 @@ def fetch_ce_funnel(ce_id, start, end):
         "lp2s": sel / lp * 100 if lp else None,
         "s2c": chk / sel * 100 if sel else None,
         "c2o": ord_ / chk * 100 if chk else None,
+        # Funnel CVR = converted users / LP users (orders/users). This is the
+        # canonical CE-level funnel CVR surfaced in vitals and used as the CVR
+        # factor in the Shapley decomposition (funnel basis).
+        "cvr": ord_ / lp * 100 if lp else None,
     }
 
 
@@ -427,6 +436,7 @@ def fetch_tgid_funnel(ce_id, cur, pri):
         ) AS s2o_pri
     FROM `{project}.{dataset}.mixpanel_user_funnel_progression`
     WHERE combined_entity_id = '{ce_id}'
+        AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
         AND (session_date BETWEEN '{c_s}' AND '{c_e}'
              OR session_date BETWEEN '{p_s}' AND '{p_e}')
     GROUP BY 1
@@ -545,7 +555,8 @@ def calc_shapley_decomposition(current, prior):
     Revenue = Traffic x CVR x AOV (x CR x TR if available).
     Copied from market_weekly_review_v5.py:2419-2454.
     """
-    factor_names = [k for k in ['traffic', 'cvr', 'aov', 'cr', 'tr'] if k in current and k in prior]
+    factor_names = [k for k in ['traffic', 'cvr', 'orders_per_converter', 'aov', 'cr', 'tr']
+                    if k in current and k in prior]
     n = len(factor_names)
 
     def _revenue(vals):
@@ -576,21 +587,42 @@ def calc_shapley_decomposition(current, prior):
     return shapley
 
 
-def compute_shapley_for_ce(cur_health, pri_health, cur_channels, pri_channels):
-    # type: (Dict, Dict, List, List) -> Dict[str, float]
-    cur_clicks = sum(float(c.get("clicks") or 0) for c in cur_channels if c.get("clicks"))
-    pri_clicks = sum(float(c.get("clicks") or 0) for c in pri_channels if c.get("clicks"))
+def compute_shapley_for_ce(cur_health, pri_health, cur_funnel, pri_funnel):
+    # type: (Dict, Dict, Dict, Dict) -> Dict[str, float]
+    """Shapley revenue decomposition on the **funnel basis**, matching the §7
+    corrected 6-factor identity in render_ce_health._facs and the vitals CVR:
+
+        revenue = traffic × cvr × orders_per_converter × aov × completion × take_rate
+
+    where ``traffic`` is funnel (LP) users, ``cvr`` is the funnel CVR
+    (converted_users / users — the SAME metric as vitals.cvr), and the remaining
+    factors come from vitals. ``orders_per_converter`` is included only when the
+    funnel exposes converted-user counts, so the multiplicative identity stays
+    exact; otherwise the factor set degrades gracefully to the funnel-CVR basis.
+
+    Invariant guaranteed: the CVR factor's sign equals sign(post_cvr − pre_cvr) —
+    if the funnel CVR rose, the Shapley CVR factor is positive (it diverged in
+    sign from vitals under the old clicks-based factors).
+    """
+    cur_users = float((cur_funnel or {}).get("lp_viewers") or 0)
+    pri_users = float((pri_funnel or {}).get("lp_viewers") or 0)
+    # Funnel CVR (orders/users) — fraction form for the multiplicative identity.
+    cur_cvr_pct = (cur_funnel or {}).get("cvr")
+    pri_cvr_pct = (pri_funnel or {}).get("cvr")
+    cur_cvr = float(cur_cvr_pct) / 100.0 if cur_cvr_pct is not None else 0.0
+    pri_cvr = float(pri_cvr_pct) / 100.0 if pri_cvr_pct is not None else 0.0
 
     cur_orders = int(cur_health.get("orders") or 0)
     pri_orders = int(pri_health.get("orders") or 0)
+    # revenue here is PREDICTED (sum_revenue_predicted, from vitals) — deliberately the same
+    # basis as the §2 vitals Revenue card, so the Shapley total Δ ties to the headline revenue Δ.
     cur_rev = float(cur_health.get("revenue") or 0)
     pri_rev = float(pri_health.get("revenue") or 0)
 
-    if cur_clicks == 0 and pri_clicks == 0:
-        return {"traffic": 0, "cvr": 0, "aov": 0, "tr": 0, "cr": 0, "total": 0}
+    if cur_users == 0 and pri_users == 0:
+        return {"traffic": 0, "cvr": 0, "orders_per_converter": 0,
+                "aov": 0, "tr": 0, "cr": 0, "total": 0}
 
-    cur_cvr = cur_orders / cur_clicks if cur_clicks > 0 else 0
-    pri_cvr = pri_orders / pri_clicks if pri_clicks > 0 else 0
     cur_aov = cur_rev / cur_orders if cur_orders > 0 else 0
     pri_aov = pri_rev / pri_orders if pri_orders > 0 else 0
 
@@ -599,8 +631,17 @@ def compute_shapley_for_ce(cur_health, pri_health, cur_channels, pri_channels):
     cur_cr = float(cur_health.get("cr") or 100) / 100.0
     pri_cr = float(pri_health.get("cr") or 100) / 100.0
 
-    current = {"traffic": max(cur_clicks, 0.001), "cvr": max(cur_cvr, 0.00001), "aov": max(cur_aov, 0.01)}
-    prior = {"traffic": max(pri_clicks, 0.001), "cvr": max(pri_cvr, 0.00001), "aov": max(pri_aov, 0.01)}
+    current = {"traffic": max(cur_users, 0.001), "cvr": max(cur_cvr, 0.00001), "aov": max(cur_aov, 0.01)}
+    prior = {"traffic": max(pri_users, 0.001), "cvr": max(pri_cvr, 0.00001), "aov": max(pri_aov, 0.01)}
+
+    # orders_per_converter = orders / converted_users. Include it when the funnel
+    # gives converted-user counts (order_completers), to match §7's 6-factor
+    # identity; the funnel CVR factor then stays converted_users/users.
+    cur_conv = float((cur_funnel or {}).get("order_completers") or 0)
+    pri_conv = float((pri_funnel or {}).get("order_completers") or 0)
+    if cur_conv > 0 and pri_conv > 0:
+        current["orders_per_converter"] = max(cur_orders / cur_conv, 0.00001)
+        prior["orders_per_converter"] = max(pri_orders / pri_conv, 0.00001)
 
     if abs(cur_tr - pri_tr) > 0.001:
         current["tr"] = cur_tr
@@ -686,6 +727,10 @@ def render_vitals(data, w):
 
     lines = [
         "## 2. CE Vitals",
+        "",
+        "_Revenue = **predicted** (`sum_revenue_predicted`); Take Rate uses **actual** booked "
+        "revenue. Channel / TGID / vendor / country breakdowns below use **actual** revenue, so "
+        "they won't sum exactly to this predicted headline._",
         "",
         "| Metric | {} | {} | \u0394 {} ({}) | {} | {} | \u0394 {} ({} LY) | \u0394 LY (YoY) |".format(
             cc, cp, cp, sl, clc, clp, clp, sl),
@@ -819,6 +864,10 @@ def render_funnel(data, w):
     lines = [
         "## 4. Funnel",
         "",
+        "_Basis: **cross-session** funnel (steps may span multiple sessions) \u00b7 **excludes "
+        "PERFORMANCE_MAX**. The within-session funnel that matches the Omni dashboard and the "
+        "CVR-RCA tab is reported there; this view differs by grain, not error._",
+        "",
         "| Stage | {} | {} | \u0394 {} ({}) | {} | {} | \u0394 {} ({} LY) | \u0394 LY (YoY) |".format(
             cc, cp, cp, sl, clc, clp, clp, sl),
         "|-------|---|---|---|---|---|---|---|",
@@ -947,8 +996,9 @@ def render_shapley(shapley, w):
         "|--------|----------|-----------|-----------|",
     ]
     factor_labels = {
-        "traffic": ("Traffic (Clicks)", "\u2191 More clicks" if shapley.get("traffic", 0) >= 0 else "\u2193 Fewer clicks"),
+        "traffic": ("Traffic (Users)", "\u2191 More users" if shapley.get("traffic", 0) >= 0 else "\u2193 Fewer users"),
         "cvr": ("CVR", "\u2191 Better conversion" if shapley.get("cvr", 0) >= 0 else "\u2193 Lower conversion"),
+        "orders_per_converter": ("Orders / User", "\u2191 More orders per converter" if shapley.get("orders_per_converter", 0) >= 0 else "\u2193 Fewer orders per converter"),
         "aov": ("AOV", "\u2191 Higher ticket value" if shapley.get("aov", 0) >= 0 else "\u2193 Lower ticket value"),
         "tr": ("Take Rate", "\u2191 TR improved" if shapley.get("tr", 0) >= 0 else "\u2193 TR compression"),
         "cr": ("Completion Rate", "\u2191 CR improved" if shapley.get("cr", 0) >= 0 else "\u2193 CR declined"),
@@ -1184,8 +1234,55 @@ def render_customer_country(cur_data, ly_data, w):
 # ORCHESTRATOR
 # ============================================================================
 
-def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None):
-    # type: (int, Optional[str], Optional[date], Optional[date], Optional[str]) -> None
+def _write_preview_sidecar(output_path, ce_id, ce_name, w, meta, vitals, shapley):
+    # type: (str, int, str, Dict[str, Any], Dict[str, Any], Dict[str, Any], Any) -> None
+    """Write the early JSON sidecar atomically (temp + os.replace) with exactly
+    today's *preview* keys. These keys are a strict subset of the final one-shot
+    sidecar and are written identically — the final pass overwrites this file
+    with the same values plus the full-pass-only keys (history_months, has_ly).
+    """
+    cur = w["current"]
+    pri = w["prior"]
+    ly_cur = w["ly_current"]
+    ly_pri = w["ly_prior"]
+
+    json_path = output_path.rsplit(".", 1)[0] + ".json"
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+    sidecar = {
+        "ce_id": ce_id,
+        "ce_name": ce_name,
+        "range": w["range"],
+        "generated_at": date.today().isoformat(),
+        "windows": {
+            "current": [cur[0].isoformat(), cur[1].isoformat()],
+            "prior": [pri[0].isoformat(), pri[1].isoformat()],
+            "ly_current": [ly_cur[0].isoformat(), ly_cur[1].isoformat()],
+            "ly_prior": [ly_pri[0].isoformat(), ly_pri[1].isoformat()],
+        },
+        "metadata": {k: str(v) for k, v in meta.items()} if meta else {},
+        "vitals": vitals,
+        "shapley": shapley,
+    }
+
+    # Atomic write: dump to a temp file in the same dir, then os.replace so a
+    # reader never sees a half-written sidecar.
+    target_dir = os.path.dirname(os.path.abspath(json_path))
+    fd, tmp_path = tempfile.mkstemp(dir=target_dir, suffix=".json.tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(sidecar, f, default=str, indent=2)
+        os.replace(tmp_path, json_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    sys.stderr.write("Preview JSON -> {}\n".format(json_path))
+
+
+def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None,
+                  preview_marker=False):
+    # type: (int, Optional[str], Optional[date], Optional[date], Optional[str], bool) -> None
     w = compute_windows(range_str=range_str, start=start, end=end)
 
     cur = w["current"]
@@ -1193,101 +1290,135 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None)
     ly_cur = w["ly_current"]
     ly_pri = w["ly_prior"]
 
-    sys.stderr.write("1. Resolving CE metadata...\n")
-    sys.stderr.flush()
-    meta = fetch_ce_metadata(ce_id)
-    ce_name = meta.get("combined_entity_name", "CE {}".format(ce_id))
+    # ------------------------------------------------------------------
+    # All BigQuery fetches below are independent (the bq client is a
+    # thread-safe module singleton) so they are submitted to a shared
+    # thread pool and run concurrently. Each future's result is assigned
+    # back into the exact same local variable the sequential version used,
+    # so render + write logic downstream is byte-for-byte unchanged — only
+    # *when* the fetches execute differs. Pure-compute / filesystem steps
+    # (compute_shapley_for_ce, find_historical_context) run after their
+    # inputs resolve. If a fetch raises, .result() re-raises it here, just
+    # as the sequential call would have.
+    #
+    # When preview_marker is set we run in two phases: the "preview set"
+    # (metadata, vitals ×4, channels ×4, funnel ×4 → Shapley) resolves
+    # first and an early JSON sidecar is written atomically + PREVIEW_READY
+    # printed; then the remaining fetches resolve and the full .md / .json
+    # are written exactly as the one-shot path, followed by FULL_READY.
+    # When the flag is off the two phases run back-to-back as a single
+    # parallel pass and only the final one-shot write happens (no markers,
+    # no early sidecar) — identical observable behaviour to today.
+    # ------------------------------------------------------------------
 
-    sys.stderr.write("2. Fetching CE vitals (4 windows)...\n")
-    sys.stderr.flush()
-    vitals = {
-        "current": fetch_ce_health(ce_id, cur[0], cur[1]),
-        "prior": fetch_ce_health(ce_id, pri[0], pri[1]),
-        "ly_current": fetch_ce_health(ce_id, ly_cur[0], ly_cur[1]),
-        "ly_prior": fetch_ce_health(ce_id, ly_pri[0], ly_pri[1]),
-    }
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+    try:
+        # --- Phase 1: the preview set (feeds vitals, funnel, Shapley) -----
+        sys.stderr.write("1-4. Fetching CE metadata, vitals, channels, funnel (parallel)...\n")
+        sys.stderr.flush()
 
-    sys.stderr.write("3. Fetching channel breakdown (4 windows)...\n")
-    sys.stderr.flush()
-    channels = {
-        "current": _fetch_channel_window_v2(ce_id, cur[0], cur[1]),
-        "prior": _fetch_channel_window_v2(ce_id, pri[0], pri[1]),
-        "ly_current": _fetch_channel_window_v2(ce_id, ly_cur[0], ly_cur[1]),
-        "ly_prior": _fetch_channel_window_v2(ce_id, ly_pri[0], ly_pri[1]),
-    }
+        f_meta = executor.submit(fetch_ce_metadata, ce_id)
 
-    sys.stderr.write("4. Fetching funnel (4 windows)...\n")
-    sys.stderr.flush()
-    funnel = {
-        "current": fetch_ce_funnel(ce_id, cur[0], cur[1]),
-        "prior": fetch_ce_funnel(ce_id, pri[0], pri[1]),
-        "ly_current": fetch_ce_funnel(ce_id, ly_cur[0], ly_cur[1]),
-        "ly_prior": fetch_ce_funnel(ce_id, ly_pri[0], ly_pri[1]),
-    }
+        f_vitals = {
+            "current": executor.submit(fetch_ce_health, ce_id, cur[0], cur[1]),
+            "prior": executor.submit(fetch_ce_health, ce_id, pri[0], pri[1]),
+            "ly_current": executor.submit(fetch_ce_health, ce_id, ly_cur[0], ly_cur[1]),
+            "ly_prior": executor.submit(fetch_ce_health, ce_id, ly_pri[0], ly_pri[1]),
+        }
+        f_channels = {
+            "current": executor.submit(_fetch_channel_window_v2, ce_id, cur[0], cur[1]),
+            "prior": executor.submit(_fetch_channel_window_v2, ce_id, pri[0], pri[1]),
+            "ly_current": executor.submit(_fetch_channel_window_v2, ce_id, ly_cur[0], ly_cur[1]),
+            "ly_prior": executor.submit(_fetch_channel_window_v2, ce_id, ly_pri[0], ly_pri[1]),
+        }
+        f_funnel = {
+            "current": executor.submit(fetch_ce_funnel, ce_id, cur[0], cur[1]),
+            "prior": executor.submit(fetch_ce_funnel, ce_id, pri[0], pri[1]),
+            "ly_current": executor.submit(fetch_ce_funnel, ce_id, ly_cur[0], ly_cur[1]),
+            "ly_prior": executor.submit(fetch_ce_funnel, ce_id, ly_pri[0], ly_pri[1]),
+        }
 
-    sys.stderr.write("5. Fetching multi-year trajectory...\n")
-    sys.stderr.flush()
-    monthly = _fetch_monthly_summary(ce_id)
-    # Merge CVR-RCA monthly CVR onto each month (match on the 'month' key).
-    cvr_by_month = {r["month"]: r.get("cvr") for r in fetch_monthly_cvr(ce_id)}
-    for m in monthly:
-        m["cvr"] = cvr_by_month.get(m.get("month"))
-    # History flags for the renderer's "(new)" pill.
-    history_months = sum(1 for m in monthly if _g(m, "revenue"))
-    has_ly = history_months >= 13
+        # --- Phase 2: the rest (feeds the report, not the preview) --------
+        # Submitted up front so they run alongside the preview set; results
+        # are only collected after the preview is emitted.
+        f_monthly = executor.submit(_fetch_monthly_summary, ce_id)
+        f_monthly_cvr = executor.submit(fetch_monthly_cvr, ce_id)
+        f_tgids = executor.submit(fetch_top_tgids, ce_id, cur, pri, ly_cur, ly_pri)
+        f_tgid_funnel = executor.submit(fetch_tgid_funnel, ce_id, cur, pri)
+        f_tgid_lt = executor.submit(fetch_tgid_lead_time, ce_id, cur, ly_cur)
+        f_vendors = executor.submit(fetch_vendor_breakdown, ce_id, cur, pri)
+        f_funnel_dims = executor.submit(fetch_funnel_by_dimension, ce_id, cur)
+        f_lead_time = executor.submit(fetch_lead_time_cohorts, ce_id, cur, ly_cur)
+        f_lp_funnel = executor.submit(fetch_lp_funnel, ce_id, cur[0], cur[1], ly_cur[0], ly_cur[1])
+        f_customers_cur = executor.submit(fetch_customer_country_distribution, ce_id, cur[0], cur[1])
+        f_customers_ly = executor.submit(fetch_customer_country_distribution, ce_id, ly_cur[0], ly_cur[1])
 
-    sys.stderr.write("6. Fetching top TGIDs...\n")
-    sys.stderr.flush()
-    tgids = fetch_top_tgids(ce_id, cur, pri, ly_cur, ly_pri)
+        # Collect the preview set.
+        meta = f_meta.result()
+        ce_name = meta.get("combined_entity_name", "CE {}".format(ce_id))
 
-    sys.stderr.write("6b. Fetching TGID funnel...\n")
-    sys.stderr.flush()
-    tgid_funnel = fetch_tgid_funnel(ce_id, cur, pri)
+        vitals = {k: f.result() for k, f in f_vitals.items()}
+        channels = {k: f.result() for k, f in f_channels.items()}
+        funnel = {k: f.result() for k, f in f_funnel.items()}
 
-    sys.stderr.write("6c. Fetching TGID lead time...\n")
-    sys.stderr.flush()
-    tgid_lt = fetch_tgid_lead_time(ce_id, cur, ly_cur)
+        # Merge the funnel CVR (orders/users) onto each window's vitals so the
+        # sidecar exposes vitals[*].cvr — the same metric the Shapley CVR factor
+        # uses and the §7 / vitals CVR card read. Stored as a fraction-of-100
+        # percentage (e.g. 4.52), matching the other rate vitals (tr/cr/roi_1).
+        for _wk in vitals:
+            vitals[_wk]["cvr"] = (funnel.get(_wk) or {}).get("cvr")
 
-    sys.stderr.write("6d. Fetching vendor breakdown...\n")
-    sys.stderr.flush()
-    vendors = fetch_vendor_breakdown(ce_id, cur, pri)
+        sys.stderr.write("7. Computing Shapley decomposition...\n")
+        sys.stderr.flush()
+        shapley = compute_shapley_for_ce(
+            vitals.get("current", {}), vitals.get("prior", {}),
+            funnel.get("current", {}), funnel.get("prior", {}))
 
-    sys.stderr.write("6e. Fetching funnel by dimension (channel, language)...\n")
-    sys.stderr.flush()
-    funnel_dims = fetch_funnel_by_dimension(ce_id, cur)
+        # --- Emit the early preview sidecar (gated behind --preview-marker) ---
+        if preview_marker and output_path:
+            _write_preview_sidecar(output_path, ce_id, ce_name, w, meta, vitals, shapley)
+            sys.stdout.write("PREVIEW_READY\n")
+            sys.stdout.flush()
 
-    sys.stderr.write("7. Computing Shapley decomposition...\n")
-    sys.stderr.flush()
-    shapley = compute_shapley_for_ce(
-        vitals.get("current", {}), vitals.get("prior", {}),
-        channels.get("current", []), channels.get("prior", []))
+        # --- Collect the rest (Phase 2) -----------------------------------
+        sys.stderr.write("5-11. Fetching trajectory, TGIDs, vendors, lead-time, LPs, countries (parallel)...\n")
+        sys.stderr.flush()
+        monthly = f_monthly.result()
+        # Merge CVR-RCA monthly CVR onto each month (match on the 'month' key).
+        cvr_by_month = {r["month"]: r.get("cvr") for r in f_monthly_cvr.result()}
+        for m in monthly:
+            m["cvr"] = cvr_by_month.get(m.get("month"))
+        # History flags for the renderer's "(new)" pill.
+        history_months = sum(1 for m in monthly if _g(m, "revenue"))
+        has_ly = history_months >= 13
 
-    sys.stderr.write("8. Searching historical context...\n")
-    sys.stderr.flush()
-    history = find_historical_context(ce_name)
+        tgids = f_tgids.result()
+        tgid_funnel = f_tgid_funnel.result()
+        tgid_lt = f_tgid_lt.result()
+        vendors = f_vendors.result()
+        funnel_dims = f_funnel_dims.result()
 
-    sys.stderr.write("9. Fetching lead time cohorts...\n")
-    sys.stderr.flush()
-    lead_time = fetch_lead_time_cohorts(ce_id, cur, ly_cur)
+        sys.stderr.write("8. Searching historical context...\n")
+        sys.stderr.flush()
+        history = find_historical_context(ce_name)
 
-    sys.stderr.write("10. Fetching landing page funnel...\n")
-    sys.stderr.flush()
-    lp_funnel = fetch_lp_funnel(ce_id, cur[0], cur[1], ly_cur[0], ly_cur[1])
+        lead_time = f_lead_time.result()
+        lp_funnel = f_lp_funnel.result()
 
-    # Most-visited landing page URL in the current window. Mirrors CVR-RCA's
-    # Q0 top_page_url so the CE-RCA composite header can render the clickable
-    # CE link (🔗) — the master reads this from the JSON sidecar's metadata.
-    # Reuses the lp_funnel data already fetched; no extra BQ query.
-    if lp_funnel:
-        top_lp = max(lp_funnel, key=lambda r: r.get("l4w_users", 0) or 0)
-        top_url = top_lp.get("page_url")
-        if top_url:
-            meta["top_page_url"] = top_url
+        # Most-visited landing page URL in the current window. Mirrors CVR-RCA's
+        # Q0 top_page_url so the CE-RCA composite header can render the clickable
+        # CE link (🔗) — the master reads this from the JSON sidecar's metadata.
+        # Reuses the lp_funnel data already fetched; no extra BQ query.
+        if lp_funnel:
+            top_lp = max(lp_funnel, key=lambda r: r.get("l4w_users", 0) or 0)
+            top_url = top_lp.get("page_url")
+            if top_url:
+                meta["top_page_url"] = top_url
 
-    sys.stderr.write("11. Fetching customer countries...\n")
-    sys.stderr.flush()
-    customers_cur = fetch_customer_country_distribution(ce_id, cur[0], cur[1])
-    customers_ly = fetch_customer_country_distribution(ce_id, ly_cur[0], ly_cur[1])
+        customers_cur = f_customers_cur.result()
+        customers_ly = f_customers_ly.result()
+    finally:
+        executor.shutdown(wait=True)
 
     # Render
     sys.stderr.write("12. Rendering report...\n")
@@ -1353,6 +1484,14 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None)
         with open(json_path, "w") as f:
             json.dump(sidecar, f, default=str, indent=2)
         sys.stderr.write("JSON -> {}\n".format(json_path))
+
+        # The full pass is complete: the early partial sidecar (if any) has
+        # now been overwritten by the identical-superset final one, and the
+        # .md is on disk. Signal downstream consumers (the orchestrator's
+        # pre-Step-2 gate) that the full report is readable.
+        if preview_marker:
+            sys.stdout.write("FULL_READY\n")
+            sys.stdout.flush()
     else:
         sys.stdout.write(report)
         if not report.endswith("\n"):
@@ -1376,6 +1515,10 @@ def main():
     parser.add_argument("--start", default=None, help="Custom start date (YYYY-MM-DD)")
     parser.add_argument("--end", default=None, help="Custom end date (YYYY-MM-DD)")
     parser.add_argument("--output", default=None, help="Output file path (.md)")
+    parser.add_argument("--preview-marker", action="store_true", default=False,
+                        help="Two-phase emit: write an early preview JSON sidecar and print "
+                             "PREVIEW_READY, then the full report and FULL_READY. Default off "
+                             "(single final write, no markers — standalone behaviour).")
     args = parser.parse_args()
 
     if not args.range and not (args.start and args.end):
@@ -1390,6 +1533,7 @@ def main():
         start=start_date,
         end=end_date,
         output_path=args.output,
+        preview_marker=args.preview_marker,
     )
 
 

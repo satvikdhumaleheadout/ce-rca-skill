@@ -41,19 +41,32 @@ The rule has **two render modes**, split by who owns the artifact's *format*:
 
 ## Before you begin
 
-Derive the skill directory from the path of this SKILL.md:
+Derive the skill directory from the path of this SKILL.md. **Set `SKILL_DIR` to the
+absolute directory THIS SKILL.md was read from** — not a hardcoded path. Every later
+`$SKILL_DIR/...` reference (the vendored engine, sub-skills, references) depends on it,
+so it must point at the bundle you are actually running:
 
 ```bash
-SKILL_DIR=~/.ce-rca   # or wherever this file was read from
+SKILL_DIR="<absolute dir this SKILL.md was read from>"   # e.g. ~/.ce-rca for downloaded installs
 ```
 
 ### Stay on the latest version — do this first, every run
 
-CE-RCA **auto-updates**. Before anything else, check whether the local bundle matches the
-published release and silently upgrade if it's behind — so a run never executes a stale skill:
+CE-RCA **auto-updates — but only for the canonical install at `~/.ce-rca`.** The auto-update
+rewrites `~/.ce-rca` wholesale, so it must never fire against a dev/local copy. Guard it on
+`SKILL_DIR`:
+
+- **If `SKILL_DIR` is *not* `~/.ce-rca`** (a dev checkout or any other location): **skip the
+  version check entirely and proceed** to Step 0 on the copy you're running. No curl, no
+  comparison, no "stale" warning — a local copy is intentional, and the canonical-install
+  updater would be wrong here (it would clobber `~/.ce-rca`, not your copy). This avoids both a
+  false "out of date" alarm and the denied-curl dead-end.
+- **If `SKILL_DIR` *is* `~/.ce-rca`** (the downloaded install): run the check below and silently
+  upgrade if behind — so a run never executes a stale skill. For downloaded users this is
+  unchanged.
 
 ```bash
-SKILL_DIR=~/.ce-rca
+# Only run this block when SKILL_DIR == ~/.ce-rca (canonical install). Otherwise skip it.
 INSTALLED=$(cat "$SKILL_DIR/VERSION" 2>/dev/null || echo "0.0.0")
 LATEST=$(curl -s --max-time 3 https://raw.githubusercontent.com/satvikdhumaleheadout/ce-rca-skill/main/VERSION 2>/dev/null | tr -d '[:space:]')
 echo "$LATEST" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || LATEST="unknown"   # offline/empty -> unknown
@@ -137,8 +150,8 @@ CE Health — until they answer.** Pinning the window up front keeps the whole r
 aligned to the period they actually want and avoids redoing work if they'd have
 changed the dates.
 
-**0c. [Silent plumbing] Create the run dir.** Once the window is confirmed,
-create:
+**0c. [Silent plumbing — batch it] Create the run dir.** Once the window is
+confirmed, create:
 
 ```
 ~/Documents/CE RCA Runs/<ce-slug>-<post_start>-to-<post_end>/
@@ -146,11 +159,24 @@ create:
 
 Refer to this as `<run_dir>`. Create the `logs/` subfolder and open
 `<run_dir>/logs/_run_log.md` (the orchestrator's own internal run log for
-debugging/audit — never surfaced to the user) and log the run start:
+debugging/audit — never surfaced to the user) and log the run start.
+
+**Batch the independent pre-CE-Health plumbing into one bash call** rather than
+several sequential round-trips. The version/freshness check (above), CE-slug
+resolution, `mkdir -p`, and the run-log seed are all independent — fold them into
+a **single** `bash` invocation (one or two at most), e.g.:
 
 ```bash
-mkdir -p "<run_dir>/logs"
+# one round-trip: make the run dir + logs, seed the run log
+RUN_DIR="$HOME/Documents/CE RCA Runs/<ce-slug>-<post_start>-to-<post_end>"
+mkdir -p "$RUN_DIR/logs" \
+  && printf '# CE-RCA run log — %s\n- started %s\n' "<ce-slug>" "$(date -u +%FT%TZ)" \
+       >> "$RUN_DIR/logs/_run_log.md" \
+  && echo "run_dir=$RUN_DIR"
 ```
+
+Do **not** spread these across one-step-per-call; the only thing that must stand
+alone as a blocking pause is the window confirm (0b).
 
 Write all run-log lines to `<run_dir>/logs/_run_log.md` throughout the run.
 **Do not write to `<run_dir>/transcript.md`** — that filename belongs to CVR-RCA's
@@ -169,18 +195,25 @@ deep dives are passed the windows directly). So `meta.json` is built once, whole
 at **Step 4a**. The confirmed window already lives in the run-dir name and the
 run log, so there's nothing to persist early.
 
-**0d. Fire CE Health (foreground — we need it before we can ask the direction).**
+**0d. Fire CE Health (foreground — one run, then read the sidecar).**
 CE Health is **vendored inside this bundle** at `$SKILL_DIR/skills/ce-health/` — a
-fixed path, no resolution or hunting. Spawn a sub-agent that runs:
+fixed path, no resolution or hunting. Run it **in the foreground** and wait for it
+to finish — it's fast (its ~30 BigQuery queries run concurrently on an internal
+thread pool, ~11 s on CE 252/month), so there's no need to background it or split
+it into phases:
 
 ```bash
-python3 "$SKILL_DIR/skills/ce-health/ce_health.py" --ce-id <id> --range month --output <run_dir>/ce_health_report.md
+python3 "$SKILL_DIR/skills/ce-health/ce_health.py" --ce-id <id> --range month \
+  --output <run_dir>/ce_health_report.md
 ```
 
 (Use `--range month` for the 30/30 default, or `--start/--end` for the custom
 window the user confirmed at 0b.) It runs from any CWD — the vendored copy is
-patched to import its own `engine/` and needs no shim. CE Health writes
-`ce_health_report.md` + a `.json` sidecar. Wait for it.
+patched to import its own `engine/` and needs no shim.
+
+When it returns, both `<run_dir>/ce_health_report.md` and its JSON sidecar
+`<run_dir>/ce_health_report.json` (carrying `vitals + shapley + windows +
+metadata`) are complete on disk. Proceed to Step 1 and read the sidecar.
 
 **Fail fast, do not improvise.** If `$SKILL_DIR/skills/ce-health/ce_health.py`
 doesn't exist, or it errors, tell the user: *"CE Health is missing or broken in
@@ -197,8 +230,9 @@ a short synthesised trajectory of **prior** RCAs for this CE. Pass `ce_id`,
 **continue immediately** (like the Slack agent — it works in its own context, so
 your context stays clean). Compose surfaces it later; first runs simply have none.
 
-**That's all Step 0 does.** CE Health has run; its `.md` + `.json` sidecar are in
-`<run_dir>`. **Do not enrich `meta.json` now, and do not build the Omni URL now.**
+**That's all Step 0 does.** CE Health's `.md` + JSON sidecar are both complete in
+`<run_dir>` (the foreground run finished before you reach Step 1). **Do not enrich
+`meta.json` now, and do not build the Omni URL now.**
 Everything that reads CE Health's sidecar into `meta.json` (CE name, type,
 market, country, the five metadata pills, `top_page_url`) plus the Omni dashboard
 URL are **header decorations consumed only by the final report** — nothing
@@ -217,7 +251,10 @@ CE name / vitals / Shapley — it does **not** need `meta.json` enriched first.
 Read CE Health's JSON sidecar **directly** (`<run_dir>/ce_health_report.json` —
 you do not need `meta.json` enriched for this) for the CE identity, vitals, and
 Shapley split; skim `ce_health_report.md` only if you need a number the sidecar
-doesn't carry. Present the diagnosis **in chat** (not a file) as a **scannable,
+doesn't carry. **CVR is now in the sidecar** — read it straight from
+`vitals.current.cvr` / `vitals.prior.cvr` (the funnel CVR, orders/users, a 0–100
+percentage like the other rate vitals); do not spelunk the `.md` funnel section for
+it. Present the diagnosis **in chat** (not a file) as a **scannable,
 table-driven** preview — this is a decision surface for a stakeholder, so it must
 be skimmable in seconds, **not** a wall of prose. The numbers do the talking;
 your job is to lay them out, not narrate them.
@@ -260,17 +297,18 @@ spend; S2C and C2O both improved while LP2S softened.">
 Reply **"continue"** for the default, or steer (e.g. "focus on supply", "skip
 perf-audit", "CVR only").
 
-Optional — sharpen the RCA. Add any of:
- • a focus area or hunch   • known dates (deploy / pricing / promo)
- • an MMP doc (link)   • an ad-hoc Sheet (link)   • a Slack channel
-What inputs help (examples) → <SKILL_DIR>/references/input_guide.md
-Or just "continue" to skip.
+**Want to sharpen this RCA?** *(optional — or just reply **"continue"** for defaults)*
+The more I know about this CE, the better I investigate. Most useful first:
+ • **📄 MMP doc / CE one-pager** — paste the link; I'll pull the CE overview, your hypotheses, and known constraints from it.
+ • **🎯 A hunch / focus** — *"probably LP2S on mobile"*, *"focus on supply"*.
+ • **📅 Known events + dates** — *"raised prices Apr 8"*, *"ran a promo last week"*.
+ • **🚧 Constraints to respect** — *PPC restrictions, no ticket-only product, no same-day inventory…*
+ • **⚠️ What usually breaks here** — *"check inventory stock-outs first"*, *"vendor API errors"*, *"pricing wars"* — I'll hunt these in Slack.
+ • **🔗 Where to look** — a Slack channel/thread, an ad-hoc Sheet, a dashboard.
+Just drop any of these in plain English (links welcome), or **"continue"** to run with defaults.
 ```
 
 **Formatting rules for the preview:**
-- **Keep the input-guide link, as an absolute clickable path.** Substitute the real
-  `$SKILL_DIR` so it opens; it's never loaded into context, so the link is the
-  user's only window into the guide.
 - Pick the right delta unit per metric: **% change** for revenue/orders/AOV
   (level metrics), **percentage points (pp)** for rates (CVR / completion / take
   rate). Never express a rate move as a % of a %.
@@ -300,6 +338,11 @@ keeping it lean protects their context window):
 ```markdown
 # User Context (provided <date>)
 
+## About this CE
+[a 2–4 line overview of what this CE is / how it's run — e.g. "Heavily PPC-driven
+ city-attraction CE; supply is single-vendor; historically seasonal Apr–Sep peak".
+ Best sourced from an MMP doc / one-pager. Orientation, not a hypothesis.]
+
 ## Focus / direction
 [what the user wants prioritised — e.g. "Focus on CVR — user believes it's the
  driver". Also feeds the dispatch decision above.]
@@ -313,9 +356,23 @@ keeping it lean protects their context window):
 [operational facts — e.g. "Pricing changed Apr 8", "ran a promo last week".
  Each seeds a hypothesis AND anchors a Step 2b corroboration.]
 
+## Constraints
+[things the investigation must respect — e.g. "PPC restrictions on this CE",
+ "no ticket-only product", "no same-day inventory". These bound what's a plausible
+ cause AND seed Slack probes (Step 2).]
+
+## Known failure modes
+[what usually breaks here — e.g. "inventory stock-outs first", "vendor API errors",
+ "pricing wars". Each becomes a PRIORITISED branch AND a Slack probe (Step 2).]
+
+## Important links
+[durable references — a `link · what it gives` line each, e.g.
+ "MMP doc <link> · CE history + supply notes"; "Omni dashboard <link> · daily CVR".
+ Distinct from Sources (provenance): these are links worth keeping in the report.]
+
 ## Sources
 [provenance only — each named source and what became of it, e.g. "MMP doc <link>
- → 2 priors above"; "Sheet <link> → user_data_<slug>.md lens"; "#mkt-france →
+ → About-this-CE + 2 priors above"; "Sheet <link> → user_data_<slug>.md lens"; "#mkt-france →
  CVR-RCA Slack agent". The distilled content lives in the slots above / the lens
  file — never paste raw source text here.]
 ```
@@ -353,6 +410,12 @@ prior can be RULED OUT. See `cvr-rca/SKILL.md → "Signal 0 — user context"`.
 
 ## Step 2 — Dispatch the matched sub-skills
 
+CVR-RCA and perf-audit read `ce_health_report.md` as a **context lens**, so the
+complete report must exist before they start — which it already does: CE Health ran
+to completion in the foreground at Step 0d, so `<run_dir>/ce_health_report.md` and
+its sidecar are on disk before you ever reach this step. No gating or polling is
+needed.
+
 Read `references/registry.md`. Map the confirmed drivers to sub-skills and apply
 the **CVR ⇒ also-fire-perf-audit** pairing rule. Every sub-skill is **vendored
 inside this bundle** at a fixed path — `$SKILL_DIR/skills/cvr-rca/`,
@@ -372,6 +435,7 @@ it elsewhere or run it from `~/Documents`.
   "context_lenses": ["ce_health_report.md", "perf_audit_report.md", "slack_context.md", "user_data_<slug>.md"],
   "user_context": "user_context.md",
   "user_slack_channels": ["#mkt-france"],
+  "slack_probes": ["inventory stock-out", "vendor API errors", "PPC restriction"],
   "run_dir": "<absolute run_dir path>"
 }
 ```
@@ -401,6 +465,17 @@ at Step 1b — it reconciles with the same model, no new mechanism.
 
 `user_slack_channels` (optional) lists any Slack channel the user named at Step 1;
 CVR-RCA's Slack agent reads them alongside its discovery set. Omit when none.
+
+`slack_probes` (optional) is an array of short standing-context search terms
+**derived from the `Constraints` + `Known failure modes` slots** of
+`user_context.md` — e.g. Constraints "PPC restrictions" and failure modes
+"inventory stock-outs", "vendor API errors" yield
+`["PPC restriction", "inventory stock-out", "vendor API errors"]`. CVR-RCA's Slack
+agent runs each as a CE-scoped, ~90-day standing-context query (see
+`cvr-rca/SKILL.md` → Slack guide) and writes a "Standing context — known-issue
+checks" bucket. Keep each probe a short noun phrase (the recurring failure/quirk),
+not a full sentence. **Omit the key entirely when both slots are empty** (a bare
+run has no probes — the Slack agent then behaves exactly as today).
 
 **Spawn the sub-skills in parallel** (one sub-agent each, single message,
 multiple Agent calls). Each sub-agent prompt says: read your skill's SKILL.md at
@@ -723,6 +798,12 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 |---|------|---------|
+| m036 | 2026-06-10 | **Shapley CVR-basis correctness fix + CVR in vitals/card + foreground CE Health + scoped auto-update (v2.10.0).** Four fixes. **(1) Shapley CVR basis — CORRECTNESS (`ce-health-skill-main/ce_health.py`, re-vendored).** `compute_shapley_for_ce` used a **clicks** basis (`traffic = paid clicks`, `cvr = orders/clicks`) that could diverge in **sign** from the vitals/funnel CVR. Rewritten to the **funnel basis** matching `render_ce_health._facs` / §7: `traffic = funnel (LP) users`, `cvr = converted_users/users` (the funnel CVR — same metric as the new `vitals.cvr`), plus `orders_per_converter = orders/converted_users` when funnel converter counts are present, with `aov`/`cr`/`tr` from vitals — toward §7's 6-factor identity `revenue = traffic × cvr × orders_per_converter × aov × completion × take_rate`. `calc_shapley_decomposition` (the engine) is unchanged; only the factor dicts changed. **Invariant guaranteed + verified on CE 252/month:** the multiplicative Shapley CVR factor's sign now equals `sign(post_cvr − pre_cvr)` — funnel CVR rose 4.08%→4.52%, and the CVR factor flipped from the old **−$2.3K** to **+$10.0K** (total $16,966.74 unchanged). The §7 engine table now reads on the funnel basis (Traffic = Users, new Orders/User factor). **(2) CVR into vitals + a CVR card (engine + `scripts/render_ce_health.py`).** `fetch_ce_funnel` now emits `cvr` (orders/users ×100); each window's `vitals` dict carries `cvr` in the sidecar (`vitals.current.cvr` etc.). `render_ce_health` §2 adds a **CVR metric card** among the rate cards (Revenue · Orders · **CVR** · AOV · Take Rate · Completion · ROI(1)) using `card()` + `pp_delta`; grid widens to 7. None-safe for old sidecars. **(3) Foreground CE Health (`SKILL.md` Step 0d + 2).** Step 0d is now a **single foreground run** (no background/two-phase/poll/PREVIEW_READY/bounded-fallback; `--preview-marker` dropped from the orchestrator call — the engine flag stays defined but dormant). Step 2's "wait for FULL_READY" gate removed — the report is already complete on disk. **(4) Scoped auto-update (`SKILL.md`).** `SKILL_DIR` is set to the absolute dir THIS SKILL.md was read from; the version check + in-place update **only run when `SKILL_DIR == ~/.ce-rca`** (canonical install). Any other location (dev/local copy) **skips the check and proceeds** — no false "stale" alarm, no denied-curl dead-end. **Blast radius:** `ce-health` engine (re-vendored) + `render_ce_health.py` §2 + `SKILL.md` Step 0/1/2 + version block + changelog. No `compose.py` / template / CVR-RCA / perf-audit change; the full CE Health `.md` is unchanged **except §7** (now funnel-basis Shapley). |
+| m035 | 2026-06-10 | **Summary vitals cards mirror CE Health §2 (order + formatting) (v2.9.1).** The Summary tab's vitals cards picked their own order/labels/decimals (ROI shown 3rd as `159.7%`, AOV `$334.59`, label "CR") — inconsistent with the CE Health §2 cards. `references/summary_guide.md` block #2 now prescribes the **exact CE Health card order** (Revenue · Orders · AOV · Take Rate · Completion · ROI(1)), **verbatim labels** ("Completion", "ROI(1)"), and **matching decimals** (Revenue `money()` `$286.5K`; Orders comma-int; AOV `$`+0-dp; Take Rate/Completion 1-dp; ROI(1) 0-dp) — sourced from CE Health's vitals so values are identical too. **Blast radius: `summary_guide.md` only** (authoring spec; no code/template/sub-skill change). Verified on CE 3593: Summary vitals order, labels, decimals, and values match the CE Health §2 cards exactly. |
+| m034 | 2026-06-10 | **CE-RCA latency — parallelize CE Health + preview-first two-phase + batched Step-0 bash (v2.9.0).** Cuts the time-to-preview without changing a single output byte. **(1) Engine parallelization (`ce-health-skill-main/ce_health.py` `run_ce_health`, re-vendored via `scripts/vendor.sh`).** The ~30 independent BigQuery fetches (vitals ×4, channels ×4, funnel ×4, trajectory + monthly-CVR, TGIDs/funnel/lead-time, vendors, funnel-by-dim, lead-time cohorts, LP funnel, customer countries, metadata) now run concurrently in a `concurrent.futures.ThreadPoolExecutor(max_workers=8)` — the bq client is a thread-safe module singleton. Each future's result is assigned back into the **exact** local variable the sequential code used; render order, query SQL, fetch args, and the one-shot `.md`/`.json` assembly are **untouched**. Pure-compute steps (`compute_shapley_for_ce`, `find_historical_context`) run after their inputs resolve; a fetch error re-raises at `.result()` exactly as before. **Measured 73s → ~11s (~6.6×) on CE 252 / month.** **(2) Two-phase preview (new `--preview-marker` CLI flag, default OFF).** When set, the engine resolves the **preview set** (metadata, vitals ×4, channels ×4, funnel ×4 → Shapley) first, **atomically** writes the JSON sidecar (temp + `os.replace`) with exactly today's preview keys (`ce_id, ce_name, range, generated_at, windows, metadata, vitals, shapley`), prints **`PREVIEW_READY`**, then finishes the rest, **rewrites the complete `.md` + `.json`** identically to the one-shot path (adding `history_months`/`has_ly`), and prints **`FULL_READY`**. Flag OFF = today exactly: single final write, no markers, no early sidecar — standalone CE Health unchanged. **(3) Orchestrator (`SKILL.md`).** Step 0d now launches CE Health **in the background** with `--preview-marker`, polls for `PREVIEW_READY` / the early sidecar, and proceeds to the Step-1 preview while CE Health keeps running (bounded ~90s fallback to foreground so it never hangs). A new gate **before Step 2 dispatch** waits for `FULL_READY` so CVR-RCA / perf-audit always read the complete `ce_health_report.md` lens. Step 0c collapses the independent pre-CE-Health plumbing (run-dir/`mkdir -p logs`/run-log seed) into a **single** bash call; 0b (window confirm) stays the blocking pause, 0e (`ce_history`) stays fire-and-forget. **Hard invariant verified:** final `.md` + `.json` are **byte-identical** before vs after (plain) vs after (`--preview-marker`) on CE 252/month (`diff` clean on all three); `PREVIEW_READY` prints before `FULL_READY`; the at-`PREVIEW_READY` sidecar carries `vitals`+`shapley`+`windows`+`metadata` (no full-pass keys). **Blast radius:** `ce-health` engine (re-vendored) + `SKILL.md` Step 0/2 + changelog. No `render_ce_health.py` / `compose.py` / template / CVR-RCA / perf-audit / query-SQL / sidecar-schema change. |
+| m033 | 2026-06-10 | **CE Health — Driver Diagnosis + Funnel default-open, and the real fix for the waterfall not spanning the card (v2.8.1).** Two changes in `scripts/render_ce_health.py`. **(1)** `CEH_DEFAULT_OPEN` gains `cehealth-shapley` + `cehealth-funnel` (now `{vitals, l12m, shapley, funnel}`) — so they're expanded on tab open. **(2) Root-cause fix for the waterfall rendering at ~700px with whitespace:** the Plotly waterfall is drawn at load while inside a hidden tab **and** a collapsed `.ceh-body`, so `autosize` falls back to its ~700px default and bakes it in; the collapse toggle (`setOpen`) flipped the section visible but **never told Plotly to resize**, so it stayed stuck. `setOpen` now, on expand, resizes every `.js-plotly-plot` inside the block (`Plotly.Plots.resize`, `setTimeout(…,30)` so the display change applies first, try/caught, `window.Plotly`-guarded). Combined with the tab-activate resize (template) and the two sections now default-open, the waterfall spans full width on first view, and **any** chart in a later-expanded section self-heals. **Blast radius:** `render_ce_health.py` only. Verified on a flat run (ce-243): shapley + funnel render open, channels/TGIDs stay collapsed, `chart-cehealth-shapley` carries `width:100%`, resize-on-expand present. **Noted (not fixed here):** `render_ce_health.py` reads its inputs (`ce_health_report.json/.md`) from the run-dir **root**, so re-rendering a v2.4.0 **organized** run (inputs under `data/`+`reports/`) raises `FileNotFoundError` — harmless in the live flow (render runs at Step 4c *before* the Organize step 4f), but a re-render/idempotency gap worth a follow-up (reuse `compose.py`'s `resolve()`/`_SUBDIR`). |
+| m032 | 2026-06-10 | **Hardening — chart-render confirmation + Summary text + render_ce_health de-rigidifying (v2.8.0).** Presentation/robustness only; no engine change. **(1) Chart render in hidden tabs (#3 + #4) — confirmed already fixed.** The composite's `templates/report.html` `activateTab()` already resizes every `.js-plotly-plot` in a pane after it becomes visible (`Plotly.Plots.resize`, idempotent, try/caught), driven on button-click, cross-tab `↗` anchor routing, and the load-time hash handler — so the CE Health waterfall renders full-width and the CVR-RCA 90-day annotations position on first open of each tab. No separate load-time `#tab-cehealth` handler exists; **no template change needed**. **(2) Summary text (`references/summary_guide.md`).** §3 block renamed **"Long-term context — is the move real?" → "Short-term vs long-term context"** (dropped the "is the move real?" framing in the heading + flow table; pre→post Δ + YoY Δ content kept). §4 headline callout now instructs a **plain heading** (just `The Story`, or a one-line factual headline like "Revenue −28%, traffic-led") — removed the clever `<h2>The Story — <metaphor>` instruction + example; What-moved / Why / Action `callout-item`s kept. Hardcoded **"flagship TGID 3909"** in all 5 examples → `<top-TGID>` placeholder. **(3) De-rigidified `scripts/render_ce_health.py`** (all graceful fallbacks preserved). **Column indices → name lookups via the existing `_col_idx`:** `build_funnel_cards` current/prior windows now located by header (first two value cols, skipping Stage/Δ/LY/prior) instead of `cur_i,pri_i=1,2`; L12M parsing + L12M hover metadata now build header→index maps (Month/Revenue/Orders/ROI/TR/CR/AOV for the health table; Month/Clicks/CVR/Paid-ROI for the paid table) instead of fixed `r[1..6]` — an absent column omits that series/hover-field rather than crashing. **Channel rules (`channel_flags_and_summary`):** cross-sell leakage = sum of **every** channel whose name ends in "Cross-sell" (was Google+Bing only); **highest-share channel** treated as primary (flag "primary is X, not search-led" only when no search channel is top) instead of hardcoding "Google Search"; known-channel benchmark dict kept, unmapped channels degrade silently; channel-name + Share columns located via `_col_idx`. **Lead-time (`leadtime_summary`):** band column located via `_col_idx` (was position 0); `_tgid_groups` already routes unmatched columns into a blank band — preserved. **Magic thresholds → documented module constants:** `TGID_CONCENTRATION_PCT` (80%), `TGID_LOW_S2O_PCT` (8%), `NEAR_FLAT_PP`/`NEAR_FLAT_PCT` (1pp / 5%), each commented as tunable. **Blast radius:** `references/summary_guide.md` + `scripts/render_ce_health.py` (template unchanged). **Verified** on ce-3593 + ce-243 → `report_v2.html`: `ast.parse` OK; template carries the per-pane resize once in `activateTab`; waterfall + CVR 90-day annotations markup intact; guide §3 = "Short-term vs long-term context", §4 plain `<h2>The Story</h2>`, no "3909"; zero residual literal indices (`=1,2`, `r[1..6]`) in the touched functions; channel rules confirmed — ce-3593 top-share Google Search treated as primary, ce-243 Google+Bing Cross-sell summed to 12% → leakage flag fires; both reports render with charts + anchors unchanged. **Deferred:** persistent CE-context store; perf-audit consuming `user_context.md` (carried from m031). |
+| m031 | 2026-06-09 | **Wave C — CE context capture → structured Historical Context (per-run) (v2.7.0).** Refines *what* CE context we capture at the Step 1 pause and *how §8 presents it* — additive + backward-compatible (a bare-"continue" run is byte-identical to before). **(1) Step 1 prompt inlined.** The optional-input prompt is now written **verbatim into SKILL.md** (MMP doc · hunch · known events · constraints · known failure modes · where-to-look) and `references/input_guide.md` is **deleted** (the pointer is gone). **(2) 8-slot `user_context.md`.** The template expands to **About this CE · Focus / direction · Hypothesis priors · Known events · Constraints · Known failure modes · Important links · Sources** (only write slots with content). Step 2 derives a **`slack_probes`** array from the **Constraints + Known failure modes** slots and writes it into `orchestration.json` (alongside `user_slack_channels`; omitted when empty). **(3) MMP-doc extraction enriched.** `references/context_ingest_guide.md`'s `<<<USER_CONTEXT>>>` return contract now yields **About-this-CE overview + Hypothesis priors + Constraints + Known failure modes + Important links** from a doc (was priors/events only); the `<<<USER_DATA_LENS>>>` Sheets path is unchanged. **(4) CVR-RCA Slack agent — probe-driven standing-context search (the one cross-skill touch).** `slack_context_guide.md` (edited in the **canonical CVR source**, re-vendored via `scripts/vendor.sh`) reads `slack_probes` from `orchestration.json` and, for each, runs a CE-scoped `"{ce_name}" AND <probe>` query over a **~90-day lookback from `post_end`** (reads user-pasted thread links directly), writing a new **"Standing context — known-issue checks"** bucket (each probe: found+links / none). **Backward-compatible:** no `slack_probes` → probe search skipped, the existing 3 window-tied searches unchanged. **(5) Structured §8.** `scripts/render_ce_health.py`'s `user_context_subsection` now **splits `user_context.md` by its `##` slot headings** and renders each as its own labelled sub-block inside the `cehealth-history` block (order: About this CE · Constraints · Known failure modes · Analyst priors & focus · Known events · Important links) — **Constraints** as warning chips/callout, **Important links** as a small `link · what-it-gives` `<table>`. Keeps the Slack-signals embed (now incl. the standing-context bucket) + `ce_history_block` / `prior_runs_block`. Graceful: missing slots omitted; a file with no recognizable slots falls back to the verbatim embed; bare-continue → §8 byte-identical. **Blast radius:** `ce-rca` (SKILL.md, `context_ingest_guide.md`, `render_ce_health.py`) + **one CVR-RCA sub-skill touch** (`slack_context_guide.md`, re-vendored). No `compose.py` / template / CE-Health-engine / perf-audit change; CE Health anchor ids unchanged. Verified: rich 8-slot fixture renders structured sub-blocks (chips + links table + standing-context bucket), bare-continue §8 byte-identical, probe-derivation maps Constraints+Failure-modes → non-empty / empty → none, vendor.sh mirrored the slack guide. **Deferred:** persistent (cross-run) CE context store; perf-audit consuming `user_context.md` (owner hand-off). |
 | m030 | 2026-06-09 | **CE Health Wave B — engine data layer (v2.6.0).** Adds the data CE Health couldn't show before, across `ce-health-skill-main` (re-vendored via `scripts/vendor.sh`) + `scripts/render_ce_health.py`. **(1) Multi-year trajectory:** monthly lookback 13→36 months + new `fetch_monthly_cvr` (CVR-RCA's CVR) → Revenue Trajectory gains a Predicted-Revenue × CVR YoY pivot; engine emits `history_months`/`has_ly`. **(2) Vendor Breakdown (new display §7):** `fetch_vendor_breakdown` from `fct_orders` (Omni measures — revenue=`amount_revenue_usd`, TR=rev/completed-gross, CR=completed/gross), vendor attributed to each order's **primary booking** (`fct_bookings_v2.vendor_id`, lowest `booking_id` — avoids fan-out) + `dim_vendors.fulfilment_type`; renderer block bumps Lead-time/Historical/Countries to 8/9/10. **(3) Funnel by dimension:** §5 gains a "Break funnel down by" dropdown — Landing page (existing) + new Channel + Language cuts (`_fetch_funnel_by_dim` on `mixpanel_user_page_funnel_progression`, per-user MAX-flag dedup). **(4) TGID corrections:** all deltas now **MoM (pre/post)**, not YoY (fixes the unlabeled "+142%") — added prior-window aggregates to `fetch_top_tgids` (`gbv_pri`/`completed_gbv_pri`→`aov_pri`/`tr_pri`/`cr_pri`) + `fetch_tgid_funnel` (prior window + true `s2o`); **RPC redefined to S2O×AOV×TR** (interim per-select-view); experience names emitted **untruncated** (renderer ellipsis+hover); **Predicted/Actual Revenue** labels on the §1 note + §7. **(5) Renderer hardening:** `section()` header match made single-line (`[^\n]*`) so same-prefix sections ("Funnel" vs "Funnel by Language") don't collide. **Blast radius:** ce-health engine (re-vendored) + `render_ce_health.py`; no compose/template/other-sub-skill change. Verified end-to-end on CE 243 + CE 3593 via the **vendored** engine. **Deferred:** exact RPC, funnel platform/page-type cuts, historical-context memory (Wave C). |
 | m029 | 2026-06-09 | **CE Health tab — Driver Diagnosis promoted to position 3 + Shapley waterfall un-truncated (v2.5.4).** Two presentation tweaks in `scripts/render_ce_health.py`. **(1) Reorder:** the §ordered list moves **Driver Diagnosis (Shapley)** to **right after Revenue Trajectory** — new display order **1 CE Vitals · 2 Revenue Trajectory · 3 Driver Diagnosis · 4 Channel Breakdown · 5 Funnel · 6 Top TGIDs · 7 Lead Time Cohorts · 8 Historical Context · 9 Customer Countries** (block titles renumbered to match; **anchor `bid`s unchanged**, so cross-tab `↗` links still resolve). **(2) Waterfall fix:** the Plotly revenue waterfall was clipping on the right (last bar's `$` label + the long "Post (dates)" x-tick). The first/last x-ticks are shortened to **Pre / Post** (the full dates remain in the chart subtitle), and the layout widens to `margin r:80, b:104, height:440, autosize:true`. **Blast radius: `render_ce_health.py` only** — no compose/template/sub-skill/engine change. Verified on ce-243 + ce-3593: titles read 1..9 in the new order, 9 `cehealth-*` anchors unchanged, waterfall renders Pre/Post ticks with the wider margins. |
 | m028 | 2026-06-09 | **CE Health tab — reverted the non-functional TGID metric selector (v2.5.3).** Reverted **only** the v2.5.2 part-(C) TGID metric selector from `scripts/render_ce_health.py` — it rendered the column checkboxes **unchecked** and the show/hide toggle **did not work**, so it's removed and **parked for a later wave**; **all other CE Health table changes are retained**. **Removed:** the `_tgid_metric_selector` function (the `.ceh-msel` checkbox bar above the TGID main table, its scoped CSS, and its toggle `<script>`) and its wiring in `build_tgid_main` (the `col_data`/`metric_cols` slug loop + the `selector` in the return). The supporting `styled_table` additions were also removed **cleanly** rather than left inert, since nothing else used them: the `table_id` + `col_data` params, the `_dcol` helper, the `#ceh-tgid-main` id, and the `data-col="<slug>"` stamping on `<th>`/`<td>`. **No inert leftovers.** **Retained unchanged:** section titles 1..9 in display order (Vitals="1."), the derived **S2O = S2C × C2O** colour-scaled column inside Funnel Metrics, the **CR<80% red** highlight (`td.ceh-cr-low`), blue group dividers (`ceh-gdiv`), grouped header bands (`ceh-group`), sticky/frozen identity columns, landing-URL ellipsis + hover (`ceh-lpurl`), collapsible sections, all Plotly charts. **Verified** on ce-243 + ce-3593 → `report_v2.html`: `ast.parse` OK; **zero `ceh-msel` / `_tgid_metric_selector` / `ceh-tgid-main` / `data-col` / `Columns` residue** in the rendered tab; S2O colour-scaled column, CR<80% red, blue dividers (37), grouped headers (5), sticky columns (44) all present; titles read 1..9 with Vitals="1."; landing-URL `title=` present; collapse JS (`ceh-toggle`) + 3 Plotly plots intact; other tabs unaffected (selector-related diff vs prior reports = 0 lines). **Blast radius: `scripts/render_ce_health.py` only.** |

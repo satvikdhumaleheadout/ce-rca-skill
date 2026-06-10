@@ -5,6 +5,107 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.11.0] — 2026-06-10 — Omni metric reconciliation (funnel parity) · Summary provenance guard · Summary CVR card
+
+**Summary:** Aligns the report's funnel/metric definitions with the **Omni dashboard** (the source of truth) so the same metric reads the same number across tabs and matches Omni. Verified on CE 3593 (Apr10–Jun08): the CVR-RCA funnel now lands at **LP 50,548 / CVR 6.14% / LP2S 42.9% / S2C 34.5% / C2O 41.52%** vs Omni's 50,543 / 6.1% / 42.89% / 34.48% / 41.52% (the ~5-user residual is the deliberately-skipped 30-day completion window — negligible). Five changes:
+
+**(1) Drop the page-type whitelist** from the CVR-RCA funnel queries (`q1_base`, `q2_dimensions`, `q3_trend`) and CE Health's `fetch_monthly_cvr` — Omni applies none, so the LP population now matches (was 48,227 → 50,548). **(2) Exclude PERFORMANCE_MAX in the funnel section only** — added to CE Health's funnel-by-dimension, landing-page, and §4/§6 funnels (CVR-RCA already excluded it); the §3 Channel Breakdown still reports PMax as its own channel. **(3) Unify the LY window to −364 days** (52-week, DOW-aligned) — fixed CE Health's custom-date path (was a calendar-year −365 shift that drifted LY ~1 day); the month path stays calendar-aligned by design. **(4) SIS = impression-weighted** `SUM(impressions)/SUM(eligible)` in `fetch_market_benchmarks` (was `AVG(search_impression_share)`). **(5) Reconcile `fetch_all_paid_metrics`** to the core fct_orders convention (`NOT IN ('Dummy','Cancelled - Fraudulent') AND user_type='Customer'`).
+
+Plus a **Summary provenance guard** (`summary_guide.md`): three rules — don't relabel a metric, attribute to the source tab, keep source precision — to stop the mis-transcription class (e.g. an ROI delta surfacing as a CVR delta). And the **Summary §2 vitals now include the CVR card** at position 3, mirroring the CE Health tab order (Revenue · Orders · CVR · AOV · Take Rate · Completion · ROI(1)).
+
+### What changed
+- **`skills/cvr-rca/references/q1_base.sql`, `q2_dimensions.sql`, `q3_trend.sql`** — removed the `page_type IN (...)` whitelist; PMax exclusion retained.
+- **`skills/ce-health/engine/sources/bq.py`** — PMax exclusion added to `_fetch_funnel_by_dim` + `fetch_lp_funnel`; whitelist dropped from `fetch_monthly_cvr`; SIS → SUM/SUM in `fetch_market_benchmarks`; `fetch_all_paid_metrics` status/user_type filter reconciled.
+- **`skills/ce-health/ce_health.py`** — PMax exclusion in `fetch_ce_funnel` + `fetch_tgid_funnel`; custom-date LY shift −365 → −364; §4 funnel labeled "cross-session · excludes PMax"; §2 vitals predicted-vs-actual note; Shapley revenue-basis comment.
+- **`references/summary_guide.md`** — provenance guard after the cardinal rule; §2 vitals add the CVR card (position 3) and mirror CE Health order/decimals.
+- **`skills/cvr-rca/references/report_structure.md`** — "excludes PMax" basis pill on the funnel section heading.
+
+### Blast radius
+- CVR-RCA funnel SQL + CE Health engine/render + the Summary/report guides. No `compose.py` / template / perf-audit change. The 30-day completion window and funnel-table grain were deliberately left unchanged (see thoughts/omni-reconciliation.md).
+
+---
+
+## [v2.10.0] — 2026-06-10 — Shapley CVR-basis correctness fix · CVR in vitals + a CVR card · foreground CE Health · scoped auto-update
+
+**Summary:** Four fixes, headlined by a **correctness fix** to the CE Health driver decomposition. **(1) Shapley CVR basis (CORRECTNESS).** The CE-level Shapley used a **clicks** basis (`traffic = paid clicks`, `cvr = orders / clicks`) that could disagree in **sign** with the funnel/vitals CVR — so the driver ranking could show CVR as a drag while conversion had actually improved. It's rewritten to the **funnel basis** matching the §7 corrected 6-factor decomposition: `traffic = funnel (LP) users`, `cvr = converted_users / users` (the funnel CVR), `orders_per_converter = orders / converted_users` (when converter counts are available), plus `aov` / completion / take-rate from vitals. The guaranteed invariant — verified on CE 252/month — is that the multiplicative Shapley CVR factor's sign equals the direction of the funnel CVR: with funnel CVR rising 4.08% → 4.52%, the CVR factor flipped from the old **−$2.3K** to **+$10.0K**, and the decomposition total ($16,966.74) is unchanged. **(2) CVR in vitals + a CVR card.** The engine now carries the funnel CVR (orders/users) on each window's `vitals` dict in the sidecar (`vitals.current.cvr`, etc.), and the CE Health tab's §2 gains a **CVR metric card** alongside the other rate cards. **(3) Foreground CE Health.** The orchestrator now runs CE Health as a single foreground call (it's fast — internally parallelized) instead of the background/two-phase/poll-for-preview dance; the `--preview-marker` machinery is left in the engine but unused. **(4) Scoped auto-update.** The auto-update only fires for the canonical `~/.ce-rca` install; a dev/local copy now skips the version check and proceeds, avoiding a false "out of date" alarm and a denied-curl dead-end.
+
+### What changed
+- **`ce_health.py` (engine, re-vendored)** — `fetch_ce_funnel` emits `cvr` (orders/users ×100); `compute_shapley_for_ce` rewritten to the funnel basis (traffic = funnel users, cvr = converted_users/users, + `orders_per_converter`); `calc_shapley_decomposition` factor list gains `orders_per_converter`; `vitals[*].cvr` merged from the funnel before the sidecar write; the §7 engine table labels updated (Traffic = Users, new Orders/User factor). The Shapley engine `calc_shapley_decomposition` math is unchanged — only the factor dicts fed to it.
+- **`scripts/render_ce_health.py` §2** — a **CVR card** added to the top vitals cards (order: Revenue · Orders · CVR · AOV · Take Rate · Completion · ROI(1)), via `card()` + `pp_delta`, reading `vitals[*].cvr`; grid widens to 7 cards; None-safe for older sidecars without `cvr`.
+- **`SKILL.md`** — version block: `SKILL_DIR` = the dir this file was read from; version check/update gated to `SKILL_DIR == ~/.ce-rca`. Step 0d: one foreground CE Health run (no `--preview-marker`, no poll/PREVIEW_READY/FULL_READY/bounded-fallback). Step 1: read CVR from `sidecar.vitals[*].cvr`. Step 2: FULL_READY gate removed.
+- **`VERSION`** 2.9.1 → 2.10.0.
+
+### Blast radius
+- CE Health engine (re-vendored into the bundle) + `render_ce_health.py` §2 + `SKILL.md` (Step 0/1/2 + version block) + changelog. **No** `compose.py` / template / CVR-RCA / perf-audit change. The full CE Health `.md` is unchanged **except §7** (now the funnel-basis Shapley, converging with the §7 render) **and** the new CVR card in §2 of the rendered tab.
+
+---
+
+## [v2.9.1] — 2026-06-10 — Summary vitals cards mirror the CE Health tab (order + formatting)
+
+**Summary:** The Summary tab's vitals cards used their own order/labels/decimals (e.g. ROI shown 3rd as `159.7%`, AOV `$334.59`, label "CR"), which didn't match the CE Health §2 cards right below them. They now mirror CE Health exactly.
+
+### What changed
+- **`references/summary_guide.md`** (block #2) — prescribes the **exact CE Health order** (Revenue · Orders · AOV · Take Rate · Completion · ROI(1)), **verbatim labels** ("Completion", "ROI(1)" — not "CR"), and **matching decimal places** (Revenue money `$286.5K`; Orders comma-int; AOV `$`+0-dp `$335`; Take Rate/Completion 1-dp `21.7%`/`86.2%`; ROI(1) 0-dp `162%`). Values are CE Health's vitals, so the two tabs read identically.
+
+### Blast radius
+- **`summary_guide.md` only** — guide/authoring change, no code/template/sub-skill change. Verified on CE 3593: Summary vitals labels, order, decimals, and values match the CE Health §2 cards exactly.
+
+---
+
+## [v2.9.0] — 2026-06-10 — Latency: parallelized CE Health + preview-first two-phase + batched Step-0
+
+**Summary:** The diagnosis preview now appears far sooner, with **zero change to the final report**. Three moves: **(1) Parallelized CE Health.** Its ~30 independent BigQuery queries used to run one-after-another (~73s on CE 252/month); they now run concurrently on an 8-worker thread pool, dropping wall-clock to **~11s (~6.6×)**. Results are slotted back into the exact same places, so the rendered `ce_health_report.md` and `.json` are unchanged. **(2) Preview-first two-phase emit.** Behind a new opt-in `--preview-marker` flag, CE Health computes the headline numbers (vitals + Shapley driver ranking) first, writes an early JSON sidecar, and signals `PREVIEW_READY` — so the orchestrator can show you the CE Health diagnosis while the rest of the report finishes in the background. It then rewrites the complete report and signals `FULL_READY`. Standalone CE Health (no flag) is byte-for-byte unchanged. **(3) Faster orchestrator start.** `/ce-rca` launches CE Health in the background, shows the preview as soon as it's ready, and only blocks for the full report right before dispatching the deep dives (which need the complete report as context) — with a safety fallback so a stuck run never hangs. The independent setup steps were also batched into fewer commands.
+
+**Blast radius:** CE Health engine (re-vendored into the bundle) + the `/ce-rca` orchestrator steps + changelog. No change to the renderer, composer, templates, CVR-RCA, perf-audit, or any query — the final `ce_health_report.md` + `.json` are **verified byte-identical** to before (plain and with `--preview-marker`).
+
+---
+
+## [v2.8.1] — 2026-06-10 — CE Health: Driver Diagnosis + Funnel default-open; waterfall full-width fix
+
+**Summary:** Two CE Health tweaks. **(1)** Driver Diagnosis (Shapley) and Funnel now open by default (alongside Vitals + Revenue Trajectory). **(2)** Fixed the revenue waterfall rendering at ~700px with whitespace on the right: it's a genuine bug, not a model error — Plotly draws the chart while it's in a hidden/collapsed container (so `autosize` falls back to a default width) and the section-expand toggle never resized it. The collapse toggle now resizes a section's Plotly charts when it's expanded, so the waterfall spans the full card and any later-expanded chart self-heals.
+
+### Blast radius
+- `scripts/render_ce_health.py` only. Verified on ce-243 (shapley/funnel open, width:100%, resize-on-expand present).
+- **Noted (follow-up):** `render_ce_health.py` reads inputs from the run-dir root, so re-rendering an *organized* (v2.4.0) run fails — harmless live (render precedes the Organize step) but worth making layout-aware via `compose.py`'s existing `resolve()`.
+
+---
+
+## [v2.8.0] — 2026-06-10 — Hardening: chart-render confirmation + Summary text + render de-rigidifying
+
+**Summary:** A real run surfaced four issues plus a request to make the recent presentation changes scalable rather than one-off rigid. This release is **presentation/robustness only — no engine change**. The two chart issues (truncated CE Health waterfall, missing CVR-RCA 90-day annotations) shared one root cause — non-active tab panes are `display:none` at load, so Plotly draws into a 0-width container — and the composite **already** resizes each pane's charts on tab activation, so no template change was needed. The Summary guide text was de-cleverised, and the CE Health renderer's hardcoded column **positions** and **channel names** were replaced with header-name lookups so it survives column reorders and other markets.
+
+### What changed
+- **Chart render in hidden tabs (#3 + #4) — confirmed already handled.** `templates/report.html`'s `activateTab()` resizes every `.js-plotly-plot` in a pane after it becomes visible (`Plotly.Plots.resize`, idempotent, guarded), and runs on every activation path — button click, cross-tab `↗` anchor routing, and the load-time hash handler. So the CE Health waterfall renders full-width and the CVR-RCA 90-day `Post period` + event annotations position the first time each tab is opened. No separate load-time handler to supersede; **the template was left unchanged**.
+- **Summary text — `references/summary_guide.md`.** §3 renamed *"Long-term context — is the move real?"* → **"Short-term vs long-term context"** (the "is the move real?" framing dropped from the heading and the reading-flow table; the pre→post Δ + YoY Δ table content/guidance kept). §4 headline callout now instructs a **plain heading** — just *"The Story"* or a one-line factual headline of the move (e.g. "Revenue −28%, traffic-led") — the clever `<h2>The Story — <metaphor>` instruction and example are gone; the What-moved / Why / Action `callout-item`s stay. The hardcoded "flagship TGID 3909" in the examples is now a `<top-TGID>` placeholder so it reads as illustrative.
+- **De-rigidified `scripts/render_ce_health.py`** (every existing graceful fallback preserved). Hardcoded column **indices** were replaced with the existing `_col_idx` header-name lookup: the funnel cards locate the current/prior windows by header (not `1, 2`); the L12M linear + YoY-hover parsing builds header→index maps (Month/Revenue/Orders/ROI/TR/CR/AOV; Month/Clicks/CVR/Paid-ROI) instead of fixed `r[1..6]`, omitting any absent column rather than crashing; the channel and lead-time tables locate their name/band + Share columns by header rather than position 0. **Channel rules** were generalised: cross-sell leakage now sums **every** "*Cross-sell" channel (not just Google + Bing); the **highest-share** channel is treated as primary (only flagged "not search-led" when no search channel leads) instead of hardcoding "Google Search"; benchmarked channels keep their norms while unmapped channels degrade silently. Magic thresholds (80% concentration, 8% low-S2O, the near-flat delta band) are now documented, tunable module constants.
+
+### Blast radius
+- `ce-rca` only: `references/summary_guide.md` + `scripts/render_ce_health.py`. No template / `compose.py` / engine / sub-skill change; CE Health anchor ids unchanged. Verified on CE 3593 + CE 243.
+
+### Deferred
+- A persistent (cross-run) CE-context store; perf-audit consuming `user_context.md` (carried from v2.7.0).
+
+---
+
+## [v2.7.0] — 2026-06-09 — Wave C: CE context capture → structured Historical Context (per-run)
+
+**Summary:** Refines *what* CE context the Step 1 pause captures (answering the questions a GM would have about a CE) and *how §8 of the CE Health tab presents it* — entirely **per-run** (no persistent store), **additive**, and **backward-compatible**: a bare-"continue" run produces a byte-identical report. The richest source wins — an MMP doc is mined for CE overview, hypotheses, constraints, and known failure modes, so the analyst types almost nothing.
+
+### What changed
+- **Step 1 prompt inlined.** The optional-input prompt (MMP doc · hunch · known events · constraints · known failure modes · where-to-look) is now written verbatim into `SKILL.md`, and the old `references/input_guide.md` is **deleted** — one less file to open, the prompt is where you read it.
+- **8-slot `user_context.md`.** The captured-context template expands to **About this CE · Focus / direction · Hypothesis priors · Known events · Constraints · Known failure modes · Important links · Sources** (only slots with content are written). Step 2 derives a **`slack_probes`** array from the Constraints + Known-failure-modes slots and writes it into `orchestration.json` (omitted when empty).
+- **MMP-doc extraction enriched.** The context-ingestion sub-agent now pulls **About-this-CE overview + Hypothesis priors + Constraints + Known failure modes + Important links** from a doc (previously priors/events only). The ad-hoc-Sheet data-lens path is unchanged.
+- **CVR-RCA Slack agent — probe-driven standing-context search (the one cross-skill touch).** The Slack sub-agent reads `slack_probes` and, for each, runs a CE-scoped `"{ce_name}" AND <probe>` query over a **~90-day standing lookback from `post_end`** (and reads user-pasted thread links directly), writing a new **"Standing context — known-issue checks"** bucket — each probe reported found-with-links or none-found. With no `slack_probes`, the probe search is skipped and the agent behaves exactly as before (the three window-tied searches are unchanged).
+- **Structured §8.** The CE Health tab's Historical Context block now **splits `user_context.md` by its slot headings** and renders each as its own labelled sub-block (About this CE · Constraints · Known failure modes · Analyst priors & focus · Known events · Important links) — **Constraints** as warning chips, **Important links** as a small `link · what-it-gives` table. The Slack-signals embed (now carrying the standing-context bucket), the synthesised Historical-trajectory narrative, and the Past-RCAs index are all kept. Any missing slot is omitted; a file with no recognizable slots falls back to the verbatim embed; a bare-continue run is byte-identical.
+
+### Blast radius
+- `ce-rca` (`SKILL.md`, `references/context_ingest_guide.md`, `scripts/render_ce_health.py`) **+** one CVR-RCA sub-skill touch (`references/slack_context_guide.md`, edited in the canonical CVR source and re-vendored via `scripts/vendor.sh`). No `compose.py` / template / CE-Health-engine / perf-audit change; CE Health anchor ids unchanged.
+
+### Deferred
+- A persistent (cross-run) CE-context store; perf-audit consuming `user_context.md` the same way (owner hand-off).
+
+---
+
 ## [v2.6.0] — 2026-06-09 — CE Health Wave B: new data (multi-year, vendor, funnel-by-dimension, MoM TGIDs)
 
 **Summary:** Wave A reorganised CE Health on the data it already had; **Wave B adds the data it was missing** — multi-year trajectory, a vendor breakdown, funnel cuts by channel/language, and correct month-over-month TGID economics. Engine work lives in `ce-health-skill-main` (re-vendored into the bundle); the renderer presents it.

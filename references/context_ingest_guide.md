@@ -40,13 +40,24 @@ narrative → priors/events, tabular → data lens. Never reject a source just b
 it isn't a "doc" or "sheet"; if you genuinely can't read it, say so in PROVENANCE
 and move on.
 
-### type: "doc"  (MMP doc / Google Doc / PDF — narrative)
+### type: "doc"  (MMP doc / CE one-pager / Google Doc / PDF — narrative)
+An MMP doc is the **richest single CE-context source** — mine it for all five of
+the structured outputs below (not just priors/events), filtered to THIS CE:
 1. `read_file_content` → markdown.
-2. Extract, filtered to THIS CE: recurring/known issues, past-RCA conclusions,
-   seasonality, supply/content quirks, structural notes.
-3. Convert each into a **falsifiable hypothesis prior** or a **known event**
-   (with a date if the doc gives one). Phrase as something the deep dive can test
-   and rule out — not a conclusion.
+2. **About this CE** — a 2–4 line overview of what the CE is / how it's run
+   (channel mix, supply structure, seasonality, positioning). Orientation only.
+3. **Hypothesis priors** — recurring/known issues, past-RCA conclusions, structural
+   quirks. Convert each into a **falsifiable prior** the deep dive can test and rule
+   out — not a conclusion.
+4. **Known events** — operational facts with a date if the doc gives one
+   (price change, content ship, promo).
+5. **Constraints** — things the investigation must respect (PPC restrictions,
+   no ticket-only product, no same-day inventory, supply exclusivity).
+6. **Known failure modes** — what usually breaks here (stock-outs, vendor API
+   errors, pricing wars). These (with Constraints) seed the Slack probes.
+7. **Important links** — any durable reference the doc points at (a dashboard, a
+   sibling doc, a tracker) as `link · what it gives`.
+Emit only the slots the doc actually supports; keep each lean.
 
 ### type: "sheet"  (ad-hoc data pull — tabular evidence)
 1. **Primary — `read_sheet.py` (ADC):**
@@ -77,10 +88,18 @@ content. Keep it lean.
 
 ```
 <<<USER_CONTEXT>>>
+## About this CE
+- [2–4 line overview]  (source: MMP doc "<title>")
 ## Hypothesis priors
 - [falsifiable prior]  (source: MMP doc "<title>")
 ## Known events
 - [event + date]  (source: MMP doc "<title>")
+## Constraints
+- [thing the investigation must respect]  (source: MMP doc "<title>")
+## Known failure modes
+- [what usually breaks here]  (source: MMP doc "<title>")
+## Important links
+- [link · what it gives]  (source: MMP doc "<title>")
 <<<END>>>
 
 <<<USER_DATA_LENS slug="<short-slug>" source="<sheet title/url>">>>

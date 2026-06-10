@@ -22,6 +22,12 @@ The main agent passes you these values when spawning you:
 - `user_channels` — (optional) Slack channels the user named at Step 1 (from
   `orchestration.json → user_slack_channels`). Absent/empty on most runs; when
   present, read them too (Search 4) and tag them as user-requested.
+- `slack_probes` — (optional) an array of short standing-context search terms (from
+  `orchestration.json → slack_probes`), derived from the user's stated constraints
+  and known failure modes — e.g. `["inventory stock-out", "vendor API errors"]`.
+  Absent/empty on most runs; when present, run the probe search (Search 5) over a
+  longer standing-context lookback and write the "Standing context" bucket. When
+  absent/empty, skip Search 5 entirely and behave exactly as before.
 
 ---
 
@@ -99,10 +105,18 @@ mkt_latest = int((post_end_dt + timedelta(days=1)).timestamp())
 bug_oldest = int((post_start_dt - timedelta(days=2)).timestamp())
 bug_latest = int((post_end_dt   + timedelta(days=1)).timestamp())
 
+# Search 5 — Standing-context probes: ~90 days before post_end → post_end.
+# Known-issue checks aren't tied to the pre/post window — a recurring quirk
+# ("stock-outs", "vendor API errors") may have last surfaced weeks before the
+# window, so we use a wider standing lookback. Only used when slack_probes given.
+probe_oldest = int((post_end_dt - timedelta(days=90)).timestamp())
+probe_latest = int((post_end_dt + timedelta(days=1)).timestamp())
+
 # Verify all timestamps by printing decoded dates before proceeding
 for label, ts in [("ce_oldest", ce_oldest), ("ce_latest", ce_latest),
                   ("mkt_oldest", mkt_oldest), ("mkt_latest", mkt_latest),
-                  ("bug_oldest", bug_oldest), ("bug_latest", bug_latest)]:
+                  ("bug_oldest", bug_oldest), ("bug_latest", bug_latest),
+                  ("probe_oldest", probe_oldest), ("probe_latest", probe_latest)]:
     print(label, datetime.fromtimestamp(ts).strftime("%Y-%m-%d"))
 ```
 
@@ -118,7 +132,7 @@ Rationale:
 
 ---
 
-## Section 5 — Searches to run (run all three)
+## Section 5 — Searches to run (Searches 1–3 always; 4–5 only when their inputs are present)
 
 ### Search 1 — CE-specific global search
 
@@ -173,6 +187,33 @@ For each channel in `user_channels`: resolve its ID (Section 3 table, else
 window (`mkt_oldest` → `mkt_latest`, `response_format="detailed"`). Apply the same
 bot-filtering and 5+-reply thread-reads as Search 2. The user pointed here on
 purpose — treat these as relevant, but still drop pure bot/symptom noise.
+
+### Search 5 — Standing-context probes  *(only if `slack_probes` provided)*
+
+These are the user's stated **constraints and known failure modes** — recurring
+issues to check for regardless of the analysis window. For **each** probe term in
+`slack_probes`, run a CE-scoped search over the wider standing lookback
+(`probe_oldest` → `probe_latest`):
+
+```
+slack_search_public_and_private(
+    query="\"{ce_name}\" AND {probe}",
+    sort="timestamp",
+    sort_dir="desc"
+)
+```
+
+Read the top results within the `probe_oldest` → `probe_latest` window; for any
+with 5+ replies, call `slack_read_thread`. **Also read any thread links the user
+pasted directly** (a Slack archive URL in the inputs / `user_context.md`) — call
+`slack_read_thread` on it regardless of window. Apply the same bot/symptom
+filtering. Record, **per probe**, whether the known issue was found (with links)
+or not — this populates the "Standing context — known-issue checks" bucket
+(Section 7). A probe that finds nothing is itself a useful signal ("checked, none
+found"), so always report every probe.
+
+If `slack_probes` is absent or empty, **skip this search entirely** — do not run
+any probe queries and omit the Standing-context bucket from the output.
 
 ---
 
@@ -244,12 +285,20 @@ Search window: [YYYY-MM-DD] to [YYYY-MM-DD]
 <!-- Source: user_channels (Search 4) — omit this whole section if none provided -->
 - [YYYY-MM-DD] · [Author] · [#channel] · [one-line message summary] → [slack link]
 
+## Standing context — known-issue checks
+<!-- Source: slack_probes (Search 5, ~90-day standing lookback) — omit this whole section if no slack_probes -->
+- **[probe term]:** found — [YYYY-MM-DD] · [Author] · [one-line summary] → [slack link]
+- **[probe term]:** none found in the standing window.
+
 ## Filtered out
 [N] bot messages skipped · [N] symptom-only messages skipped
 ```
 
 (Include the **User-requested channel signals** section only when `user_channels`
-was provided; omit the header entirely otherwise.)
+was provided; omit the header entirely otherwise. Likewise include the **Standing
+context — known-issue checks** section only when `slack_probes` was provided —
+list every probe with its result, found-with-links or none-found; omit the whole
+section otherwise.)
 
 **Rules:**
 - Keep ALL four section headers even if a category is empty (the main agent

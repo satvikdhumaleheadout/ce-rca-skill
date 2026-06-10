@@ -479,7 +479,7 @@ def fetch_monthly_cvr(ce_id, months=36):
     """Monthly CVR via the CVR-RCA definition (mixpanel_user_page_funnel_progression).
 
     CVR = COUNT(DISTINCT order_completed users) / COUNT(DISTINCT LP users) per month,
-    with the q1_base page_type whitelist + PERFORMANCE_MAX exclusion. LP = distinct
+    with the PERFORMANCE_MAX exclusion and NO page_type whitelist (matches Omni). LP = distinct
     users on the funnel table; order_completed = distinct users with has_order_completed.
 
     Returns list of {month, cvr} with cvr as a fraction (0-1).
@@ -497,10 +497,7 @@ def fetch_monthly_cvr(ce_id, months=36):
     WHERE combined_entity_id = '{ce_id}'
         AND event_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {months} MONTH)
             AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
-        AND page_type IN (
-            'Collection', 'ShoulderPage', 'Cruises Landing Page', 'Hop-On Hop-Off',
-            'Airport Transfers', 'Content Page', 'Theme', 'Collection Page', 'Experience Page'
-        )
+        -- No page_type whitelist: matches the Omni dashboard funnel (all landing page types).
         AND (
             advertising_channel_type IS NULL
             OR advertising_channel_type != 'PERFORMANCE_MAX'
@@ -844,6 +841,7 @@ def _fetch_funnel_by_dim(ce_id, dim_col, start, end, top_n=12):
         FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
         WHERE combined_entity_id = '{ce_id}'
             AND event_date BETWEEN '{start}' AND '{end}'
+            AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
         GROUP BY dim_value, user_id
     )
     SELECT
@@ -1269,7 +1267,8 @@ def fetch_all_paid_metrics(
             ROUND(SUM(amount_revenue_usd), 0) AS paid_revenue
         FROM `{project}.{dataset}.fct_orders`
         WHERE combined_entity_id = '{ce_id}'
-            AND order_status = 'Completed'
+            AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+            AND user_type = 'Customer'
             AND channel_grouping = 'Paid'
             AND DATE(created_at) BETWEEN '{start}' AND '{end}'
         """.format(
@@ -1354,7 +1353,8 @@ def fetch_market_benchmarks(
     ads_stats AS (
         SELECT
             a.campaign_target_combined_entity_id AS ce_id,
-            AVG(a.search_impression_share) AS avg_sis,
+            -- Impression-weighted SIS (SUM/SUM), not AVG(ratio) — see metrics.sis().
+            SAFE_DIVIDE(SUM(a.count_impressions), NULLIF(SUM(a.count_eligible_searches), 0)) AS avg_sis,
             SAFE_DIVIDE(SUM(a.sum_spend), SUM(a.count_clicks)) AS cpc,
             SAFE_DIVIDE(SUM(a.count_clicks), NULLIF(SUM(a.count_impressions), 0)) AS ctr,
             SAFE_DIVIDE(SUM(COALESCE(a.count_conversions_online, 0)), NULLIF(SUM(a.count_clicks), 0)) AS cvr,
@@ -1823,6 +1823,7 @@ def fetch_lp_funnel(ce_id, tw_start, tw_end, ly_start=None, ly_end=None):
                   COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' AND has_checkout_started THEN user_id END)) * 100 AS ly_c2o
     FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
     WHERE combined_entity_id = '{ce_id}'
+      AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
       AND (event_date BETWEEN '{tw_s}' AND '{tw_e}' {ly_clause})
     GROUP BY 1
     HAVING COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' THEN user_id END) >= 1

@@ -26,10 +26,7 @@ WITH base AS (
   WHERE combined_entity_id = '{{CE_ID}}'
     AND event_date BETWEEN '{{PRE_START}}' AND '{{POST_END}}'
     AND CASE WHEN is_microbrand_page THEN 'MB' ELSE 'HO' END = '{{PRIMARY_MBHO}}'
-    AND page_type IN (
-      'Collection', 'ShoulderPage', 'Cruises Landing Page', 'Hop-On Hop-Off',
-      'Airport Transfers', 'Content Page', 'Theme', 'Collection Page', 'Experience Page'
-    )
+    -- No page_type whitelist: matches the Omni dashboard funnel (all landing page types).
     AND (
       advertising_channel_type IS NULL
       OR advertising_channel_type != 'PERFORMANCE_MAX'

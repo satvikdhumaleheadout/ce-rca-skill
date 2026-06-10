@@ -16,10 +16,6 @@ WITH base AS (
     page_type,
     device_type                                                            AS device,
 
-    MAX(CASE WHEN page_type IN (
-      'Collection', 'ShoulderPage', 'Cruises Landing Page', 'Hop-On Hop-Off',
-      'Airport Transfers', 'Content Page', 'Theme', 'Collection Page', 'Experience Page'
-    ) THEN 1 ELSE 0 END)                                                  AS visited_lp,
     MAX(CASE WHEN has_select_page_viewed THEN 1 ELSE 0 END)               AS visited_select,
     MAX(CASE WHEN has_checkout_started   THEN 1 ELSE 0 END)               AS checkout_started,
     MAX(CASE WHEN has_order_completed    THEN 1 ELSE 0 END)               AS order_completed,
@@ -75,10 +71,7 @@ ptype AS (
 
   FROM base
   WHERE period IS NOT NULL
-    AND page_type IN (
-      'Collection', 'ShoulderPage', 'Cruises Landing Page', 'Hop-On Hop-Off',
-      'Airport Transfers', 'Content Page', 'Theme', 'Collection Page', 'Experience Page'
-    )
+  -- No page_type whitelist: page-type cut shows all landing page types (matches Omni).
   GROUP BY 1, 2, 3
 
 ),

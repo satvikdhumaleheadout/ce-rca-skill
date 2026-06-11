@@ -92,6 +92,12 @@ markdown conversion, no body extraction, no chart-script handling (the Summary
 has no charts; it references the tabs' charts via `↗`). It is **pure synthesis**:
 it weaves findings the tabs already reached and never computes new numbers.
 
+**Metric naming (canonical):** all tabs use one canonical name per metric concept so the same
+label never carries two different numbers — **Site CVR** (Mixpanel funnel) vs **Paid CVR**
+(Google-Ads); **LP Users** (funnel) vs **Paid sessions** (paid); funnel steps carry a basis tag
+(within-session / cross-session / paid-session). Defined once in `references/metric_glossary.md`
+(a maintainer reference — not loaded at runtime; the tabs are authored/rendered to conform).
+
 ## The CVR-RCA rename step (master's responsibility)
 
 CVR-RCA writes its standalone report to `<run_dir>/report.html`. The composite

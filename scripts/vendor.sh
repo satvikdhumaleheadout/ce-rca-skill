@@ -19,6 +19,19 @@
 #
 set -euo pipefail
 
+# ── SAFETY GUARD (2026-06-10) ─────────────────────────────────────────────────
+# ce-rca/skills/ is now the CANONICAL source of truth for edits. Local changes
+# (metric-naming consistency, Omni reconciliation, etc.) live in the vendored
+# copies here and are NOT present in the upstream source dirs — a re-vendor would
+# OVERWRITE them. This guard refuses to run unless explicitly forced. Only force
+# AFTER you've backported the bundle's edits upstream so nothing is lost.
+if [ "${VENDOR_FORCE:-}" != "1" ]; then
+  echo "vendor.sh is DISABLED: ce-rca/skills/ is the canonical source of truth." >&2
+  echo "A re-vendor would overwrite local edits that aren't upstream." >&2
+  echo "If you really mean to (upstream already in sync): VENDOR_FORCE=1 bash scripts/vendor.sh" >&2
+  exit 1
+fi
+
 BUNDLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SKILLS_DIR="$BUNDLE_DIR/skills"
 

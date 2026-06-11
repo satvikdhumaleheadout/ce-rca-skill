@@ -5,6 +5,22 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.11.3] — 2026-06-10 — Cross-tab metric naming consistency (Site CVR / Paid CVR · LP Users / Paid sessions)
+
+**Summary:** Eliminates cross-tab label collisions — the same word ("CVR", "Traffic") was showing different numbers across tabs because the underlying measure differs by basis (Mixpanel funnel vs paid-platform). Now there's **one canonical name per metric concept**, so a reader never mistakes a legitimately-different number for a data error. **Labeling only — no metric/SQL changes; report numbers are byte-identical.**
+
+### What changed
+- **CVR split → "Site CVR" (Mixpanel funnel, completed/LP) vs "Paid CVR" (Google-Ads clicks→conversions).** Renamed across CVR-RCA hero cards (`report_structure.md`), CE Health §4/§5/§7/§10 (`ce_health.py`) — **killing the §5 same-section funnel-vs-paid "CVR" collision** — perf-audit Table-2/cohort/AG-type/monthly headers + `metric-definitions.md`, and the Summary vitals card + driver table (`summary_guide.md`).
+- **Traffic split → "LP Users" (Mixpanel funnel volume) vs "Paid sessions" (Google-Ads).** perf-audit "LP Sessions" → "Paid sessions".
+- **Funnel-step basis tags** — within-session (CVR-RCA + CE Health, matches Omni) vs paid-session (perf-audit on-site funnel; basis note added).
+- **New `references/metric_glossary.md`** — single source-of-truth for canonical names. **Maintainer reference, NOT loaded at runtime** (deterministic code + ~6 inline guide lines enforce the names).
+- **`scripts/vendor.sh` DISARMED** (`VENDOR_FORCE=1` to override) — `ce-rca/skills/` is now the canonical edit location; a re-vendor would overwrite local edits not present upstream.
+
+### Files
+`skills/cvr-rca/references/report_structure.md`; `skills/ce-health/ce_health.py`; `skills/perf-audit/engine/render/audit_skeleton.py` + `references/metric-definitions.md`; `references/summary_guide.md` + `references/composition_rules.md`; new `references/metric_glossary.md`; `scripts/vendor.sh`. Blast radius: render/label layers + orchestrator docs. No `compose.py` / template / query-SQL change.
+
+---
+
 ## [v2.11.2] — 2026-06-10 — CE Health funnel → within-session (matches Omni) · transient-404 resilience · deterministic PMax pill
 
 **Summary:** Closes the last funnel mismatch and hardens the engine against a transient BigQuery failure. The CE Health funnel now matches the Omni dashboard and the CVR-RCA tab exactly; a clone-refresh 404 no longer crashes a run; and the "EXCLUDES PMAX" basis pill now renders deterministically on the CE Health funnel.

@@ -187,7 +187,7 @@ def render_table2(t2):
     rows = [
         "**Table 2: Paid Performance (Google Search + PMax + Bing)**",
         "",
-        "| Period | Paid Rev | Paid ROI | RPC | CPC | Ad Spend | Clicks | CTR | CVR | CM1 | Paid TR | Paid CR |",
+        "| Period | Paid Rev | Paid ROI | RPC | CPC | Ad Spend | Clicks | CTR | Paid CVR | CM1 | Paid TR | Paid CR |",
         "|--------|----------|----------|-----|-----|----------|--------|-----|-----|-----|---------|---------|",
     ]
     for label, d in [("L4W", l), ("P4W", p), ("LY", y)]:
@@ -365,7 +365,7 @@ def render_cohort_table(cohorts):
     total_cm1 = sum(_g(r, "cm1", 0) for r in tw)
 
     rows = [
-        "| Cohort | Window | Spend | CPC | Clicks | CTR | Conv | CM1 | Rev | AOV | CVR | ROI | RPC | TR | CR | SIS | CM1 % |",
+        "| Cohort | Window | Spend | CPC | Clicks | CTR | Conv | CM1 | Rev | AOV | Paid CVR | ROI | RPC | TR | CR | SIS | CM1 % |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
@@ -628,9 +628,11 @@ def render_funnel(funnel_data):
     lw, pw, yw = stages
 
     rows = [
+        "_Paid-session funnel (Google-Ads attributed); rates are session-based._",
+        "",
         "| Stage | L4W | P4W | LY | \u0394 LY (pp) | \u0394 P4W (pp) |",
         "|-------|-----|-----|----|-----------|-----------| ",
-        f"| LP Sessions | {fi(lw['lp'])} | {fi(pw['lp'])} | {fi(yw['lp'])} | {dp(lw['lp'], yw['lp'])} | {dp(lw['lp'], pw['lp'])} |",
+        f"| Paid sessions | {fi(lw['lp'])} | {fi(pw['lp'])} | {fi(yw['lp'])} | {dp(lw['lp'], yw['lp'])} | {dp(lw['lp'], pw['lp'])} |",
         f"| LP2S | {fp1(lw['lp2s'])} | {fp1(pw['lp2s'])} | {fp1(yw['lp2s'])} | {dpp(lw['lp2s'], yw['lp2s'])} | {dpp(lw['lp2s'], pw['lp2s'])} |",
         f"| S2C | {fp1(lw['s2c'])} | {fp1(pw['s2c'])} | {fp1(yw['s2c'])} | {dpp(lw['s2c'], yw['s2c'])} | {dpp(lw['s2c'], pw['s2c'])} |",
         f"| C2O | {fp1(lw['c2o'])} | {fp1(pw['c2o'])} | {fp1(yw['c2o'])} | {dpp(lw['c2o'], yw['c2o'])} | {dpp(lw['c2o'], pw['c2o'])} |",
@@ -742,7 +744,7 @@ def render_ad_group_table(ad_groups):
     rows = [
         "**Ad Group Coverage**",
         "",
-        "| Ad Group Type | Ad Groups | Languages | Clicks | Spend | CVR | CPC | ROI |",
+        "| Ad Group Type | Ad Groups | Languages | Clicks | Spend | Paid CVR | CPC | ROI |",
         "|---------------|-----------|-----------|--------|-------|-----|-----|-----|",
     ]
     for ag_type, t in sorted(type_totals.items(), key=lambda x: x[1]["clicks"], reverse=True):
@@ -798,7 +800,7 @@ def render_appendix(channels, cohorts, budget, targeting=None):
     lines.extend(["", "### A2. Monthly Paid Performance (L12M)"])
     if monthly:
         lines.extend(["",
-            "| Month | Ad Spend | CPC | Clicks | CVR | CM1 | Paid ROI |",
+            "| Month | Ad Spend | CPC | Clicks | Paid CVR | CM1 | Paid ROI |",
             "|-------|----------|-----|--------|-----|-----|----------|"])
         for m in monthly:
             paid_roi = _g(m, "paid_roi")

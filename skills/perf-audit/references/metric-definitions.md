@@ -41,10 +41,12 @@ CPC = spend / clicks
 CTR = clicks / impressions * 100
 ```
 
-### CVR (Conversion Rate)
+### Paid CVR (Conversion Rate)
 ```
-CVR = conversions / clicks * 100
+Paid CVR = conversions / clicks * 100
 ```
+- **Canonical name: "Paid CVR"** (paid-platform basis) — distinct from "Site CVR" (Mixpanel funnel,
+  completed users / LP users) used in CVR-RCA / CE Health. See ce-rca `references/metric_glossary.md`.
 - Source: `count_conversions_offline_contribution_margin / count_clicks`
 - **Post-Sep 2025**: uses offline conversions
 - **Pre-Sep 2025**: uses online conversions

@@ -82,12 +82,18 @@ Render the Omni link on every CVR-RCA report — the row itself is unconditional
 
 ### 1a. Metric cards (always — all five)
 
-Five cards in this order: **CVR · LP2S · S2C · C2O · Traffic (users_lp)**
+Five cards in this order: **Site CVR · LP2S · S2C · C2O · LP Users**
 
-**Basis label (required):** the funnel is computed **excluding PERFORMANCE_MAX** (matches the Omni
-dashboard) across **all landing page types** (no page-type whitelist). Render a small **"excludes
-PMax"** pill on the funnel section heading — reuse the existing badge styling (`delta-flat` grey),
-no new CSS — so the basis is explicit and never reads as a discrepancy vs a PMax-inclusive table.
+(Canonical names — see ce-rca `references/metric_glossary.md`. **"Site CVR"** = the Mixpanel
+funnel conversion completed/LP users; distinct from perf-audit's **"Paid CVR"** (Google-Ads
+clicks→conversions). **"LP Users"** = the funnel's landing-page users; distinct from perf-audit's
+**"Paid sessions"**.)
+
+**Basis label (required):** the funnel is computed **within-session, excluding PERFORMANCE_MAX**
+(matches the Omni dashboard) across **all landing page types** (no page-type whitelist). Render a
+small **"within-session · excludes PMax"** pill on the funnel section heading — reuse the existing
+badge styling (`delta-flat` grey), no new CSS — so the basis is explicit and never reads as a
+discrepancy vs a PMax-inclusive or paid-session table.
 
 Each card shows: pre value (grey, smaller), post value (large bold), delta badge on its own line.
 Delta format: `Δ −0.33pp / −7.0%` — absolute pp change and percentage change together.

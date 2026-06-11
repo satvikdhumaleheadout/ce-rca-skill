@@ -806,7 +806,7 @@ def render_funnel_by_dimension(data, w):
         lines = [
             "## {}".format(title),
             "",
-            "| {} | LP Users | LP2S | S2C | C2O | CVR |".format(title.split(" by ")[-1]),
+            "| {} | LP Users | LP2S | S2C | C2O | Site CVR |".format(title.split(" by ")[-1]),
             "|---|---|---|---|---|---|",
         ]
         for r in rows:
@@ -895,7 +895,7 @@ def render_l12m(monthly):
         "",
         "### CE Health (Monthly)",
         "",
-        "| Month | Revenue | Orders | ROI(1) | TR | CR | AOV | CVR |",
+        "| Month | Revenue | Orders | ROI(1) | TR | CR | AOV | Site CVR |",
         "|-------|---------|--------|--------|----|----|-----|-----|",
     ]
     for m in monthly:
@@ -938,7 +938,7 @@ def render_l12m(monthly):
             lines.append("| {} | {} |".format(name_map[mm], " | ".join(cells)))
 
     lines.extend(["", "### Paid Performance (Monthly)", "",
-        "| Month | Ad Spend | CPC | Clicks | CVR | CM1 | Paid ROI |",
+        "| Month | Ad Spend | CPC | Clicks | Paid CVR | CM1 | Paid ROI |",
         "|-------|----------|-----|--------|-----|-----|----------|"])
     for m in monthly:
         paid_roi = _g(m, "paid_roi")
@@ -996,7 +996,7 @@ def render_shapley(shapley, w):
     ]
     factor_labels = {
         "traffic": ("Traffic (Users)", "\u2191 More users" if shapley.get("traffic", 0) >= 0 else "\u2193 Fewer users"),
-        "cvr": ("CVR", "\u2191 Better conversion" if shapley.get("cvr", 0) >= 0 else "\u2193 Lower conversion"),
+        "cvr": ("Site CVR", "\u2191 Better conversion" if shapley.get("cvr", 0) >= 0 else "\u2193 Lower conversion"),
         "orders_per_converter": ("Orders / User", "\u2191 More orders per converter" if shapley.get("orders_per_converter", 0) >= 0 else "\u2193 Fewer orders per converter"),
         "aov": ("AOV", "\u2191 Higher ticket value" if shapley.get("aov", 0) >= 0 else "\u2193 Lower ticket value"),
         "tr": ("Take Rate", "\u2191 TR improved" if shapley.get("tr", 0) >= 0 else "\u2193 TR compression"),
@@ -1176,7 +1176,7 @@ def render_landing_pages(lp_data, w):
     lines = [
         "## 10. Landing Pages",
         "",
-        "| Page URL | Users | CVR | LP2S | S2C | C2O | \u0394 LP2S LY | \u0394 S2C LY | \u0394 C2O LY |",
+        "| Page URL | Users | Site CVR | LP2S | S2C | C2O | \u0394 LP2S LY | \u0394 S2C LY | \u0394 C2O LY |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in top_lps:

@@ -22,6 +22,11 @@ You **weave findings the tabs already reached**. You do **not**:
 - **Don't relabel a metric** — an ROI delta stays ROI, a session count stays sessions; never swap one metric's number onto another's name.
 - **Attribute to the tab it came from** — the Source / `↗` must be the tab that produced that exact figure on that basis, not another tab discussing the same entity.
 - **Keep the source's precision** — `6.47%` stays `6.47%`, never re-rounded into a new value.
+- **Use canonical metric names** — **"Site CVR"** (Mixpanel funnel, completed/LP) vs **"Paid CVR"**
+  (Google-Ads clicks→conv); **"LP Users"** (funnel) vs **"Paid sessions"** (paid). Never put Site
+  CVR and Paid CVR (or LP Users and Paid sessions) side by side without both labels; carry each
+  source's basis tag (within-session / cross-session / paid-session) verbatim. (Full glossary:
+  ce-rca `references/metric_glossary.md` — reference only, do not load at runtime.)
 
 If two tabs appear to disagree (e.g. CVR-RCA says page-issue, perf-audit says
 traffic-issue), **present both and frame the tension** — do not adjudicate.
@@ -103,16 +108,17 @@ same decimal places** (7 cards when CVR is present; CVR is conditional — see b
 |---|---|---|---|
 | 1 | **Revenue** | money — `$NNN.NK` / `$N.NM` | `$286.5K` |
 | 2 | **Orders** | comma integer | `4,872` |
-| 3 | **CVR** | **2 decimals** + `%` | `6.06%` |
+| 3 | **Site CVR** | **2 decimals** + `%` | `6.06%` |
 | 4 | **AOV** | `$` + **0 decimals** | `$335` |
 | 5 | **Take Rate** | **1 decimal** + `%` | `21.7%` |
 | 6 | **Completion** | **1 decimal** + `%` | `86.2%` |
 | 7 | **ROI(1)** | **0 decimals** + `%` | `160%` |
 
-Values are CE Health's vitals (pre → post + delta badge). Use labels **"CVR"**, **"Completion"**
-(not "CR") and **"ROI(1)"** exactly, matching CE Health's decimals (ROI `160%` not `159.7%`; AOV
-`$335`; Take Rate `21.7%`; CVR `6.06%`). **Omit the CVR card when CE Health's sidecar has no `cvr`**
-(drop to 6 cards), mirroring CE Health.
+Values are CE Health's vitals (pre → post + delta badge). Use labels **"Site CVR"** (the Mixpanel
+funnel conversion — canonical name, distinct from perf-audit's "Paid CVR"), **"Completion"** (not
+"CR") and **"ROI(1)"** exactly, matching CE Health's decimals (ROI `160%` not `159.7%`; AOV `$335`;
+Take Rate `21.7%`; Site CVR `6.06%`). **Omit the Site CVR card when CE Health's sidecar has no
+`cvr`** (drop to 6 cards), mirroring CE Health.
 
 **Grid: use `class="metric-cards summary-vitals"` and do NOT set an inline
 `grid-template-columns`.** The `summary-vitals` class caps the row at **6 equal-width columns**,
@@ -125,8 +131,8 @@ size, never overshooting the tab. (A 6-card set, CVR absent, fills a single row.
     <div class="values"><span class="pre">$421.9K</span><span class="post">$286.5K</span></div>
     <div class="delta delta-neg">Δ −32%</div>
   </div>
-  <!-- then Orders · CVR · AOV · Take Rate · Completion · ROI(1), same shape, same order as CE Health §2
-       (CVR inserted 3rd); delta-neg / delta-pos / delta-flat by direction. No inline grid style. -->
+  <!-- then Orders · Site CVR · AOV · Take Rate · Completion · ROI(1), same shape, same order as CE Health §2
+       (Site CVR inserted 3rd); delta-neg / delta-pos / delta-flat by direction. No inline grid style. -->
 </div>
 ```
 Omit this row if CE Health didn't run.
@@ -267,7 +273,7 @@ One scannable `analysis-block` table, **one row per material driver**:
 
 | Column | Content |
 |---|---|
-| Driver | the factor (CVR, Traffic, AOV, Completion, Take Rate, …) |
+| Driver | the factor (Site CVR, LP Users, AOV, Completion, Take Rate, …) — canonical names |
 | Δ Contribution | Shapley magnitude + share of the revenue move ($ and %), from CE Health |
 | Dir | ▲ / ▼ |
 | What the RCA found | **one line** — the mechanism the deep dive localized |
@@ -280,7 +286,7 @@ One scannable `analysis-block` table, **one row per material driver**:
     <thead><tr><th>Driver</th><th class="num">Δ Contribution</th><th>Dir</th><th>What the RCA found</th><th>↗</th></tr></thead>
     <tbody>
       <tr class="highlight-row">
-        <td><strong>CVR</strong></td>
+        <td><strong>Site CVR</strong></td>
         <td class="num"><span class="delta delta-pos">+$8.5K · 38%</span></td>
         <td>▲</td>
         <td>S2C+C2O step-up, concentrated on <top-TGID> — a real rate gain, not a mix shift</td>

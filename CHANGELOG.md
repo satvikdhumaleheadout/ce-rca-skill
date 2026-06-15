@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.42.1] — 2026-06-15 — "Your read" question: plainer wording
+
+**Summary:** A live run surfaced the 1e question as *"What's the scalable lever you want sized, and where should I dig first?"* — too jargon-y. The §1e template now mandates **plain language, no jargon** (ask it the way you'd ask a colleague), with the default phrasing simplified to *"what do you think is driving this, and where should I dig first?"* and plainer examples. Wording only — no behaviour change.
+
+### Blast radius
+- `SKILL.md` §1e + changelog row m075; `CHANGELOG.md`; `VERSION` 2.42.0 → 2.42.1.
+
+---
+
 ## [v2.42.0] — 2026-06-15 — The post-reveal "Your read" hypothesis ask becomes a pop-up too
 
 **Summary:** The driver-hypothesis ask shown after the numbers ("💡 Your read on the driver…") was the **last free-text prompt** left in the onboarding — every other step (goal, window, the constraint buckets, aliases) is now a structured `AskUserQuestion`. This converts it to match, so the whole front door is consistent.

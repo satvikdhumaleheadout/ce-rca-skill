@@ -383,13 +383,6 @@ diagnosis, I'll test it against the data). For your goal (<goal>), most useful:
  • 💬 **Slack** — paste a thread link, or name a channel to read.
  • 🎙️ **Or just dump everything you know** — what changed, what you suspect, what
    usually breaks here — as free text or a voice note (Whisperflow works well).
- • 📈 **Google-Ads CSVs (optional — feeds the Paid-Performance tab).** Two exports
-   strengthen the paid audit: **Auction Insights** (competitor names + outranking
-   share → §6b) and **Search Terms** (search-term clusters → §8). Export from Google
-   Ads: *Auction insights* — select the CE campaigns → Auction insights tab → segment
-   by Week → last 8 weeks (plus the same 8 weeks last year from the pre-consolidation
-   account); *Search terms* — Search terms report filtered to the CE campaigns, last 4
-   weeks. **Attach them, paste file paths, or type `skip`.**
 Drop any of these (links welcome), or reply **`skip`** if you've nothing to share —
 I'll still ask a few quick context questions next; even one line about what changed
 sharpens the result.
@@ -422,14 +415,6 @@ in place (it's already text).
 Persist by nature: narrative/context → the matching `user_context.md` slots (tag the
 source); tabular data → a `<run_dir>/user_data_<slug>.md` lens.
 
-**Google-Ads CSVs (if the user attached/pasted any at 1a).** Save the file(s) into
-`<run_dir>/uploads/` (create it if needed), keeping the original filenames. Do **not**
-parse or interpret them here — they are read later by perf-audit at the narrative
-layer (Auction Insights → §6b, Search Terms → §8). Perf-audit tells CY-vs-LY Auction
-Insights apart by reading **line 2** of each CSV (the date range), so leave the files
-intact. Carry the saved paths to Step 2 (the perf-audit dispatch passes them, or
-`none` if the user skipped). `skip` / nothing attached → no files, pass `none`.
-
 **Mine to pre-fill the questionnaire.** Map what you found onto the four 1c buckets
 (Supply/Availability · LP · PPC · Pricing) + aliases (1d), so 1c can show each finding
 inside its question. This **pre-fills** the questions; it never removes them (the
@@ -452,7 +437,8 @@ explicit pop-ups (with an explicit Skip) get far better input than a free-text
   so "what's driving the change?" presupposes a question the user didn't ask. The only
   ask is **one soft-context `AskUserQuestion` pop-up** (below) — the **same pop-up
   mechanism** as the other goals' questions, just one of them, framed as *"any of this
-  would help me read the health right,"* not an interrogation. Then go to the reveal.
+  would help me read the health right,"* not an interrogation. **Then still do 1d
+  (confirm aliases — it runs on every path)**, and go to the reveal.
 - **All other goals** (growth · decline · investigate · something-else) **→ FULL
   path:** **all four** buckets below (one pop-up) **+ a 5th "anything else?" pop-up**
   (catch-all), then the driver-hypothesis at 1e.
@@ -559,6 +545,14 @@ Step 2) defaults to the full CE name + id, so without aliases it **misses every
 thread that used the nickname**. Capture them here — from the human, who knows them
 (this is *not* mined from Slack; Slack is searched later, and aliases are the input
 that makes that search work).
+
+**Ask this on EVERY run — it is not conditional on Slack input.** CE Context always
+runs the Slack collector (every CE-RCA run), so aliases always sharpen it —
+**regardless of whether the user shared a Slack thread/channel or any doc at 1a**, and
+on **every path** including the general-health-check light path and a bare-`skip` run.
+(A common mistake is treating 1d as part of "Slack-only" intake and skipping it when
+no Slack link was pasted — don't; the search still runs and still benefits.) It's
+near-zero friction: you propose, they confirm in one tap.
 
 **Auto-propose, then confirm — don't ask cold.** Generate the obvious short-forms
 from the CE name yourself (acronym + common shortenings) and ask the user to confirm
@@ -907,6 +901,27 @@ The run window is the four dates resolved at Step 0c and analyzed by CE Health
 use them, so CE Health, CVR-RCA, perf-audit, and CE Context all compare the
 **identical period**.
 
+**Pre-dispatch gate — perf-audit CSVs (only when perf-audit is in the dispatch set).**
+Right before spawning, *if perf-audit will run*, post this **short, single-purpose**
+prompt and **WAIT** for one reply (the user has just confirmed the run, so this is the
+moment it makes sense — never ask it back at Step 1, and never mid-parallel):
+
+```
+Before I launch the paid audit — two optional Google-Ads CSVs make it sharper (or reply `skip`):
+ • Auction Insights (competitor names + outranking share → §6b): Google Ads → the CE's
+   campaigns → "Auction insights" tab → segment by Week → last 8 weeks; plus the SAME 8
+   weeks last year from the pre-consolidation account.
+ • Search Terms (search-term clusters → §8): Google Ads → "Search terms" report →
+   filtered to the CE's campaigns → last 4 weeks.
+Attach the files, paste their paths, or reply `skip`.
+```
+
+Save whatever they attach into `<run_dir>/uploads/` (create it; keep original filenames;
+do **not** parse — perf-audit reads them at the narrative layer and tells CY-vs-LY Auction
+Insights apart by line 2's date range). `skip` / nothing → no files. Carry the saved paths
+(or `none`) into the perf-audit dispatch below. **If perf-audit is not in the dispatch set,
+skip this gate entirely.** Then:
+
 **Spawn the sub-skills in parallel** (one sub-agent each, single message,
 multiple Agent calls). Each sub-agent prompt says: read your skill's SKILL.md at
 its fixed bundle path (`$SKILL_DIR/skills/ce-context/SKILL.md`,
@@ -944,7 +959,7 @@ your own), for CE `<id>` over the run window
   relabel (it's owned upstream).
 
   **Google-Ads CSVs (skip its Step-0 prompt).** Pass the CSV paths captured at the
-  Step-1 input pause (saved under `<run_dir>/uploads/`) — the **Auction Insights**
+  pre-dispatch CSV gate above (saved under `<run_dir>/uploads/`) — the **Auction Insights**
   file(s) for §6b and the **Search Terms** file for §8 — or the literal `none` if the
   user skipped. Instruct perf-audit to **skip its Step-0 interactive upload prompt**
   (exactly as it's already told to skip its Step-1 date self-computation) and instead
@@ -1413,6 +1428,8 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 | --- | --- | --- |
+| m072 | 2026-06-15 | **perf-audit CSV ask moved from Step 1 to a pre-dispatch gate, with where-to-export instructions (v2.40.0).** The Google-Ads CSV request (Auction Insights → §6b, Search Terms → §8) was buried in the Step-1 input menu — premature/contextless (the user hasn't yet committed to running perf) and cluttering the direction-setting ask. Moved it to a **short, single-purpose pre-dispatch gate** in `SKILL.md` Step 2, posted **only when perf-audit is in the dispatch set**, right after the user confirms the run and just before the CE-Context + CVR + perf-audit parallel spawn (the only clean spot — can't prompt mid-parallel). The gate prompt now **includes the concise where-from export steps** (Auction insights tab → by week → last 8 wks + same 8 wks LY from the pre-consolidation account; Search terms report → CE campaigns → last 4 wks) so users actually know how to get the files; full parsing detail stays in perf-audit's Step 0. Capture (`<run_dir>/uploads/`, line-2 CY/LY identification) + the Step-2 dispatch hand-off (pass paths or `none`, perf skips its Step-0 prompt) are unchanged — only relocated; the Step-1 1a bullet + 1b capture paragraph are removed. `skip` → graceful degrade. Blast radius: `SKILL.md` §1a/§1b (removed) + Step-2 gate (added) + dispatch repoint, `CHANGELOG.md`, `VERSION`. No sub-skill / engine / renderer change. |
+| m071 | 2026-06-15 | **1d alias confirm now fires on EVERY run, not just when Slack input was given (v2.39.0).** CE Context always runs the Slack collector (every CE-RCA run), and aliases ("KSC" for Kennedy Space Center) are the input that lets that search find nickname-only threads — so the alias confirm must be asked **every time**, independent of whether the user pasted a Slack thread/channel or any doc at 1a. Two fixes in `SKILL.md` §1: (1) 1d opens with an explicit **"Ask this on EVERY run — not conditional on Slack input"** note (+ a call-out against the common mistake of treating it as Slack-only intake and skipping it when no Slack link was pasted); (2) the **general-health-check LIGHT path** previously went soft-context-pop-up → reveal, **skipping 1d** — it now routes **soft-context → 1d (aliases) → reveal**, so even a health check (and a bare-`skip` run) confirms aliases before the Slack search runs. Near-zero friction (auto-propose short-forms, one-tap confirm); still skippable (confirm-nothing → search falls back to name + id). Presentation/flow only — `ce_aliases` plumbing into `orchestration.json` → both Slack guides' Search 1 is unchanged. Blast radius: `SKILL.md` §1c light-path + §1d, `CHANGELOG.md`, `VERSION`. No renderer / `compose.py` / sub-skill-code change. |
 | m070 | 2026-06-15 | **Installer registers per-skill slash commands so each sub-skill runs standalone (v2.38.0).** With every sub-skill now emitting its own openable `report.html`, the installer (`INSTALL.md` Step 3) now registers **five** commands instead of one: `/ce-rca` (umbrella) **+ `/ce-context`, `/cvr-rca`, `/perf-audit`, `/ce-health`**. Each sub-skill command is a 3-line file pointing Claude at that skill's **vendored** `SKILL.md` (`~/.ce-rca/skills/<x>/SKILL.md`) with a "run STANDALONE → its own report.html" instruction (CE Context/CE Health pass `--standalone` to their renderer; perf-audit renders via `render_perf_audit.py --standalone`; CVR-RCA self-names + writes report.html natively). Works because each sub-skill sets `SKILL_DIR` to its own folder, so its `$SKILL_DIR/../../scripts/` references resolve to the bundle's `~/.ce-rca/scripts/` — the shared renderers (`render_*`, `standalone_report.py`) stay reachable; no separate installs, no path config. The Step-6 "how to use" brief gains a **"Or run just one piece"** line listing the four standalone commands. Blast radius: `INSTALL.md` (Step 3 + Step 6 brief), `CHANGELOG.md`, `VERSION`. No skill-logic / script / `compose.py` change — purely how the commands are registered at install. |
 | m069 | 2026-06-15 | **Standalone HTML: perf-audit joins; + the full composite-style header (Omni link · pre/post · CE pills) on standalone CE Context & CE Health (v2.37.0).** Two extensions of m067's standalone-report work. **(1) perf-audit `--standalone`.** `scripts/render_perf_audit.py` gains `--standalone` (mirrors CE Health/CE Context): default writes only the `perf_audit_tab.html` fragment (orchestrated path unchanged); `--standalone` additionally wraps it via the shared `standalone_report.wrap_fragment` into an openable `<run_dir>/report.html` (Plotly CDN + visual-kit CSS + a **lightweight** title banner — no CE pills, per scope). `skills/perf-audit/SKILL.md` Execution-Modes gains a "Standalone HTML report" note (run the bundle renderer `--standalone` after the report.md is final; graceful if unreachable; unnecessary under `/ce-rca`). **(2) Full header on standalone CE Context + CE Health.** Standalone reports for these two now carry the **same rich header the composite shows** — CE identity, **📅 Pre/Post**, the **Omni dashboard pill**, and the five CE chips (**Category · Subcategory · Evolution · Management · Status**) — instead of the lightweight banner. New `standalone_report` helpers: **`build_omni_url(ce_id, post_start, post_end)`** (absolute end-exclusive BETWEEN template, matching the composite's custom-window form) and **`build_header_meta(md, ce_id, ce_name, windows)`** (maps a CE Health sidecar `metadata` block → the `meta` dict) feeding **`build_rich_header(meta, eyebrow)`** which **reuses `compose.build_header`** (graceful fallback to the lightweight banner if `compose` can't import; eyebrow relabeled per skill). Sources: CE Health reads its own sidecar `metadata`; CE Context prefers a present CE Health sidecar, else a new **`ce_context_meta.json`** the standalone `/ce-context` flow writes from its `dim_combined_entities` lookup (the dim SELECT now also pulls the five pill columns + `top_page_url`; `skills/ce-context/SKILL.md` standalone section documents it). **CVR-RCA untouched** (hand-authored full report, already has its own header). Blast radius: `scripts/standalone_report.py` (+3 helpers), `scripts/render_ce_{context,health,perf_audit}.py` (`--standalone` header wiring), `skills/{ce-context,perf-audit}/SKILL.md`, `CHANGELOG.md`, `VERSION`. No `compose.py`/template/engine change. Verified on real data: CE Context standalone header shows Omni + 5 pills (Non-POI · Day Trips · Growth · Managed · Hero) + pre/post; CE Health same; perf-audit standalone = openable doc w/ lightweight banner; orchestrated fragments + composite unchanged. |
 | m068 | 2026-06-15 | **Perf-audit tab — drop the redundant echo caption (de-dup) (v2.36.1).** Follow-up to the perf-audit structured re-render (m065): the perf-audit engine emits a bold caption that just echoes its heading (`## 3. Channel Breakdown` → `**Channel Breakdown**`; `### Ad Group Coverage` → `**Ad Group Coverage**`), so the beautified tab showed the name **twice** (card title / `<h3>` + the echoed caption). `scripts/render_perf_audit.py` gains `_strip_echo_captions()` (+ `_norm_heading()`): before rendering a section/subsection body, a **bold-only** line is dropped **iff it normalises equal to the heading it sits under** (enumerator/emphasis/trailing-punct stripped) — informative labels like `**Table 1: CE Health …**` are **kept**. Wording-preserving: removes only a pure duplicate the title already states. Verified on ce-3593 / ce-2174 / ce-243 → echo caption gone (table now follows the title/`<h3>` directly); remaining name occurrences are the title + legitimate §B Data-Sources cross-refs. **Blast radius: `render_perf_audit.py` only**; no engine/compose/sub-skill change; no `vendor.sh`. |

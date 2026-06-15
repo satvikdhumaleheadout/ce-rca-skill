@@ -5,6 +5,29 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.40.0] — 2026-06-15 — perf-audit CSV ask moved to a pre-dispatch gate (with where-to-export steps)
+
+**Summary:** The Google-Ads CSV request for perf-audit (Auction Insights → §6b, Search Terms → §8) was in the Step-1 input menu — premature and contextless, since the user hasn't yet committed to running the paid audit. Moved it to a **short, single-purpose pre-dispatch gate** that fires **only when perf-audit is in the run**, right after the user confirms the default run and just before the parallel CE-Context + CVR + perf-audit spawn. The gate now also **tells users where to export the CSVs from** (so the ask is actionable), with full parsing detail still living in perf-audit's Step 0.
+
+### What changed
+- **`SKILL.md`** — removed the CSV bullet from Step-1 1a and the CSV-capture paragraph from 1b; added the conditional pre-dispatch gate in Step 2 (concise where-from + attach/paste/`skip`, capture to `<run_dir>/uploads/`); repointed the perf-audit dispatch hand-off to "captured at the pre-dispatch CSV gate." No engine/sub-skill/renderer change.
+
+### Why
+- Step 1 is for reading vitals + setting direction; a Google-Ads-export request there is confusing and dilutes the input menu. Asking once perf is confirmed — with export instructions — is both contextual and actionable. Can't prompt mid-parallel, so just-before-dispatch is the only clean spot. `skip` degrades gracefully.
+
+---
+
+## [v2.39.0] — 2026-06-15 — Alias confirm (1d) now fires on every run, not just when Slack input was given
+
+**Summary:** CE Context runs the Slack collector on **every** CE-RCA run, and CE aliases ("KSC" → Kennedy Space Center) are what let that search find threads that only ever used the nickname. So the alias confirm should be asked **every time** — but it was reading as part of the optional Slack/doc intake (skipped when no Slack link was pasted), and the **general-health-check light path skipped it entirely** (soft-context pop-up → straight to the reveal).
+
+Fixed in `SKILL.md` §1: (1) the 1d step now opens with an explicit **"ask on every run — not conditional on Slack input"** instruction, with a call-out against the common mistake of treating it as Slack-only intake; (2) the light path now routes **soft-context → 1d (aliases) → reveal**, so even a health check (and a bare-`skip` run) confirms aliases before Slack runs. It stays near-zero friction (auto-proposed short-forms, one-tap confirm) and still skippable (confirm-nothing → the search falls back to name + id).
+
+### Blast radius
+- `SKILL.md` §1c (light path) + §1d + changelog row m071; `CHANGELOG.md`; `VERSION` 2.38.0 → 2.39.0. Flow/wording only — the `ce_aliases` → `orchestration.json` → both Slack guides' Search-1 plumbing is unchanged; no renderer / `compose.py` / sub-skill-code change.
+
+---
+
 ## [v2.38.0] — 2026-06-15 — Installer registers per-skill commands (`/ce-context`, `/cvr-rca`, `/perf-audit`, `/ce-health`) for standalone runs
 
 **Summary:** Now that every sub-skill produces its own openable `report.html`, the installer registers a slash command for each — so a downloader can run **the whole RCA *or* just one piece**. `INSTALL.md` Step 3 now creates **five** commands instead of one:

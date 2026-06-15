@@ -5,6 +5,23 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.38.0] — 2026-06-15 — Installer registers per-skill commands (`/ce-context`, `/cvr-rca`, `/perf-audit`, `/ce-health`) for standalone runs
+
+**Summary:** Now that every sub-skill produces its own openable `report.html`, the installer registers a slash command for each — so a downloader can run **the whole RCA *or* just one piece**. `INSTALL.md` Step 3 now creates **five** commands instead of one:
+
+- **`/ce-rca`** — the umbrella (CE Health → CE Context + CVR-RCA + perf-audit → one composite tabbed report).
+- **`/ce-context <CE>`** — standalone CE orientation brief (about · timeline · prior RCAs · constraints · Slack).
+- **`/cvr-rca <CE>`** — standalone funnel / CVR root-cause analysis.
+- **`/perf-audit <CE>`** — standalone paid performance audit.
+- **`/ce-health <CE>`** — standalone CE briefing packet (vitals · channels · funnel · L12M · Shapley).
+
+Each sub-skill command is a tiny file pointing Claude at that skill's **vendored** `SKILL.md` inside the bundle with a "run standalone → its own `report.html`" instruction. This works with **no separate installs and no path config**: each sub-skill sets `SKILL_DIR` to its own folder, so its `$SKILL_DIR/../../scripts/` references resolve to the bundle's `~/.ce-rca/scripts/` and the shared renderers stay reachable. The "how to use" onboarding brief (Step 6) gains an **"Or run just one piece"** line listing the four standalone commands.
+
+### Blast radius
+- `INSTALL.md` (Step 3 command registration + the Step-6 brief), `CHANGELOG.md`, `VERSION` 2.37.0 → 2.38.0. **No skill-logic / script / `compose.py` change** — purely how commands are registered at install time. (Existing installs pick up the new commands on their next install/update; users can also just run a sub-skill via natural language pointing at `~/.ce-rca/skills/<x>/SKILL.md`.)
+
+---
+
 ## [v2.37.0] — 2026-06-15 — Standalone HTML: perf-audit joins; + the full CE header (Omni · pre/post · pills) on standalone CE Context & CE Health
 
 **Summary:** Two extensions of the standalone-report work (v2.36.0).

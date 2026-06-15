@@ -138,20 +138,74 @@ Otherwise: "Installed CE-RCA master to `~/.ce-rca/`."
 
 ---
 
-## Step 3 — Register the /ce-rca command
+## Step 3 — Register the commands (`/ce-rca` + the four sub-skills)
+
+The umbrella `/ce-rca` runs everything and composes the tabbed report. The four
+sub-skills are **vendored inside the bundle** and each can also be run **on its own**
+(its own window, its own decision logic) → its own openable `report.html`. Register a
+slash command for each so users can invoke any of them directly:
 
 ```bash
 mkdir -p ~/.claude/commands
+
+# Umbrella — runs CE Health → CE Context + CVR-RCA + perf-audit → one composite report.
 cat > ~/.claude/commands/ce-rca.md << 'EOF'
 ---
-description: CE-level Root Cause Analysis — runs CE Health, then dispatches CVR-RCA + perf-audit, composes one tabbed report.
+description: CE-level Root Cause Analysis — runs CE Health, CE Context, CVR-RCA + perf-audit, composes one tabbed report.
 ---
 
 Read the skill file at: ~/.ce-rca/SKILL.md
 EOF
+
+# CE Context — standalone CE orientation brief (about / timeline / past RCAs / constraints / Slack).
+cat > ~/.claude/commands/ce-context.md << 'EOF'
+---
+description: CE Context — standalone orientation brief for a CE (what it is, known constraints, prior RCAs, Slack). Produces its own report.html.
+---
+
+Read the skill file at: ~/.ce-rca/skills/ce-context/SKILL.md and run it STANDALONE for
+the CE the user names (resolve the CE, confirm the window, and on render pass
+`--standalone` so an openable `report.html` lands in the run dir).
+EOF
+
+# CVR-RCA — standalone funnel/CVR root-cause analysis.
+cat > ~/.claude/commands/cvr-rca.md << 'EOF'
+---
+description: CVR-RCA — standalone CVR / funnel root-cause analysis for a CE. Produces its own report.html.
+---
+
+Read the skill file at: ~/.ce-rca/skills/cvr-rca/SKILL.md and run it STANDALONE for the
+CE the user names (it self-names a run dir and writes its own report.html).
+EOF
+
+# perf-audit — standalone paid performance audit.
+cat > ~/.claude/commands/perf-audit.md << 'EOF'
+---
+description: Perf-Audit — standalone paid performance audit for a CE. Produces its own report.html.
+---
+
+Read the skill file at: ~/.ce-rca/skills/perf-audit/SKILL.md and run it STANDALONE for
+the CE the user names (after the report markdown is final, render the HTML with
+`~/.ce-rca/scripts/render_perf_audit.py --run-dir <run_dir> --standalone` → report.html).
+EOF
+
+# CE Health — standalone CE briefing packet (vitals, channels, funnel, Shapley).
+cat > ~/.claude/commands/ce-health.md << 'EOF'
+---
+description: CE Health — standalone CE briefing packet (vitals, channels, funnel, L12M, Shapley). Produces its own report.html.
+---
+
+Read the skill file at: ~/.ce-rca/skills/ce-health/SKILL.md and run it STANDALONE for the
+CE the user names (write artifacts with the canonical `ce_health_report.{md,json}` names
+into a run dir, then `~/.ce-rca/scripts/render_ce_health.py --run-dir <run_dir> --standalone`
+→ report.html).
+EOF
 ```
 
-Tell the user: "Registered the `/ce-rca` command."
+Tell the user: "Registered `/ce-rca` + the four sub-skill commands (`/ce-context`,
+`/cvr-rca`, `/perf-audit`, `/ce-health`)." Each sub-skill command points at its
+vendored `SKILL.md` inside the bundle, so its `$SKILL_DIR/../../scripts/` references
+resolve to `~/.ce-rca/scripts/` — the shared renderers stay reachable.
 
 ---
 
@@ -203,6 +257,11 @@ brief** (keep it exactly this tight — it's their onboarding):
 > ```
 > e.g. `/ce-rca 252` or `/ce-rca "Louvre Museum"`. Default window is last 30 days
 > vs the prior 30.
+>
+> **Or run just one piece** — each sub-skill works standalone and gives its own
+> openable `report.html`:
+> `/ce-context <CE>` (CE orientation brief) · `/cvr-rca <CE>` (funnel / CVR) ·
+> `/perf-audit <CE>` (paid performance) · `/ce-health <CE>` (vitals briefing).
 >
 > **What it'll ask you (3 quick checkpoints)**
 > 1. **Window** — confirm the default 30-vs-30, or give your own dates.

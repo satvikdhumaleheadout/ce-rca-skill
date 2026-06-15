@@ -101,6 +101,41 @@ def run_bq_query(query, _max_retries=4, _base_delay=10.0):
     raise last_exc
 
 
+def _fetch_pmax_value(ce_id, start, end):
+    # type: (int, date, date) -> Dict[str, float]
+    """PMax revenue + CM1 for a CE from fct_orders (CE-attributed ground truth).
+
+    google_ads_pmax_asset_stats.sum_conversion_value is unreliable at CE grain —
+    post-Sep-2025 it's already ~net, so `× revenue_percentage` understates CM1 ~4×.
+    Per the perf-team rule ("PMax is city/country-level; use fct_orders for per-CE
+    PMax metrics"), value comes from fct_orders PMax-channel orders. PMax *spend*
+    stays from asset-stats (valid via the dedicated asset group / CID filter).
+    """
+    query = """
+    SELECT
+        ROUND(SUM(amount_revenue_usd), 2) AS revenue,
+        ROUND(SUM(amount_revenue_usd - amount_direct_costs_usd), 2) AS cm1,
+        COUNT(*) AS orders
+    FROM `{project}.{dataset}.fct_orders`
+    WHERE combined_entity_id = '{ce_id}'
+        AND DATE(created_at) BETWEEN '{start}' AND '{end}'
+        AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+        AND user_type = 'Customer'
+        AND channel_name = 'Google Ads'
+        AND REGEXP_CONTAINS(LOWER(COALESCE(campaign_name, '')), r'pmax|performance.max')
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+    )
+    rows = run_bq_query(query) or []
+    r = rows[0] if rows else {}
+    return {
+        "revenue": float(r.get("revenue") or 0.0),
+        "cm1": float(r.get("cm1") or 0.0),
+        "orders": int(r.get("orders") or 0),
+    }
+
+
 def fetch_campaign_level_cm1_roi(
     ce_id,    # type: int
     tw,       # type: Tuple[date, date]
@@ -423,16 +458,58 @@ def _fetch_monthly_summary(ce_id):
             SUBSTR(CAST(report_date AS STRING), 1, 7) AS month,
             SUM(count_clicks) AS clicks,
             SUM(sum_spend) AS ad_spend,
-            SUM(count_conversions_offline_contribution_margin) AS conv_offline,
-            SUM(count_conversions_online) AS conv_online,
-            SUM(sum_conversion_value_offline_contribution_margin) AS cm1_offline,
-            SUM(sum_conversion_value_calculated_contribution_margin) AS cm1_calc,
+            SUM(CASE
+                WHEN report_date > '2025-09-01'
+                    AND COALESCE(count_conversions_offline_contribution_margin, 0) > 0
+                THEN count_conversions_offline_contribution_margin
+                ELSE count_conversions_online
+            END) AS conversions,
+            SUM(CASE
+                WHEN report_date > '2025-09-01'
+                    AND COALESCE(sum_conversion_value_offline_contribution_margin, 0) > 0
+                THEN sum_conversion_value_offline_contribution_margin
+                ELSE sum_conversion_value_calculated_contribution_margin
+            END) AS cm1,
             SUM(sum_coupon_and_wallet_credits) AS coupon_wallet
         FROM `{project}.{dataset}.ads_campaign_stats`
         WHERE campaign_target_combined_entity_id = '{ce_id}'
             AND report_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)
                 AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
             AND ad_platform IN ('Google Ads', 'Microsoft Ads')
+        GROUP BY 1
+    ),
+    pmax_monthly AS (
+        -- PMax spend/clicks/conversions: asset-stats (Omni-validated, CID-gated).
+        -- CM1 (value) is NOT taken here — sum_conversion_value × revenue_percentage
+        -- understates ~4× post-Sep-2025 (see _fetch_pmax_value). Value comes from
+        -- pmax_value_monthly (fct_orders) below.
+        SELECT
+            SUBSTR(CAST(date AS STRING), 1, 7) AS month,
+            SUM(count_clicks) AS clicks,
+            SUM(sum_cost) AS spend,
+            SUM(count_conversions) AS conversions
+        FROM `{project}.{dataset}.google_ads_pmax_asset_stats`
+        WHERE combined_entity_id = '{ce_id}'
+            AND date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)
+                AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+        GROUP BY 1
+    ),
+    pmax_value_monthly AS (
+        -- PMax CM1 (value) from fct_orders PMax-channel orders, CE-attributed
+        -- ground truth (mirrors _fetch_pmax_value). Gated downstream on PMax
+        -- clicks existing so a CE without a dedicated asset group reads $0,
+        -- consistent with the headline window paths.
+        SELECT
+            SUBSTR(CAST(DATE(created_at) AS STRING), 1, 7) AS month,
+            SUM(amount_revenue_usd - amount_direct_costs_usd) AS cm1
+        FROM `{project}.{dataset}.fct_orders`
+        WHERE combined_entity_id = '{ce_id}'
+            AND DATE(created_at) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)
+                AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+            AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+            AND user_type = 'Customer'
+            AND channel_name = 'Google Ads'
+            AND REGEXP_CONTAINS(LOWER(COALESCE(campaign_name, '')), r'pmax|performance.max')
         GROUP BY 1
     )
     SELECT
@@ -443,20 +520,27 @@ def _fetch_monthly_summary(ce_id):
         SAFE_DIVIDE(c.revenue_actual, c.gross_bookings_completed) AS tr,
         SAFE_DIVIDE(c.gross_bookings_completed, c.gross_bookings) AS cr,
         SAFE_DIVIDE(c.gross_bookings, c.orders) AS aov,
-        p.clicks AS paid_clicks,
-        p.ad_spend AS paid_spend,
-        CASE WHEN p.cm1_offline > 0 THEN p.cm1_offline ELSE p.cm1_calc END AS paid_cm1,
+        COALESCE(p.clicks, 0) + COALESCE(pm.clicks, 0) AS paid_clicks,
+        COALESCE(p.ad_spend, 0) + COALESCE(pm.spend, 0) AS paid_spend,
+        COALESCE(p.cm1, 0)
+            + (CASE WHEN COALESCE(pm.clicks, 0) > 0 THEN COALESCE(pv.cm1, 0) ELSE 0 END) AS paid_cm1,
         SAFE_DIVIDE(
-            CASE WHEN p.cm1_offline > 0 THEN p.cm1_offline ELSE p.cm1_calc END,
-            p.ad_spend + p.coupon_wallet
+            COALESCE(p.cm1, 0)
+                + (CASE WHEN COALESCE(pm.clicks, 0) > 0 THEN COALESCE(pv.cm1, 0) ELSE 0 END),
+            COALESCE(p.ad_spend, 0) + COALESCE(pm.spend, 0) + COALESCE(p.coupon_wallet, 0)
         ) AS paid_roi,
-        SAFE_DIVIDE(p.ad_spend, p.clicks) AS paid_cpc,
         SAFE_DIVIDE(
-            CASE WHEN p.conv_offline > 0 THEN p.conv_offline ELSE p.conv_online END,
-            p.clicks
+            COALESCE(p.ad_spend, 0) + COALESCE(pm.spend, 0),
+            COALESCE(p.clicks, 0) + COALESCE(pm.clicks, 0)
+        ) AS paid_cpc,
+        SAFE_DIVIDE(
+            COALESCE(p.conversions, 0) + COALESCE(pm.conversions, 0),
+            COALESCE(p.clicks, 0) + COALESCE(pm.clicks, 0)
         ) AS paid_cvr
     FROM ce_monthly c
     LEFT JOIN paid_monthly p USING (month)
+    LEFT JOIN pmax_monthly pm USING (month)
+    LEFT JOIN pmax_value_monthly pv USING (month)
     ORDER BY c.month
     """.format(
         project=PROJECT_ID,
@@ -632,13 +716,13 @@ def _fetch_channel_window_v2(ce_id, start, end):
             "rpc": paid_rev / clicks if clicks else None,
         }
 
-    # ── Part 3: PMax metrics from google_ads_pmax_asset_stats ──
+    # ── Part 3: PMax metrics ── spend/clicks/conversions from asset-stats; CM1 from
+    # fct_orders (CE-attributed ground truth — asset-stats value unreliable at CE grain).
     pmax_query = """
     SELECT
         SUM(sum_cost) AS spend,
         SUM(count_clicks) AS clicks,
-        SUM(count_conversions) AS conversions,
-        SUM(sum_conversion_value) AS cm1
+        SUM(count_conversions) AS conversions
     FROM `{project}.{dataset}.google_ads_pmax_asset_stats`
     WHERE combined_entity_id = '{ce_id}'
         AND date BETWEEN '{start}' AND '{end}'
@@ -656,7 +740,7 @@ def _fetch_channel_window_v2(ce_id, start, end):
         clicks = float(p.get("clicks") or 0)
         spend = float(p.get("spend") or 0)
         conv = float(p.get("conversions") or 0)
-        cm1 = float(p.get("cm1") or 0)
+        cm1 = _fetch_pmax_value(ce_id, start, end)["cm1"]
         paid_map["Google PMax"] = {
             "clicks": clicks,
             "spend": spend,
@@ -973,6 +1057,7 @@ def _fetch_cohort_window(ce_id, start, end):
             "ctr": cl / impr * 100 if impr else None,
             "cvr": conv / cl * 100 if cl else None,
             "aov": ov / orders if orders else None,
+            "avg_cm1": cm1 / conv if conv else None,
             "tr": rev / ovc * 100 if ovc else None,
             "cr": ovc / ov * 100 if ov else None,
             "roi": cm1 / mkt * 100 if mkt else None,
@@ -1379,14 +1464,15 @@ def fetch_paid_performance(ce_id, start, end):
     ads_cm1 = cm1_off if cm1_off > 0 else cm1_c
     ads_conv = conv_off if conv_off > 0 else conv_on
 
-    # PMax from separate table (not in ads_campaign_stats)
+    # PMax: spend/clicks/conversions from asset-stats (valid via the dedicated asset
+    # group / CID filter). VALUE (revenue + CM1) from fct_orders — asset-stats
+    # sum_conversion_value is unreliable at CE grain (see _fetch_pmax_value).
     pmax_query = """
     SELECT
         SUM(count_clicks) AS clicks,
         SUM(count_impressions) AS impressions,
         SUM(sum_cost) AS spend,
-        SUM(count_conversions) AS conversions,
-        SUM(sum_conversion_value) AS cm1
+        SUM(count_conversions) AS conversions
     FROM `{project}.{dataset}.google_ads_pmax_asset_stats`
     WHERE combined_entity_id = '{ce_id}'
         AND date BETWEEN '{start}' AND '{end}'
@@ -1395,15 +1481,20 @@ def fetch_paid_performance(ce_id, start, end):
         ce_id=ce_id, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
     )
     pmax_rows = run_bq_query(pmax_query) or []
+    pmax_net_rev = 0.0
     if pmax_rows and pmax_rows[0].get("clicks"):
         p = pmax_rows[0]
         clicks += float(p.get("clicks") or 0)
         impr += float(p.get("impressions") or 0)
         spend += float(p.get("spend") or 0)
         ads_conv += float(p.get("conversions") or 0)
-        ads_cm1 += float(p.get("cm1") or 0)
+        # Only attribute PMax value when a dedicated asset group exists (= asset-stats
+        # has rows), so spend and value stay consistent (both present or both absent).
+        pv = _fetch_pmax_value(ce_id, start, end)
+        ads_cm1 += pv["cm1"]
+        pmax_net_rev = pv["revenue"]
 
-    paid_rev = ads_rev
+    paid_rev = ads_rev + pmax_net_rev
     cm1 = ads_cm1
     mkt_cost = spend + cw
     conversions = ads_conv
@@ -1419,7 +1510,10 @@ def fetch_paid_performance(ce_id, start, end):
         "ctr": clicks / impr * 100 if impr else None,
         "cvr": conversions / clicks * 100 if clicks else None,
         "cm1": cm1,
-        "paid_tr": paid_rev / (off_gb * paid_cr) * 100 if off_gb and paid_cr else None,
+        "avg_cm1": cm1 / conversions if conversions else None,
+        # ads-only TR: off_gb (gross bookings) is ads-only, so pair it with ads_rev
+        # (not paid_rev, which now includes PMax) to keep numerator/denominator consistent.
+        "paid_tr": ads_rev / (off_gb * paid_cr) * 100 if off_gb and paid_cr else None,
         "paid_cr": paid_cr * 100 if paid_cr else None,
     }
 
@@ -1499,11 +1593,24 @@ def fetch_budget_bidding(ce_id, start, end):
     SELECT
         g.campaign_name,
         g.campaign_id,
-        ANY_VALUE(g.current_campaign_target_roas) AS troas_target,
-        ANY_VALUE(g.current_campaign_bidding_strategy) AS bid_strategy,
-        ANY_VALUE(g.bidding_strategy_name) AS bidding_strategy_name,
-        ANY_VALUE(b.daily_budget) AS daily_budget,
+        ARRAY_AGG(g.current_campaign_target_roas ORDER BY g.report_date DESC LIMIT 1)[OFFSET(0)] AS troas_target,
+        ARRAY_AGG(g.current_campaign_bidding_strategy ORDER BY g.report_date DESC LIMIT 1)[OFFSET(0)] AS bid_strategy,
+        ARRAY_AGG(g.bidding_strategy_name ORDER BY g.report_date DESC LIMIT 1)[OFFSET(0)] AS bidding_strategy_name,
+        ARRAY_AGG(b.daily_budget ORDER BY g.report_date DESC LIMIT 1)[OFFSET(0)] AS daily_budget,
         SUM(g.sum_spend) AS spend,
+        SUM(CASE
+            WHEN g.report_date > '2025-09-01'
+                AND COALESCE(g.sum_conversion_value_offline_contribution_margin, 0) > 0
+            THEN g.sum_conversion_value_offline_contribution_margin
+            ELSE g.sum_conversion_value_calculated_contribution_margin
+        END) AS cm1,
+        SUM(CASE
+            WHEN g.report_date > '2025-09-01'
+                AND COALESCE(g.count_conversions_offline_contribution_margin, 0) > 0
+            THEN g.count_conversions_offline_contribution_margin
+            ELSE g.count_conversions_online
+        END) AS conversions,
+        SUM(g.count_clicks) AS clicks,
         SAFE_DIVIDE(SUM(g.count_impressions), SUM(g.count_eligible_searches)) AS sis,
         SAFE_DIVIDE(SUM(g.count_budget_lost_searches),
             NULLIF(SUM(g.count_eligible_searches), 0)) AS budget_lost_is,
@@ -1534,6 +1641,11 @@ def fetch_budget_bidding(ce_id, start, end):
             "campaign_type": "Individual" if not row.get("bidding_strategy_name") else "Portfolio",
             "daily_budget": float(row.get("daily_budget") or 0) if row.get("daily_budget") else None,
             "spend": float(row.get("spend") or 0),
+            "cm1": float(row.get("cm1") or 0),
+            "conversions": float(row.get("conversions") or 0),
+            "clicks": float(row.get("clicks") or 0),
+            "roi": float(row.get("cm1") or 0) / float(row.get("spend") or 0) * 100 if float(row.get("spend") or 0) else None,
+            "cvr": float(row.get("conversions") or 0) / float(row.get("clicks") or 0) * 100 if float(row.get("clicks") or 0) else None,
             "sis": float(row.get("sis") or 0) * 100 if row.get("sis") else None,
             "budget_lost_is": float(row.get("budget_lost_is") or 0) * 100 if row.get("budget_lost_is") else None,
             "rank_lost_is": float(row.get("rank_lost_is") or 0) * 100 if row.get("rank_lost_is") else None,
@@ -1594,6 +1706,68 @@ def fetch_landing_page_performance(ce_id, tw_start, tw_end, ly_start=None, ly_en
     if ly_start and ly_end:
         data["ly"] = _fetch_lp_window(ly_start, ly_end)
     return data
+
+
+def fetch_lp_funnel(ce_id, tw_start, tw_end, ly_start=None, ly_end=None):
+    # type: (int, date, date, Optional[date], Optional[date]) -> List[Dict[str, Any]]
+    """Per-LP funnel from mixpanel_user_page_funnel_progression.
+
+    Uses COUNT(DISTINCT user_id) to match Omni Page URL Analysis.
+    Mixpanel collapses language variants (/it/, /de/) into the root URL.
+    """
+    ly_clause = ""
+    if ly_start and ly_end:
+        ly_clause = "OR event_date BETWEEN '{ly_s}' AND '{ly_e}'".format(
+            ly_s=ly_start.strftime("%Y-%m-%d"), ly_e=ly_end.strftime("%Y-%m-%d"))
+
+    query = """
+    SELECT
+      page_url,
+      COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' THEN user_id END) AS l4w_users,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_order_completed THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' THEN user_id END)) * 100 AS l4w_cvr,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_select_page_viewed THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' THEN user_id END)) * 100 AS l4w_lp2s,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_checkout_started THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_select_page_viewed THEN user_id END)) * 100 AS l4w_s2c,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_order_completed THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_checkout_started THEN user_id END)) * 100 AS l4w_c2o,
+      COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' THEN user_id END) AS ly_users,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' AND has_select_page_viewed THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' THEN user_id END)) * 100 AS ly_lp2s,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' AND has_checkout_started THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' AND has_select_page_viewed THEN user_id END)) * 100 AS ly_s2c,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' AND has_order_completed THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' AND has_checkout_started THEN user_id END)) * 100 AS ly_c2o
+    FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
+    WHERE combined_entity_id = '{ce_id}'
+      AND (event_date BETWEEN '{tw_s}' AND '{tw_e}' {ly_clause})
+    GROUP BY 1
+    HAVING COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' THEN user_id END) >= 1
+    ORDER BY l4w_users DESC
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+        tw_s=tw_start.strftime("%Y-%m-%d"), tw_e=tw_end.strftime("%Y-%m-%d"),
+        ly_s=(ly_start or tw_start).strftime("%Y-%m-%d"),
+        ly_e=(ly_end or tw_end).strftime("%Y-%m-%d"),
+        ly_clause=ly_clause,
+    )
+    rows = run_bq_query(query) or []
+    result = []
+    for r in rows:
+        result.append({
+            "page_url": r.get("page_url"),
+            "l4w_users": int(r.get("l4w_users") or 0),
+            "l4w_cvr": float(r.get("l4w_cvr") or 0),
+            "l4w_lp2s": float(r.get("l4w_lp2s") or 0),
+            "l4w_s2c": float(r.get("l4w_s2c") or 0),
+            "l4w_c2o": float(r.get("l4w_c2o") or 0),
+            "ly_users": int(r.get("ly_users") or 0),
+            "ly_lp2s": float(r.get("ly_lp2s") or 0),
+            "ly_s2c": float(r.get("ly_s2c") or 0),
+            "ly_c2o": float(r.get("ly_c2o") or 0),
+        })
+    return result
 
 
 def fetch_keyword_impression_share(ce_id, tw_start, tw_end):
@@ -1807,3 +1981,585 @@ def fetch_ad_group_by_type(ce_id, tw_start, tw_end):
             "roi": (cm1 / sp * 100) if sp else None,
         }
     return result
+
+
+def fetch_ad_group_audit(ce_id, start, end, p4w_start=None, p4w_end=None,
+                         top_n=15, material_spend=500.0):
+    # type: (int, date, date, Optional[date], Optional[date], int, float) -> Dict[str, Any]
+    """Per-ad-group performance + bid-headroom opportunity for the ad-group audit.
+
+    google_ads_ad_group_stats has NO impression-share / rank-lost at ad-group grain
+    (those are campaign-level), so opportunity is framed as **bid headroom vs the
+    ad group's tROAS target**, not SIS gap:
+      - Scale candidate: actual ROI ≥ target × 1.15 AND material spend — the
+        algorithm is under-bidding a profitable ad group (volume left on the table).
+      - Efficiency leak: actual ROI < 130% (breakeven risk) AND material spend —
+        spend at risk; fix LP/quality/match or trim.
+      - On-target / Long-tail otherwise.
+
+    Note: ad group × product (experience_id) is NOT available — fct_orders carries
+    no ad_group_id. The ad-group *type* (parsed from the name) is the product-intent
+    proxy.
+
+    Returns {rows (top_n by spend), all, scale_spend, leak_spend, scale_count,
+             leak_count, n_total}.
+    """
+    query = """
+    SELECT
+        ad_group_name,
+        ANY_VALUE(ad_group_status) AS status,
+        ANY_VALUE(ad_group_target_roas) AS target_roas,
+        SUM(count_impressions) AS impressions,
+        SUM(count_clicks) AS clicks,
+        SUM(sum_spend) AS spend,
+        SUM(CASE
+            WHEN report_date > '2025-09-01'
+                AND COALESCE(count_conversions_offline_contribution_margin, 0) > 0
+            THEN count_conversions_offline_contribution_margin
+            ELSE count_conversions_online
+        END) AS conversions,
+        SUM(CASE
+            WHEN report_date > '2025-09-01'
+                AND COALESCE(sum_conversion_value_offline_contribution_margin, 0) > 0
+            THEN sum_conversion_value_offline_contribution_margin
+            ELSE sum_conversions_value
+        END) AS cm1
+    FROM `{project}.{dataset}.google_ads_ad_group_stats`
+    WHERE campaign_target_combined_entity_id = '{ce_id}'
+        AND report_date BETWEEN '{start}' AND '{end}'
+    GROUP BY ad_group_name
+    HAVING spend > 0
+    ORDER BY spend DESC
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+    )
+    rows = run_bq_query(query) or []
+
+    # MoM: prior-4-week spend + ROI per ad group (join by name — stable within the
+    # same consolidation era; YoY is NOT done — ad-group names churn across the year).
+    mom_map = {}  # type: Dict[str, Dict[str, Any]]
+    if p4w_start and p4w_end:
+        p4w_query = """
+        SELECT
+            ad_group_name,
+            SUM(sum_spend) AS spend,
+            SUM(CASE
+                WHEN report_date > '2025-09-01'
+                    AND COALESCE(sum_conversion_value_offline_contribution_margin, 0) > 0
+                THEN sum_conversion_value_offline_contribution_margin
+                ELSE sum_conversions_value
+            END) AS cm1
+        FROM `{project}.{dataset}.google_ads_ad_group_stats`
+        WHERE campaign_target_combined_entity_id = '{ce_id}'
+            AND report_date BETWEEN '{start}' AND '{end}'
+        GROUP BY 1
+        HAVING spend > 0
+        """.format(
+            project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+            start=p4w_start.strftime("%Y-%m-%d"), end=p4w_end.strftime("%Y-%m-%d"),
+        )
+        for r in run_bq_query(p4w_query) or []:
+            sp = float(r.get("spend") or 0)
+            cm1 = float(r.get("cm1") or 0)
+            mom_map[r.get("ad_group_name")] = {"spend": sp, "roi": (cm1 / sp * 100) if sp else None}
+
+    out = []
+    scale_spend = leak_spend = 0.0
+    scale_count = leak_count = 0
+    for r in rows:
+        name = r.get("ad_group_name") or ""
+        parts = name.split(" - ")
+        cl = float(r.get("clicks") or 0)
+        sp = float(r.get("spend") or 0)
+        conv = float(r.get("conversions") or 0)
+        imp = float(r.get("impressions") or 0)
+        cm1 = float(r.get("cm1") or 0)
+        roi = (cm1 / sp * 100) if sp else None
+        tr = r.get("target_roas")
+        target_pct = float(tr) * 100 if tr else None     # stored as ratio (1.65 → 165%)
+        eff_target = target_pct or 145.0                  # Pro+ standard when unset
+        if sp >= material_spend and roi is not None and roi >= eff_target * 1.15:
+            flag = "Scale"
+            scale_spend += sp
+            scale_count += 1
+        elif sp >= material_spend and roi is not None and roi < 130:
+            flag = "Leak"
+            leak_spend += sp
+            leak_count += 1
+        elif sp < material_spend:
+            flag = "Long-tail"
+        else:
+            flag = "On-target"
+        out.append({
+            "ad_group_name": name,
+            "ag_type": parts[0].strip() if parts else "Unknown",
+            "language": parts[2].strip() if len(parts) > 2 else "Unknown",
+            "status": r.get("status"),
+            "impressions": imp,
+            "clicks": cl,
+            "spend": sp,
+            "conversions": conv,
+            "cm1": cm1,
+            "cpc": (sp / cl) if cl else None,
+            "cvr": (conv / cl * 100) if cl else None,
+            "ctr": (cl / imp * 100) if imp else None,
+            "roi": roi,
+            "target_pct": target_pct,
+            "vs_target": (roi - eff_target) if roi is not None else None,
+            "flag": flag,
+            "spend_mom_pct": (
+                (sp - mom_map[name]["spend"]) / mom_map[name]["spend"] * 100
+                if (name in mom_map and mom_map[name]["spend"]) else None),
+            "roi_mom_pp": (
+                roi - mom_map[name]["roi"]
+                if (name in mom_map and mom_map[name].get("roi") is not None and roi is not None)
+                else None),
+        })
+    return {
+        "rows": out[:top_n],
+        "all": out,
+        "scale_spend": scale_spend,
+        "leak_spend": leak_spend,
+        "scale_count": scale_count,
+        "leak_count": leak_count,
+        "n_total": len(out),
+    }
+
+
+# ============================================================================
+# V6.1: PRODUCT MIX — TGID / EXPERIENCE REVENUE (assortment shift detection)
+# ============================================================================
+
+def _fetch_tgid_window(ce_id, start, end):
+    # type: (int, date, date) -> List[Dict[str, Any]]
+    """Net-revenue + order economics per experience (TGID) for one window.
+
+    Grain: `fct_orders.experience_id` (= Tour Group ID). Each order carries a
+    primary `experience_id` / `experience_name`, so this is order-grain — no
+    join to dim_experiences needed (the name is on the order).
+
+    Per-TGID economics mirror the channel/cohort tables:
+        AOV     = order_value_usd / orders
+        TR              = revenue / order_value_completed_usd
+        CR              = order_value_completed_usd / order_value_usd
+        net_rev_per_order = net revenue / orders  (== AOV x TR x CR — Headout's take
+                          per order; NOT contribution margin, no cost subtracted)
+        cm1_per_order   = (net revenue − direct costs) / orders — true per-order
+                          contribution margin (computed in fetch_tgid_revenue)
+
+    Net revenue uses `amount_revenue_usd` (NOT GMV `order_value_completed_usd`).
+    """
+    query = """
+    SELECT
+        experience_id AS tgid,
+        ANY_VALUE(experience_name) AS experience_name,
+        ROUND(SUM(amount_revenue_usd), 2) AS revenue,
+        ROUND(SUM(amount_direct_costs_usd), 2) AS direct_costs,
+        COUNT(*) AS orders,
+        ROUND(SAFE_DIVIDE(SUM(order_value_usd), COUNT(*)), 2) AS aov,
+        ROUND(SAFE_DIVIDE(SUM(amount_revenue_usd), NULLIF(SUM(order_value_completed_usd), 0)) * 100, 2) AS tr,
+        ROUND(SAFE_DIVIDE(SUM(order_value_completed_usd), NULLIF(SUM(order_value_usd), 0)) * 100, 2) AS cr,
+        ROUND(SAFE_DIVIDE(SUM(amount_revenue_usd), COUNT(*)), 2) AS net_rev_per_order
+    FROM `{project}.{dataset}.fct_orders`
+    WHERE combined_entity_id = '{ce_id}'
+        AND DATE(created_at) BETWEEN '{start}' AND '{end}'
+        AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+        AND user_type = 'Customer'
+    GROUP BY experience_id
+    HAVING orders > 0
+    ORDER BY revenue DESC
+    """.format(
+        project=PROJECT_ID,
+        dataset=DATASET,
+        ce_id=ce_id,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+    )
+    return run_bq_query(query) or []
+
+
+def fetch_tgid_revenue(ce_id, l4w, ly, top_n=10):
+    # type: (int, Tuple[date, date], Tuple[date, date], int) -> Dict[str, Any]
+    """Top experiences (TGIDs) by L4W net revenue with LY assortment-shift deltas.
+
+    Surfaces *what products paid traffic purchased* and how the product mix shifted
+    YoY — the missing layer that let prior audits miss assortment-driven CVR/RPC
+    moves. The load-bearing column is Δ Share (L4W revenue share − LY revenue share):
+    a TGID going 0%->15% (new hero) or 20%->5% (decayed) is the assortment change.
+
+    Returns:
+        {
+          "l4w_total": float, "ly_total": float,
+          "rows": [ {tgid, experience_name, l4w_rev, l4w_share, ly_rev, ly_share,
+                     delta_share, orders, aov, tr, cr, net_rev_per_order,
+                     cm1_per_order, is_new, is_dropped}, ... ],
+          "n_l4w": int, "n_ly": int,   # distinct TGID counts (catalogue breadth)
+        }
+        Rows are the union of the top_n L4W TGIDs and any LY TGID that was >5% of LY
+        revenue but fell out of the L4W top_n (so decayed heroes still surface).
+    """
+    l4w_rows = _fetch_tgid_window(ce_id, l4w[0], l4w[1])
+    ly_rows = _fetch_tgid_window(ce_id, ly[0], ly[1])
+
+    l4w_total = sum(float(r.get("revenue") or 0) for r in l4w_rows)
+    ly_total = sum(float(r.get("revenue") or 0) for r in ly_rows)
+    ly_by_tgid = {r["tgid"]: r for r in ly_rows}
+    l4w_by_tgid = {r["tgid"]: r for r in l4w_rows}
+
+    # Selection: top_n by L4W revenue, plus any LY TGID >5% share now outside top_n.
+    keep = [r["tgid"] for r in l4w_rows[:top_n]]
+    keep_set = set(keep)
+    for r in ly_rows:
+        ly_share = (float(r.get("revenue") or 0) / ly_total * 100) if ly_total else 0
+        if ly_share >= 5.0 and r["tgid"] not in keep_set:
+            keep.append(r["tgid"])
+            keep_set.add(r["tgid"])
+
+    rows = []
+    for tgid in keep:
+        cur = l4w_by_tgid.get(tgid)
+        prev = ly_by_tgid.get(tgid)
+        l4w_rev = float(cur.get("revenue") or 0) if cur else 0.0
+        ly_rev = float(prev.get("revenue") or 0) if prev else 0.0
+        l4w_share = (l4w_rev / l4w_total * 100) if l4w_total else 0.0
+        ly_share = (ly_rev / ly_total * 100) if ly_total else 0.0
+        name = (cur or prev or {}).get("experience_name") or "(unknown)"
+        cur_orders = int(cur.get("orders") or 0) if cur else 0
+        cur_dc = float(cur.get("direct_costs") or 0) if cur else 0.0
+        cm1_per_order = ((l4w_rev - cur_dc) / cur_orders) if cur_orders else None
+        rows.append({
+            "tgid": tgid,
+            "experience_name": name,
+            "l4w_rev": l4w_rev,
+            "l4w_share": l4w_share,
+            "ly_rev": ly_rev,
+            "ly_share": ly_share,
+            "delta_share": l4w_share - ly_share,
+            "orders": cur_orders,
+            "aov": float(cur["aov"]) if cur and cur.get("aov") is not None else None,
+            "tr": float(cur["tr"]) if cur and cur.get("tr") is not None else None,
+            "cr": float(cur["cr"]) if cur and cur.get("cr") is not None else None,
+            "net_rev_per_order": float(cur["net_rev_per_order"]) if cur and cur.get("net_rev_per_order") is not None else None,
+            "cm1_per_order": round(cm1_per_order, 2) if cm1_per_order is not None else None,
+            "is_new": cur is not None and prev is None,
+            "is_dropped": cur is None and prev is not None,
+        })
+
+    # Sort by current share desc, but push fully-dropped TGIDs (no L4W rev) to the end.
+    rows.sort(key=lambda r: (r["l4w_rev"] > 0, r["l4w_share"]), reverse=True)
+
+    monthly = _fetch_tgid_monthly(ce_id, [r["tgid"] for r in rows]) if rows else {}
+
+    return {
+        "l4w_total": l4w_total,
+        "ly_total": ly_total,
+        "rows": rows,
+        "n_l4w": len(l4w_rows),
+        "n_ly": len(ly_rows),
+        "monthly": monthly,  # {tgid: [net_rev chronological]} — L12M, kept TGIDs only
+    }
+
+
+def _fetch_tgid_monthly(ce_id, tgids, months=13):
+    # type: (int, List[str], int) -> Dict[str, List[float]]
+    """L12M monthly net revenue for the given experience_ids (kept/enumerated TGIDs).
+
+    One query bounded to the kept TGIDs (≤ ~12) so cost stays small. Returns
+    {tgid: [revenue per month, chronological]} for trajectory tagging.
+    """
+    if not tgids:
+        return {}
+    id_list = ", ".join("'%s'" % str(t) for t in tgids if t is not None)
+    if not id_list:
+        return {}
+    query = """
+    SELECT
+        experience_id AS tgid,
+        SUBSTR(CAST(DATE(created_at) AS STRING), 1, 7) AS month,
+        ROUND(SUM(amount_revenue_usd), 2) AS revenue
+    FROM `{project}.{dataset}.fct_orders`
+    WHERE combined_entity_id = '{ce_id}'
+        AND experience_id IN ({ids})
+        AND DATE(created_at) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {months} MONTH)
+            AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+        AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+        AND user_type = 'Customer'
+    GROUP BY 1, 2
+    ORDER BY 2
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id, ids=id_list, months=months,
+    )
+    rows = run_bq_query(query) or []
+    out = {}  # type: Dict[str, List[float]]
+    for r in rows:
+        out.setdefault(str(r["tgid"]), []).append(float(r.get("revenue") or 0.0))
+    return out
+
+
+def fetch_channel_monthly(ce_id, months=13):
+    # type: (int, int) -> Dict[str, List[float]]
+    """L12M monthly net revenue per channel (taxonomy mirrors _fetch_channel_window_v2).
+
+    Returns {channel: [net_rev per month, chronological]} for trajectory tagging of
+    channel signals. The CASE is duplicated from _fetch_channel_window_v2 to keep
+    that hot path untouched.
+    """
+    query = """
+    WITH classified AS (
+        SELECT
+            CASE
+                WHEN channel_name = 'Google Ads'
+                    AND REGEXP_CONTAINS(campaign_name, CONCAT('cid', CAST(combined_entity_id AS STRING)))
+                    THEN 'Google Search'
+                WHEN channel_name = 'Google Ads'
+                    AND campaign_name LIKE '1 - %'
+                    THEN 'Bing'
+                WHEN channel_name = 'Bing Ads'
+                    AND REGEXP_CONTAINS(campaign_name, CONCAT('cid', CAST(combined_entity_id AS STRING)))
+                    THEN 'Bing'
+                WHEN channel_name = 'Google Ads'
+                    AND REGEXP_CONTAINS(LOWER(COALESCE(campaign_name, '')), r'pmax|performance.max')
+                    THEN 'Google PMax'
+                WHEN channel_name = 'Google Ads' THEN 'Google Cross-sell'
+                WHEN channel_name = 'Bing Ads' THEN 'Bing Cross-sell'
+                WHEN channel_name = 'Things to Do (Ads)' THEN 'TTD (Paid)'
+                WHEN channel_name = 'Things to Do (Organic)' THEN 'TTD (Organic)'
+                WHEN channel_name = 'Confirmation Page Recommendations' THEN 'CPR'
+                WHEN channel_name = 'Organic Search' THEN 'Organic'
+                WHEN channel_grouping = 'Direct (App)' THEN 'Direct (App)'
+                WHEN channel_grouping = 'Direct' THEN 'Direct'
+                WHEN channel_grouping = 'Affiliates' THEN 'Affiliates'
+                WHEN channel_grouping = 'Email' THEN 'Email'
+                WHEN channel_grouping = 'Referral' THEN 'Referral'
+                ELSE 'Other'
+            END AS channel,
+            SUBSTR(CAST(DATE(created_at) AS STRING), 1, 7) AS month,
+            amount_revenue_usd AS revenue
+        FROM `{project}.{dataset}.fct_orders`
+        WHERE combined_entity_id = '{ce_id}'
+            AND DATE(created_at) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL {months} MONTH)
+                AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+            AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+            AND user_type = 'Customer'
+    )
+    SELECT channel, month, ROUND(SUM(revenue), 2) AS revenue
+    FROM classified
+    GROUP BY 1, 2
+    ORDER BY 2
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id, months=months,
+    )
+    rows = run_bq_query(query) or []
+    out = {}  # type: Dict[str, List[float]]
+    for r in rows:
+        out.setdefault(r["channel"], []).append(float(r.get("revenue") or 0.0))
+    return out
+
+
+def fetch_campaign_product_mix(ce_id, start, end, top_n=15):
+    # type: (int, date, date, int) -> Dict[str, Any]
+    """Paid campaign x product (TGID) revenue + margin for one window.
+
+    Answers "which campaign sells which product at what margin" — the join that
+    crosses the campaign backbone (Section 5) with the product mix (Section 4
+    TGID table). Grain: (campaign_name, experience_id). Paid scope only
+    (campaign-attributed Google/Bing orders, classified with the same channel
+    CASE as `fetch_channel_monthly`).
+
+    Margin comes straight from fct_orders (amount_revenue_usd −
+    amount_direct_costs_usd): spend lives only at campaign level, so ROI can't be
+    split by product, but TR and CM1/order can. Net revenue uses
+    `amount_revenue_usd` (NOT GMV).
+
+    Returns:
+        {
+          "rows": [...top_n pairs by net revenue — the report mini-table...],
+          "all":  [...every pair, net-rev desc — the Google Sheet tab...],
+          "total_rev": float,   # paid net rev across all pairs (share denominator)
+        }
+        Each row: {campaign_name, channel, tgid, experience_name, orders,
+                   net_rev, share, aov, tr, cm1, cm1_per_order}.
+    """
+    query = """
+    WITH classified AS (
+        SELECT
+            campaign_name,
+            CASE
+                WHEN channel_name = 'Google Ads'
+                    AND REGEXP_CONTAINS(campaign_name, CONCAT('cid', CAST(combined_entity_id AS STRING)))
+                    THEN 'Google Search'
+                WHEN channel_name = 'Google Ads'
+                    AND campaign_name LIKE '1 - %'
+                    THEN 'Bing'
+                WHEN channel_name = 'Bing Ads'
+                    AND REGEXP_CONTAINS(campaign_name, CONCAT('cid', CAST(combined_entity_id AS STRING)))
+                    THEN 'Bing'
+                WHEN channel_name = 'Google Ads'
+                    AND REGEXP_CONTAINS(LOWER(COALESCE(campaign_name, '')), r'pmax|performance.max')
+                    THEN 'Google PMax'
+                WHEN channel_name = 'Google Ads' THEN 'Google Cross-sell'
+                WHEN channel_name = 'Bing Ads' THEN 'Bing Cross-sell'
+                ELSE 'Other'
+            END AS channel,
+            experience_id AS tgid,
+            experience_name,
+            amount_revenue_usd AS revenue,
+            amount_direct_costs_usd AS direct_costs,
+            order_value_usd,
+            order_value_completed_usd
+        FROM `{project}.{dataset}.fct_orders`
+        WHERE combined_entity_id = '{ce_id}'
+            AND DATE(created_at) BETWEEN '{start}' AND '{end}'
+            AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+            AND user_type = 'Customer'
+            AND campaign_name IS NOT NULL
+            AND experience_id IS NOT NULL
+    )
+    SELECT
+        campaign_name,
+        channel,
+        tgid,
+        ANY_VALUE(experience_name) AS experience_name,
+        COUNT(*) AS orders,
+        ROUND(SUM(revenue), 2) AS net_rev,
+        ROUND(SAFE_DIVIDE(SUM(order_value_usd), COUNT(*)), 2) AS aov,
+        ROUND(SAFE_DIVIDE(SUM(revenue), NULLIF(SUM(order_value_completed_usd), 0)) * 100, 2) AS tr,
+        ROUND(SUM(revenue - direct_costs), 2) AS cm1,
+        ROUND(SAFE_DIVIDE(SUM(revenue - direct_costs), COUNT(*)), 2) AS cm1_per_order
+    FROM classified
+    WHERE channel IN ('Google Search', 'Bing', 'Google PMax', 'Google Cross-sell', 'Bing Cross-sell')
+    GROUP BY campaign_name, channel, tgid
+    HAVING net_rev > 0
+    ORDER BY net_rev DESC
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+    )
+    rows = run_bq_query(query) or []
+    total_rev = sum(float(r.get("net_rev") or 0.0) for r in rows)
+    for r in rows:
+        r["share"] = (float(r.get("net_rev") or 0.0) / total_rev * 100) if total_rev else 0.0
+    return {
+        "rows": rows[:top_n],
+        "all": rows,
+        "total_rev": total_rev,
+    }
+
+
+# ============================================================================
+# V6.1: PAID VALUE SHAPLEY (Clicks x CVR x Avg CM1 -> paid CM1 change)
+# ============================================================================
+
+def _fetch_paid_value_window(ce_id, start, end):
+    # type: (int, date, date) -> Dict[str, float]
+    """Total paid clicks / conversions / CM1 for one window (Google + Bing + PMax).
+
+    Same paid universe and offline-boundary logic as `_fetch_channel_window_v2`,
+    aggregated to a single paid total so the Shapley factors tie to the paid
+    figures shown in the Channel and Paid Deep Dive tables.
+    """
+    ads_query = """
+    SELECT
+        SUM(count_clicks) AS clicks,
+        SUM(CASE
+            WHEN report_date > '2025-09-01'
+                AND COALESCE(count_conversions_offline_contribution_margin, 0) > 0
+            THEN count_conversions_offline_contribution_margin
+            ELSE count_conversions_online
+        END) AS conversions,
+        SUM(CASE
+            WHEN report_date > '2025-09-01'
+                AND COALESCE(sum_conversion_value_offline_contribution_margin, 0) > 0
+            THEN sum_conversion_value_offline_contribution_margin
+            ELSE sum_conversion_value_calculated_contribution_margin
+        END) AS cm1
+    FROM `{project}.{dataset}.ads_campaign_stats`
+    WHERE campaign_target_combined_entity_id = '{ce_id}'
+        AND report_date BETWEEN '{start}' AND '{end}'
+        AND ad_platform IN ('Google Ads', 'Microsoft Ads')
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+    )
+
+    # PMax: clicks/conversions from asset-stats; CM1 from fct_orders (CE-attributed
+    # ground truth — asset-stats sum_conversion_value is unreliable at CE grain).
+    pmax_query = """
+    SELECT
+        SUM(count_clicks) AS clicks,
+        SUM(count_conversions) AS conversions
+    FROM `{project}.{dataset}.google_ads_pmax_asset_stats`
+    WHERE combined_entity_id = '{ce_id}'
+        AND date BETWEEN '{start}' AND '{end}'
+    """.format(
+        project=PROJECT_ID, dataset=DATASET, ce_id=ce_id,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+    )
+
+    ads = (run_bq_query(ads_query) or [{}])[0]
+    pmax = (run_bq_query(pmax_query) or [{}])[0]
+    # PMax value only when a dedicated asset group exists (asset-stats has clicks)
+    pmax_cm1 = _fetch_pmax_value(ce_id, start, end)["cm1"] if (pmax.get("clicks") or 0) else 0.0
+
+    clicks = float(ads.get("clicks") or 0) + float(pmax.get("clicks") or 0)
+    conversions = float(ads.get("conversions") or 0) + float(pmax.get("conversions") or 0)
+    cm1 = float(ads.get("cm1") or 0) + pmax_cm1
+
+    return {
+        "clicks": clicks,
+        "conversions": conversions,
+        "cm1": cm1,
+        "cvr": (conversions / clicks) if clicks else 0.0,        # fraction (conv/click)
+        "avg_cm1": (cm1 / conversions) if conversions else 0.0,  # CM1 per conversion
+    }
+
+
+def fetch_paid_value_shapley(ce_id, l4w, p4w, ly):
+    # type: (int, Tuple[date, date], Tuple[date, date], Tuple[date, date]) -> Dict[str, Any]
+    """Shapley decomposition of paid CM1 change into Clicks x CVR x Avg CM1.
+
+    Paid CM1 = Clicks x (conv/clicks) x (CM1/conv). Decomposing into these three
+    factors tells the analyst which driver moved the paid value — clicks (volume),
+    CVR (conversion efficiency), or avg CM1 (value per conversion = AOV x TR x CR).
+    This forces the driver-ordering verdict from computed attribution rather than
+    letting the narrative pick the story from raw tables.
+
+    Computes the decomposition for two comparisons:
+        - mom: L4W vs P4W
+        - yoy: L4W vs LY
+
+    Returns:
+        {
+          "windows": {"l4w": {...}, "p4w": {...}, "ly": {...}},   # raw factor values
+          "mom": { "total_delta": float, "clicks": {...}, "cvr": {...}, "avg_cm1": {...} },
+          "yoy": { ... same shape ... },
+        }
+      Each driver dict: {"contribution": $, "share_pct": % of |total_delta|, "direction": "up"|"down"}.
+    """
+    from engine.metrics import shapley_multiplicative
+
+    factors = ["clicks", "cvr", "avg_cm1"]
+    cur = _fetch_paid_value_window(ce_id, l4w[0], l4w[1])
+    pri = _fetch_paid_value_window(ce_id, p4w[0], p4w[1])
+    lyw = _fetch_paid_value_window(ce_id, ly[0], ly[1])
+
+    def decompose(prior, current):
+        contrib = shapley_multiplicative(prior, current, factors)
+        total = current["cm1"] - prior["cm1"]
+        denom = abs(total) if total else 1.0
+        out = {"total_delta": total}
+        for nm in factors:
+            c = contrib[nm]
+            out[nm] = {
+                "contribution": c,
+                "share_pct": (c / denom * 100) if total else None,
+                "direction": "up" if c >= 0 else "down",
+            }
+        return out
+
+    return {
+        "windows": {"l4w": cur, "p4w": pri, "ly": lyw},
+        "mom": decompose(pri, cur),
+        "yoy": decompose(lyw, cur),
+    }

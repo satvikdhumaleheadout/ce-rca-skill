@@ -53,6 +53,16 @@ def build_data_parser():
     p4 = sub.add_parser("cohorts", help="Section 4a: Campaign cohorts by language")
     add_3w_dates(p4)
 
+    p_tgid = sub.add_parser("tgid-revenue", help="Section 4: Product mix — top experiences (TGID) + assortment shift")
+    p_tgid.add_argument("--ce-id", required=True)
+    p_tgid.add_argument("--l4w-start", required=True)
+    p_tgid.add_argument("--l4w-end", required=True)
+    p_tgid.add_argument("--ly-start", required=True)
+    p_tgid.add_argument("--ly-end", required=True)
+
+    p_shap = sub.add_parser("paid-shapley", help="Section 4: Paid value Shapley (Clicks x CVR x Avg CM1)")
+    add_3w_dates(p_shap)
+
     p5 = sub.add_parser("customer-country", help="Customer country distribution from fct_orders")
     add_single_dates(p5)
 
@@ -79,7 +89,7 @@ def build_data_parser():
 
 def data_main(argv=None):
     # type: (Optional[List[str]]) -> None
-    """Entry point for `perf_audit.py data <command>` subcommand."""
+    """Entry point for `perf_audit_v6.py data <command>` subcommand."""
     import json
     from datetime import date as d
 
@@ -92,6 +102,8 @@ def data_main(argv=None):
         fetch_geo_coverage_3w,
         fetch_budget_bidding,
         fetch_market_benchmarks,
+        fetch_tgid_revenue,
+        fetch_paid_value_shapley,
     )
 
     parser = build_data_parser()
@@ -135,6 +147,19 @@ def data_main(argv=None):
             pd(args.ly_start), pd(args.ly_end),
             pd(args.p4w_start), pd(args.p4w_end),
         )
+    elif cmd == "tgid-revenue":
+        result = fetch_tgid_revenue(
+            args.ce_id,
+            (pd(args.l4w_start), pd(args.l4w_end)),
+            (pd(args.ly_start), pd(args.ly_end)),
+        )
+    elif cmd == "paid-shapley":
+        result = fetch_paid_value_shapley(
+            args.ce_id,
+            (pd(args.l4w_start), pd(args.l4w_end)),
+            (pd(args.p4w_start), pd(args.p4w_end)),
+            (pd(args.ly_start), pd(args.ly_end)),
+        )
     elif cmd == "customer-country":
         result = fetch_customer_country_distribution(
             args.ce_id,
@@ -171,7 +196,7 @@ def data_main(argv=None):
 
 def render_main(argv=None):
     # type: (Optional[List[str]]) -> None
-    """Entry point for `perf_audit.py render`. Fetches data + renders skeleton."""
+    """Entry point for `perf_audit_v6.py render`. Fetches data + renders skeleton."""
     from datetime import date as d
 
     from engine.sources.bq import (
@@ -183,9 +208,16 @@ def render_main(argv=None):
         fetch_geo_coverage_3w,
         fetch_budget_bidding,
         fetch_landing_page_performance,
+        fetch_lp_funnel,
         fetch_campaign_targeting,
         fetch_ad_group_performance,
+        fetch_tgid_revenue,
+        fetch_paid_value_shapley,
+        fetch_channel_monthly,
+        fetch_campaign_product_mix,
+        fetch_ad_group_audit,
     )
+    from engine.signals import build_signals, attach_trajectories
     from engine.render.audit_skeleton import render_audit
 
     parser = argparse.ArgumentParser(prog="perf_audit render")
@@ -225,10 +257,42 @@ def render_main(argv=None):
     customers_ly = fetch_customer_country_distribution(ce_id, ly[0], ly[1])
     landing_pages = fetch_landing_page_performance(
         ce_id, l4w[0], l4w[1], ly[0], ly[1])
+    lp_funnel = fetch_lp_funnel(
+        ce_id, l4w[0], l4w[1], ly[0], ly[1])
     targeting = fetch_campaign_targeting(ce_id)
     ad_groups = fetch_ad_group_performance(ce_id, l4w[0], l4w[1])
+    tgid = fetch_tgid_revenue(ce_id, l4w, ly)
+    shapley = fetch_paid_value_shapley(ce_id, l4w, p4w, ly)
+    channel_monthly = fetch_channel_monthly(ce_id)
+    campaign_product = fetch_campaign_product_mix(ce_id, l4w[0], l4w[1])
+    ad_group_audit = fetch_ad_group_audit(ce_id, l4w[0], l4w[1], p4w[0], p4w[1])
 
-    sys.stderr.write("2. Rendering skeleton...\n")
+    # Coverage gate: enumerate material signals + tag L12M trajectory (Phase 3)
+    signals = build_signals(ce_health, channels, cohorts, paid_perf, shapley, tgid)
+    attach_trajectories(
+        signals, channels=channels, cohorts=cohorts, ce_health=ce_health,
+        paid_perf=paid_perf, channel_monthly=channel_monthly, tgid=tgid,
+    )
+
+    # Auto-validate metrics before rendering
+    sys.stderr.write("2. Validating metrics...\n")
+    sys.stderr.flush()
+    warnings = []
+    for wname, wdata in [("l4w", paid_perf.get("l4w", {})), ("p4w", paid_perf.get("p4w", {})), ("ly", paid_perf.get("ly", {}))]:
+        if wdata.get("cm1") and wdata.get("paid_rev") and wdata["cm1"] > wdata["paid_rev"] * 1.05:
+            warnings.append(f"  ⚠ {wname}: CM1 ${wdata['cm1']:,.0f} > Rev ${wdata['paid_rev']:,.0f} ({(wdata['cm1']/wdata['paid_rev']-1)*100:.1f}% gap)")
+    for wname, wdata in [("l4w", ce_health.get("l4w", {})), ("p4w", ce_health.get("p4w", {})), ("ly", ce_health.get("ly", {}))]:
+        if wdata.get("aov") and wdata.get("revenue") and wdata.get("orders") and wdata["orders"] > 0:
+            rev_per_order = wdata["revenue"] / wdata["orders"]
+            if abs(wdata["aov"] - rev_per_order) < 1.0:
+                warnings.append(f"  ⚠ {wname}: AOV ${wdata['aov']:.2f} ≈ rev/orders ${rev_per_order:.2f} — may be using revenue instead of order_value")
+    if warnings:
+        sys.stderr.write("   WARNINGS:\n" + "\n".join(warnings) + "\n")
+    else:
+        sys.stderr.write("   All checks passed ✓\n")
+    sys.stderr.flush()
+
+    sys.stderr.write("3. Rendering skeleton...\n")
     sys.stderr.flush()
 
     output = render_audit(
@@ -248,8 +312,14 @@ def render_main(argv=None):
         customers=customers,
         customers_ly=customers_ly,
         landing_pages=landing_pages,
+        lp_funnel=lp_funnel,
         targeting=targeting,
         ad_groups=ad_groups,
+        shapley=shapley,
+        tgid=tgid,
+        campaign_product=campaign_product,
+        ad_group_audit=ad_group_audit,
+        signals=signals,
     )
 
     if args.output:

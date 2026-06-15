@@ -4,6 +4,35 @@ For each metric signal, walk the tree top-down. Test each hypothesis with its da
 
 ---
 
+## 0. Coverage Gate — close every enumerated signal
+
+The engine enumerates the **material movers** into the "Signals to Close" tables inside a **backend HTML comment** at Section 9 (channels/cohorts >10% of |rev Δ|, headline metrics past threshold, Shapley drivers >15% of |paid CM1 Δ|, TGID |Δ share|>5pp). That list is the gate: **every row must be closed** in the comment — none may be silently dropped. The comment is *not* rendered in the report; the visible §9 is only the ranked **Red Flags** table (the CONFIRMED subset). This is the perf-audit analogue of CVR-RCA's "close every quantified signal ≥10% of Shapley."
+
+**Disposition vocabulary** — every row gets exactly one:
+- **CONFIRMED** — a real driver/problem. Flows into the Red Flags table (severity-ranked).
+- **RULED OUT** — not a driver. Requires a one-line reason: *noise* (within ±5% / a few pp), *below materiality*, or *explained by another signal* (e.g. "CVR −0.7pp is assortment-mix, not funnel — see TGID 39257"). 
+- **DATA GAP** — can't be closed with available data; name what's missing (CSV, Ahrefs, a query not run).
+
+**A one-line closure satisfies the gate.** You don't owe every signal a paragraph — a sub-threshold or already-explained mover can be closed in a single clause. The rule is *always closed*, not *always deep*. The engine renders two tiers: the **HIGH-severity** movers get reasoned dispositions (these are the 3–4 conclusions the report leads with); the **"Also enumerated"** rows get **one line each** (most RULED OUT). Narrating a paragraph for every minor signal is itself a failure — it buries the verdict.
+
+**Account for the L12M trajectory** (the table's L12M column) when disposing — it changes the verdict:
+- `cliff` → a single-month break; look for a point event (pause, tracking outage, SP action) at that month.
+- `gradual` → structural erosion; not a recent shock.
+- `recovering` → the YoY drop is already reversing (MoM up); temper the severity, credit the recovery — don't alarm on a metric that's climbing back.
+- `volatile` → noisy; be cautious sizing a single-window move.
+- `new` → a recently-appeared SKU/cohort; expected to be small/ramping, not a "loss."
+This maps onto §11 (Temporal Diagnostics) — use it to separate structural from cyclical.
+
+**Which tree closes which signal** (the gate says *which* to close; these trees say *how*):
+- Clicks / Impressions driver → §1 / §2 ; CPC → §4 (3-lens) ; SIS / rank-lost → §6
+- CVR driver → §5 (route to /cvr-rca) ; Take Rate → §7b ; ROI → §7
+- Channel mover → §9 ; Spend → §8 ; Coverage/dormancy → §10 ; Temporal shape → §11
+- TGID / assortment shift → §5 "Assortment change" (read the Product Mix table's Δ Share)
+
+After closing all rows, build **Red Flags** = the CONFIRMED rows, severity-ranked, plus any qualitative flag not in the enumeration (data caveats, competitor surges). Every CONFIRMED signal must appear in Red Flags.
+
+---
+
 ## 1. Clicks ↓
 
 Decompose first: Clicks = Impressions × CTR. Which component drove the drop?
@@ -84,7 +113,22 @@ Investigate both branches. Compounding = more severe. Likely a structural issue 
 
 ---
 
-## 4. CPC ↑ (3-lens tree + internal check)
+## 4. CPC Analysis
+
+### Step 0: Decompose by language BEFORE applying 3-lens tree
+
+NEVER conclude on blended CPC alone. Blended CPC hides mix shifts — if expensive cohorts shrink while cheap cohorts grow, blended CPC looks flat despite competition.
+
+For each language cohort with >$1K spend, classify:
+- **CPC ↑ + Scale ↓** = competition (competitor bidding up, we're losing auctions)
+- **CPC ↑ + Scale ↑** = healthy scaling (paying more but winning more)
+- **CPC flat + Scale ↓** = SIS compression / competition (not bidding enough to enter auctions — same root cause as competition, just expressed differently. Competitors bid higher → we lose rank → SIS drops → clicks drop)
+- **CPC ↓ + Scale ↓** = algorithm retreat OR demand decline (see Step 1b to distinguish)
+- **CPC ↓ + Scale ↑** = efficiency gain (rare — usually means competitor exited)
+
+A flat blended CPC with large click loss almost always means competition or SIS compression at the cohort level. The mix shift masks it.
+
+### Step 1a: If dominant pattern is CPC ↑ — apply 3-lens tree
 
 Walk in order. Stop at the first confirmed lens for primary cause, but check remaining for secondary.
 
@@ -94,22 +138,40 @@ Walk in order. Stop at the first confirmed lens for primary cause, but check rem
 - Meaning: Google is optimizing for converting clicks at higher cost. This is GOOD.
 - Action: Accept the premium. Monitor RPC/CPC ratio.
 
-**Lens 2: AOV structural**
-- Check: AOV / ticket price L4W vs LY. Did product pricing increase?
-- Confirmed if: AOV up >10% and CPC up proportionally
-- Meaning: Everyone bids more when the prize is bigger. Structural, not fixable.
-- Action: Note as context. Adjust ROI expectations.
+**Lens 2: Average CM1 structural (replaces AOV)**
+- Check: Average CM1 (= CM1 / conversions) L4W vs LY. This captures AOV × take rate × completion rate in one metric.
+- Confirmed if: avg CM1 up >10% and CPC up proportionally — the algorithm bids more because each conversion is worth more
+- If avg CM1 DOWN despite AOV up → take rate or completion rate dropped, limiting bidding ability. This is the Eiffel pattern: AOV rose but TR fell, so avg CM1 fell, so the algorithm couldn't bid high enough.
+- Meaning: avg CM1 is what the algorithm optimizes for. CPC follows avg CM1, not AOV.
+- Action: If avg CM1 up → CPC rise is justified (structural). If avg CM1 down → investigate TR/CR as the root constraint (see §7b TR tree).
 
 **Lens 3: Competition**
-- Check: top-of-page % dropped AND/OR auction insights show competitor IS up AND/OR search partner mix changed
-- Confirmed if: at least 2 of 3 evidence types present. NEVER say "competition" with only CPC data.
-- Evidence sources: position data (Q1), auction insights (CSV), search partner mix (Q4)
-- Action: If RPC still > CPC → accept. If RPC < CPC → find lower-competition segments (Bing, OL, long-tail).
+- Check: (a) per-cohort CPC rose while scale dropped for the largest cohort, OR (b) auction insights show competitor SIS expansion, OR (c) SIS Δ of Δ shows Headout decelerating while competitors accelerate
+- Confirmed if: at least 1 of the 3 evidence types present. Per-cohort CPC × scale is sufficient evidence — don't require auction insights CSV.
+- Action: If RPC still > CPC → accept but flag SIS gap. If RPC < CPC → find lower-competition segments (Bing, OL, long-tail).
 
 **Lens 4: Internal bid change**
 - Check: tROAS or bid strategy changed in last 14d (change_event log, Q7)
 - Confirmed if: strategy changed AND CPC moved within 14d of change
 - Action: If in learning period (<14d) → defer judgment. If post-learning → evaluate if new bids are profitable.
+
+### Step 1b: If dominant pattern is CPC ↓ + Scale ↓ — algorithm retreat vs demand decline
+
+CPC declining is NOT always good. If clicks also dropped, distinguish:
+
+**Algorithm retreat (campaign entering dormancy) — the dangerous pattern:**
+- Check: (a) demand is growing (Ahrefs volume up or stable), AND (b) SIS is low (<30%) with high rank-lost (>60%), AND (c) RPC dropped (often from TR decline)
+- Confirmed if: demand growing + SIS low + RPC dropped. The algorithm can't hit tROAS with low RPC, so it retreats to cheaper (lower-competition) auctions and enters fewer total auctions.
+- Causal chain: TR decline → RPC drop → tROAS gap widens → algorithm bids less aggressively → wins only cheap auctions (CPC↓) → enters fewer auctions (clicks↓, SIS↓)
+- Action: Fix the upstream constraint (TR/RPC), THEN loosen tROAS. Loosening tROAS alone won't help if RPC can't support it.
+
+**Demand decline (external):**
+- Check: Ahrefs volume trending down for CE core keywords
+- Confirmed if: volume down >15% vs same period LY
+- Meaning: Fewer people searching. CPC drops because fewer bidders per auction.
+- Action: Seasonal → ride it out. Structural → diversify keywords or expand to adjacent products.
+
+**Key distinction:** Both show CPC↓ + Scale↓. The difference is demand direction. If demand is UP but CPC and clicks are DOWN → algorithm retreat. If demand is DOWN → external contraction.
 
 ---
 
@@ -117,30 +179,47 @@ Walk in order. Stop at the first confirmed lens for primary cause, but check rem
 
 The paid audit detects and sizes funnel leaks, rules out traffic quality as the cause, and routes to Product. Don't diagnose LP content, pricing, or availability — that's Product's scope.
 
+**Run `/cvr-rca` for the deep investigation.** The perf audit's role is to:
+1. Call CVR-RCA with the CE and date windows
+2. Validate direction against cohort table CVR
+3. Incorporate findings into Section 7 narrative
+4. Surface P1/P2 funnel actions in Executive Summary
+
+CVR-RCA provides the full diagnostic: Shapley decomposition (which step), mix cascade (routing vs conversion), device/experience/language cuts (where), C2O sub-stages (C2A checkout submission vs A2O payment success), and LY structural gap.
+
+**How to interpret CVR-RCA output in the perf audit context:**
+
 **LP2S dropped (landing page → selection)**
-- Check: Mixpanel funnel, filtered to paid channel
-- Possible causes: LP content/UX change, availability display, pricing visibility, traffic quality shift
-- **Before routing to Product, rule out the paid-side cause:**
-  - Check traffic quality indicators: top-of-page % (Q1), informational term share (6a), CVR trend
-  - If traffic quality improved (higher top-of-page %, fewer informational clicks, CVR up) BUT LP2S worsened → LP is confirmed. The argument: "better traffic should convert better at every funnel stage; if it doesn't, the stage itself degraded."
-  - If traffic quality degraded (more search partner clicks, informational share grew) → funnel drop may be traffic mix, not LP. Investigate search term shift before routing.
-- Action: Route to Product WITH the traffic-quality argument. Size the leak: sessions lost × historical CVR × AOV.
+- CVR-RCA Shapley shows LP2S as significant step (>10% contribution)
+- Before routing to Product, rule out paid-side cause using perf audit data:
+  - Check informational term share from Section 8 clusters — if informational grew, LP2S drop may be traffic mix
+  - Check cohort CVR trend from Section 5 — if CVR up but LP2S down, traffic quality improved but LP degraded
+- Action: Route to Product WITH the traffic-quality argument. Size: LP sessions × LP2S gap × downstream rates × AOV.
 
 **S2C dropped (selection → cart)**
-- Check: Mixpanel funnel
-- Possible causes: pricing change, variant availability gaps, merchandising changes
+- CVR-RCA Shapley shows S2C significant
+- Check experience-level S2C from CVR-RCA — if specific experiences drag, it's supply/availability
+- Check LY gap — if S2C persists below LY all year, it's structural (not a point event)
 - Action: Route to Product/Supply. Check `/availability-diagnostics` for inventory gaps.
 
 **C2O dropped (cart → order)**
-- Check: Mixpanel funnel
-- Possible causes: checkout UX, payment failures, booking fee changes
-- Action: Route to Tech/Product.
+- CVR-RCA splits C2O into C2A (checkout submission) and A2O (payment success)
+- C2A drop → checkout UX regression. Check device concentration — mobile-only means mobile UX issue.
+- A2O drop → payment failures. Check experience-level — if one experience has A2O drop while volume surged, it's capacity/gateway issue.
+- Action: Route to Tech/Product with specific device + experience locus.
 
 **Blended CVR down but largest cohort CVR stable**
 - Check: filter funnel to Google Search English only. Compare blended vs filtered.
-- Confirmed if: blended down but largest cohort stable = dormant/low-CVR cohorts diluting
-- Meaning: Not a conversion problem — it's a traffic mix problem (coverage issue).
+- CVR-RCA's mix cascade (L1: MB/HO, L2: Paid/Organic, L3: Channel) resolves this automatically
+- If mix exit at any level → routing story, not conversion problem
 - Action: Don't fix CVR. Fix coverage (dormant cohorts).
+
+**Assortment change (product/experience contribution shift)**
+- Check: the **Product Mix — Top Experiences (TGID) table in Section 4** (rendered by the engine from `fct_orders.experience_id`). Read the **Δ Share** column directly — no ad-hoc query needed.
+- Confirmed if: any TGID with |Δ Share| > 5pp — a product that was a meaningful share of revenue LY is now near-zero (⚠️ / decayed), OR a new TGID (🆕) accounts for >5pp of revenue that didn't exist LY.
+- Meaning: product mix shifted — CVR/RPC change is a side effect of different products converting and pricing differently, not a change in traffic quality or funnel performance. The table's AOV / CR / TR / Net Rev/Order / CM1/Order columns show *how* the economics differ between the gaining and losing products (Net Rev/Order = AOV × CR × TR; CM1/Order subtracts direct costs).
+- **Tie to the Paid Value Shapley:** a mix shift toward a lower-AOV or lower-TR product mechanically drags blended Avg CM1 → this shows up as the Avg CM1 driver in the Section 4 Shapley. If the Shapley's Avg CM1 contribution is material and the TGID table shows a mix shift, they are the same story — state it once, with the product named.
+- Action: Surface in the narrative — "revenue/CVR moved because the product mix changed (TGID X 50%→18%, TGID Y 0%→13%), not because the funnel improved/degraded." If a high-value product grew, positive (catalogue expansion / pricing). If a high-value product disappeared, route to Supply.
 
 ---
 
@@ -159,10 +238,11 @@ The paid audit detects and sizes funnel leaks, rules out traffic quality as the 
 **Budget-lost dominant (>40%)**
 - Check: budget_lost_IS from Q7
 - Confirmed if: budget_lost > 0.4 of total lost IS
+- Note: budget level itself is not meaningful — budgets are managed as profitability controls, not spend caps. Check if actual SPEND dropped instead.
 - Sub-causes:
-  - Budget was cut → Check: change_event log for budget reduction
-  - CPC inflation consumed budget → Check: CPC trending up + budget constant
-- Action: Raise budget on high-ROI campaigns. Redistribute from low-ROI groups.
+  - Spend dropped → Check: L4W spend vs P4W spend. If spend dropped with constant budget → algorithm is self-suppressing (tROAS too high for current avg CM1)
+  - CPC inflation consumed budget → Check: CPC trending up + spend constant but clicks down
+- Action: If spend dropped → investigate avg CM1 trend (see Lens 2). If CPC consumed budget → raise budget on high-ROI campaigns only.
 
 **SP-imposed cap**
 - Check: Slack for "yellow card", "descale", "pause", "SP", "supplier" mentions
@@ -207,6 +287,38 @@ The paid audit detects and sizes funnel leaks, rules out traffic quality as the 
 
 ---
 
+## 7b. Take Rate (TR) ↓ — Algorithm Constraint
+
+TR decline is often the hidden root cause of SIS and ROI problems. When TR drops, RPC drops proportionally, making tROAS targets harder to achieve. The algorithm then self-suppresses to maintain profitability.
+
+**Causal chain:** TR ↓ → RPC ↓ → tROAS gap widens → algorithm bids lower → SIS ↓ → clicks ↓ → revenue ↓
+
+This chain can produce a confusing pattern: CPC declining, ROI stable or slightly improving, but massive volume loss. The algorithm is "winning" on efficiency by retreating from auctions it can't profitably compete in.
+
+**SP contract / commission change**
+- Check: L12M TR trend from appendix A1. Did TR drop abruptly (point event) or gradually (structural)?
+- Check Slack for SP renegotiation, commission changes, new vendor terms
+- Confirmed if: TR dropped >3pp in a specific month + Slack evidence of contract change
+- Action: This is not a Perf issue. Route to Biz/SP team. Size the impact: every 1pp TR ≈ proportional % drop in RPC.
+
+**Product mix shift**
+- Check: Are lower-TR TGIDs growing in share? (e.g., combo tickets with lower commission vs standard tickets)
+- Confirmed if: share of low-TR products increased while blended TR dropped
+- Action: Accept structural TR shift. Adjust tROAS targets to reflect new blended RPC reality. If tROAS was set when TR was higher, it's now unachievable.
+
+**Completion rate (CR) decline contributing**
+- Check: CR from Table 1 or cohort table. TR = Rev / (OV × CR) approximately. If CR dropped, TR drops even if commission didn't change.
+- Confirmed if: CR dropped >2pp YoY
+- Action: Route to Supply (fulfillment issues, cancellations). CR recovery restores TR.
+
+**Impact on tROAS recommendations:**
+When TR is the root cause, loosening tROAS alone won't fully solve the problem — it buys temporary volume but at unsustainable efficiency. The report should:
+1. Size the TR impact: "TR dropped Xpp → RPC dropped $Y → each click is worth $Y less → tROAS of Z% requires CVR of W% which exceeds market median"
+2. Recommend tROAS adjustment as a short-term bridge
+3. Flag TR fix as the structural solution (SP team, product mix, CR recovery)
+
+---
+
 ## 8. Spend ↓ (without intentional cut)
 
 **Bid strategy self-suppressing**
@@ -214,10 +326,11 @@ The paid audit detects and sizes funnel leaks, rules out traffic quality as the 
 - Confirmed if: spend/budget ratio dropping over time
 - Action: Lower tROAS. Same pattern as dormancy.
 
-**Budget was cut**
-- Check: Q7 budget amount, change_event log
-- Confirmed if: budget_amount decreased >20% in last 30d
-- Action: Verify if intentional. Restore if drift.
+**Spend dropped (replaces "budget was cut")**
+- Check: L4W spend vs P4W spend. Did actual spend decline?
+- Confirmed if: spend dropped >15% MoM without a budget reduction
+- Meaning: algorithm is self-suppressing — avg CM1 can't support the tROAS target, so it bids less, spends less
+- Action: Check avg CM1 trend. If avg CM1 dropped → TR/CR is the root cause (see §7b). Budget level itself is irrelevant — don't flag budget as a problem.
 
 **Campaigns paused**
 - Check: campaign status timeline. Any campaigns paused in last 30d?
@@ -286,6 +399,12 @@ The paid audit detects and sizes funnel leaks, rules out traffic quality as the 
 - Check: geo-specific campaigns paused (EN-RoW, EN-RoA) + All-countries campaign active
 - Confirmed if: consolidated campaign exists and captures equivalent volume
 - Action: Do NOT recommend reactivation. Verify via geographic_view that user countries are covered.
+
+**"Other" / catch-all cohort collapse (≥90% YoY drop)**
+- Check: "Other" or "Other Languages" cohort had significant LY spend/clicks but near-zero now.
+- Confirmed if: language-specific cohorts (EN, DE, FR, IT, etc.) grew or were created in the same period, absorbing the "Other" traffic. Sum of language-specific L4W spend ≈ "Other" LY spend.
+- Meaning: Campaign restructuring moved traffic from a catch-all "Other" into dedicated language campaigns. This is expected — better targeting, not lost volume.
+- Action: Verify that total clicks/spend across all cohorts hasn't dropped disproportionately. If total is stable but "Other" collapsed → consolidation artifact, note it but don't flag as a problem. If total also dropped significantly → there's a real volume loss on top of the restructuring, investigate other branches (SIS, demand).
 
 **PMax missing from this account**
 - Check: no PMax campaigns found with spend for this CE

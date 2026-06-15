@@ -1,28 +1,20 @@
 # Changelog
 
-## 6.3.0 (2026-06-08)
+## 6.2.0 (2026-06-15)
 
-### Changed
-- **Decision transcript is now a decision *tree*.** Step 6's `transcript_perf_audit.md` was a flat
-  list of per-section verdicts; it now mirrors CVR-RCA's two-layer transcript — a **fenced
-  ` ```text ` tree-map** (root verdict → one branch per audit lens: traffic quality, campaigns +
-  portfolio, coverage + matchmaking, funnel, search intelligence — each CONFIRMED / RULED OUT + the
-  call, `LEAF` = headline finding) plus short **detail sections** below. The tree is fenced so its
-  alignment survives markdown rendering in the CE-RCA umbrella's Transcript tab (which now renders
-  transcripts as markdown). No engine change — still authored by the analyst step. Companion: ce-rca
-  v1.9.0.
+Sync from `~/analytics` — Phase 3 coverage gate, diagnosis-layer additions, PMax fixes, and an output/language overhaul.
 
-## 6.2.0 (2026-06-08)
+### Features
+- **Coverage gate (Phase 3)** — new `engine/signals.py`: enumerates material movers (channels/cohorts >10% of |rev Δ|, headline metrics past threshold, Shapley drivers >15%, TGID |Δ share|>5pp), tags L12M trajectory, and is closed in a backend §9 comment (visible §9 = ranked Red Flags). EVAL hard-gates that every signal is disposed.
+- **Paid Value Shapley** — `shapley_multiplicative` (exact Clicks × CVR × Avg CM1 decomposition) consolidated into one §4 table (per-window inputs + MoM/YoY contribution + share).
+- **Campaign × Product** join (`fetch_campaign_product_mix`) — which campaign sells which product at what margin (TR / CM1/Ord); narrative in report, full matrix in Sheet Tab 7.
+- **Ad Group Audit** (`fetch_ad_group_audit`) — per-ad-group performance + bid-headroom opportunity (Scale / Leak vs tROAS target), with MoM Δ inlined into Spend/ROI; full set + MoM columns in Sheet Tab 8.
+- **Plain-language narrative rule** — concrete cause→effect prose across every section (modeled on the cvr-rca exec summary).
+- **Driver-ordering caveat** — Shapley is arithmetic, not causal: trace clicks back through the §7b TR chain when TR/CR moved >5%.
 
-### Added
-- **Decision transcript (Step 6).** The audit now writes a lightweight, structured decision log to
-  `transcript_perf_audit.md` in the run directory — CE + windows resolved, mode + data pulled,
-  one-line verdict per section (traffic quality, campaign/portfolio status, coverage + matchmaking,
-  funnel, search intelligence), the headline finding, and what was skipped/ruled out. Conclusions
-  and decisions only, not a re-run of the report's tables — it exposes the *reasoning* behind the
-  audit. Under the CE-RCA umbrella orchestrator the file is collected verbatim into the composite
-  report's **Transcript** tab (the orchestrator globs `transcript_<skill>.md`); standalone runs drop
-  it next to the report. No engine change — the transcript is authored by the analyst step, model-side.
+### Bug Fixes
+- **PMax CM1 from `fct_orders`** (headline paths + A2 monthly appendix) — `sum_conversion_value × revenue_percentage` understated PMax CM1 ~4.3× post-Sep-2025; sourcing value from fct_orders corrects paid ROI (Eiffel ~123% → ~142%, near target).
+- Campaign × product Channel made deterministic (GROUP BY channel, was non-deterministic ANY_VALUE).
 
 ## 6.1.0 (2026-05-21)
 

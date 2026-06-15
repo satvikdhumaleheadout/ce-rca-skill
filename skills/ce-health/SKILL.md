@@ -26,10 +26,15 @@ Get the full context on a CE before starting any depth analysis. Produces metada
 /ce-health 189 --range l6m                   # last 6 months
 /ce-health 252 --range week                  # alias for l1w
 /ce-health 252 --range month                 # alias for l1m
-/ce-health 189 --start 2026-03-06 --end 2026-04-05  # custom dates
+/ce-health 189 --start 2026-03-06 --end 2026-04-05  # custom dates (pre = preceding equal window)
+/ce-health 189 --start 2026-05-01 --end 2026-05-31 --pre-start 2026-03-01 --pre-end 2026-03-31  # explicit baseline
 ```
 
 **Range syntax:** `l<N>w` (N weeks) or `l<N>m` (N months). Any number works.
+**Explicit baseline:** by default the pre window is the equal-length block
+immediately before `--start/--end`. Pass `--pre-start/--pre-end` to override it
+with **any** baseline — non-contiguous or unequal-length (e.g. post = May vs
+pre = March). Only valid alongside `--start/--end`; both must be given together.
 **Aliases:** `week` = `l1w`, `month` = `l1m`, `3m` = `l3m`, `6m` = `l6m`
 
 ---
@@ -75,6 +80,30 @@ cd ~/analytics && python3 scripts/ce_health.py \
 ### Step 3 — Read the output
 
 Read the generated markdown file. All 8 sections are pre-rendered.
+
+### Step 3b — Beautified standalone HTML report (optional; needs the CE-RCA bundle)
+
+The markdown above is the portable deliverable. For a **polished, browser-openable
+HTML report** (metric cards, Plotly charts, the corrected Shapley waterfall), run the
+CE-RCA bundle's renderer with `--standalone`. It needs the sidecar + markdown under
+the **canonical names** `ce_health_report.{md,json}` in one run dir, so emit them that
+way (the engine writes the `.json` sidecar next to the `--output` `.md`):
+
+```bash
+# 1) write the artifacts with canonical names into a run dir
+python3 <ce-health-engine>/ce_health.py --ce-id <CE_ID> --range <RANGE> \
+  --output <run_dir>/ce_health_report.md
+# 2) wrap the beautified tab into an openable report.html
+python3 <ce-rca-bundle>/scripts/render_ce_health.py --run-dir <run_dir> --standalone
+```
+
+`--standalone` writes **`<run_dir>/report.html`** (the shared
+`standalone_report.wrap_fragment` adds the `<html>` shell + Plotly CDN + visual-kit
+CSS + a lightweight CE banner, around the same beautified fragment the CE-RCA
+composite embeds). **Graceful:** if the bundle renderer isn't reachable (e.g. running
+purely in `~/analytics` without the bundle), skip this — the markdown from Step 2
+remains the deliverable. (Under the `/ce-rca` orchestrator this is unnecessary — the
+master renders the fragment without `--standalone` and `compose.py` builds the tab.)
 
 ### Step 4 — Search Slack for CE context
 

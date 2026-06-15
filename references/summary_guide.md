@@ -16,7 +16,10 @@ You **weave findings the tabs already reached**. You do **not**:
 - run queries or fetch data,
 - compute new numbers (every number you show must already appear in a source tab),
 - contradict a tab on your own authority, or
-- re-investigate anything.
+- re-investigate anything,
+- **cite a source that isn't present** — if `slack_context.md` is absent, say "Slack context
+  unavailable"; never fabricate a "threads searched" claim, Slack row, or chip (full **Slack
+  honesty rule** under Inputs below).
 
 **Copy numbers exactly — provenance over polish:**
 - **Don't relabel a metric** — an ROI delta stays ROI, a session count stays sessions; never swap one metric's number onto another's name.
@@ -27,6 +30,12 @@ You **weave findings the tabs already reached**. You do **not**:
   CVR and Paid CVR (or LP Users and Paid sessions) side by side without both labels; carry each
   source's basis tag (within-session / cross-session / paid-session) verbatim. (Full glossary:
   ce-rca `references/metric_glossary.md` — reference only, do not load at runtime.)
+
+**Corroborate via independent evidence, never peer-conclusion-as-proof.** Two tabs
+corroborate only when each rests on its *own* evidence or a *shared upstream anchor* (a CE
+Health fact). Never present "Perf is right because CVR said so" (or vice-versa) — that's
+circular. In the cross-reference "Corroborated by" column, the corroboration must be an
+independent measurement / source, not the other tab restating the same conclusion.
 
 If two tabs appear to disagree (e.g. CVR-RCA says page-issue, perf-audit says
 traffic-issue), **present both and frame the tension** — do not adjudicate.
@@ -61,6 +70,15 @@ conclusion or an implication, never a description of process.
 Read only what exists. A skill that didn't run is simply absent — synthesize
 across whatever tabs are present.
 
+**Slack honesty rule.** When `slack_context.md` is **absent** (Slack MCP not connected —
+see `INSTALL.md`), the Summary must report Slack as **unavailable, consistently**, and must
+**not**:
+- claim threads were searched or cite a date range (e.g. "threads searched May 2026"),
+- add a Slack row to any data-source / coverage table,
+- attach a `<span class="tag">Slack</span>` chip or cite any Slack-sourced signal or flag.
+Never fabricate Slack evidence. Only fold in Slack signals when `slack_context.md` actually
+exists; otherwise say "Slack context unavailable" and move on.
+
 When `user_context.md` is present, the cross-reference table's **Corroborated by**
 column should surface where a user prior or user-provided source backed a finding,
 tagged as user-provided (see `cvr-rca/references/visual_kit.md → "User-provided
@@ -74,6 +92,16 @@ content that drops into the Summary tab pane). The composite injects the shared
 visual-kit `<style>`, so use the **visual-kit component classes** — do not write
 your own CSS. Read `references/visual_kit.md` for the exact HTML patterns.
 
+**No CE-identity chrome, no "Links" row — start at the section label.** The Summary
+fragment must **NOT** author any CE-identity header — no `<header>` (or `id="top"`),
+no eyebrow, no `<h1>` with the CE name, and no meta/dates line. It must also **NOT**
+render a "Links" row or any dashboards row. Rationale: the composite's top banner
+already shows the CE identity + dashboards above every tab, and any user-provided
+links live in **exactly one place — CE Health §8 "Important links"**. Duplicating
+either here produces a phantom "extra subtab" that varies with whatever links the
+user shared. **The fragment's first element is the `<div class="section-label">CE-Level
+Summary</div>`, immediately followed by the vitals cards** — nothing above it.
+
 ## What the Summary must answer
 
 A reader of only this tab should understand the whole RCA. The blocks below are the **recommended
@@ -85,10 +113,11 @@ views and next steps. It is **not a rigid template** (see "Freedom to adapt").
 | 1 | Vitals cards | current state at a glance (pre→post) | CE Health vitals (verbatim) |
 | 2 | Short-term vs long-term context | pre→post Δ + YoY Δ | CE Health vitals + L12M |
 | 3 | Headline callout | TL;DR — the story + the single top action | synthesized |
-| 4 | What we set out to check *(if user context)* | the analyst's intent + whether the RCA answered it | `user_context.md` |
+| 3b | **Driver waterfall** (placeholder) | the §7 Revenue-Waterfall, reused verbatim — emit `<!--SUMMARY_SHAPLEY_WATERFALL-->`, the composer fills it | CE Health §7 (cloned) |
+| 4 | **Driver table** | the revenue decomposition + per-driver verdict — straight after the waterfall | CE Health Shapley + CVR/perf |
 | 5 | **Per-tab conclusion digests** | each tab's conclusions/callouts **in full** | CE Health · CVR-RCA · perf-audit |
-| 6 | Driver table | the revenue decomposition + per-driver verdict | CE Health Shapley + CVR/perf |
-| 7 | Recommended next steps | consolidated actions across the tabs | CVR-RCA + perf-audit |
+| 6 | Recommended next steps | consolidated actions across the tabs | CVR-RCA + perf-audit |
+| 7 | What we set out to check *(if user context)* | the analyst's intent + whether the RCA answered it — last table before the cross-reference | `user_context.md` |
 | 8 | Cross-reference table (**last**) | provenance — how the tabs corroborate | all tabs |
 
 Author with **visual-kit component classes only** (the composite injects the shared `<style>`;
@@ -114,6 +143,18 @@ same decimal places** (7 cards when CVR is present; CVR is conditional — see b
 | 6 | **Completion** | **1 decimal** + `%` | `86.2%` |
 | 7 | **ROI(1)** | **0 decimals** + `%` | `160%` |
 
+**Delta pill — arrow + absolute + relative (mirror CE Health §2 exactly).** Each card's
+pill is **not** `Δ <x>`. Author it as a direction **arrow** (`↑` increase / `↓` decrease —
+plain unicode arrows, never "Δ"), then the **absolute change**, then `· <relative %>`:
+- **Money / count** (Revenue, Orders, AOV): `↓ −$135K · −32%` — absolute = `post − pre`
+  formatted like the metric (money / comma-integer), relative = the `%` change.
+- **Rate** (Site CVR, Take Rate, Completion, ROI(1)): `↓ −0.63pp · −31%` — absolute = the
+  pp change (`post − pre` in pp), relative = `pp / pre × 100`.
+- **Colour by direction:** `delta-pos` (green) when the metric increased, `delta-neg`
+  (red) when it decreased, `delta-flat` for a near-flat move. The arrow direction follows
+  the sign, so `↓` + red is unambiguous. Near-flat → drop the arrow (or a `·` dash) +
+  `delta-flat`. **Δ stays only in table column headers; the vitals cards use this pill.**
+
 Values are CE Health's vitals (pre → post + delta badge). Use labels **"Site CVR"** (the Mixpanel
 funnel conversion — canonical name, distinct from perf-audit's "Paid CVR"), **"Completion"** (not
 "CR") and **"ROI(1)"** exactly, matching CE Health's decimals (ROI `160%` not `159.7%`; AOV `$335`;
@@ -129,10 +170,12 @@ size, never overshooting the tab. (A 6-card set, CVR absent, fills a single row.
   <div class="metric-card">
     <div class="label">Revenue</div>
     <div class="values"><span class="pre">$421.9K</span><span class="post">$286.5K</span></div>
-    <div class="delta delta-neg">Δ −32%</div>
+    <div class="delta delta-neg">↓ −$135K · −32%</div>
   </div>
   <!-- then Orders · Site CVR · AOV · Take Rate · Completion · ROI(1), same shape, same order as CE Health §2
-       (Site CVR inserted 3rd); delta-neg / delta-pos / delta-flat by direction. No inline grid style. -->
+       (Site CVR inserted 3rd); delta-neg / delta-pos / delta-flat by direction. No inline grid style.
+       Pill = arrow + absolute + relative (NOT "Δ"): money/count cards e.g. ↓ −$135K · −32% (abs = post−pre);
+       rate cards e.g. Site CVR ↓ −0.63pp · −31% (abs = pp change, rel = pp / pre). -->
 </div>
 ```
 Omit this row if CE Health didn't run.
@@ -187,28 +230,54 @@ move (e.g. "Revenue −28%, traffic-led"). No clever metaphors or themed phrasin
 </div>
 ```
 
-### 5. What we set out to check — *did the RCA answer it?* (only if `user_context.md` is present)
-A short `analysis-block` that closes the loop on the analyst's intent. Restate each item the
-analyst gave — **focus / hypothesis priors / known events** — and for each, a one-line verdict on
-whether the RCA confirmed, refuted, or couldn't address it, with a `↗` to where. Omit this block
-entirely when there is no `user_context.md`. Pure synthesis — report what the tabs concluded
-about the prior, never adjudicate beyond that.
+### 5. Driver table — *the revenue decomposition* (straight after the callout)
+
+**First, emit the driver-waterfall placeholder.** On its own line, immediately after the
+headline callout and **directly above** the driver table below, output exactly:
+
+```
+<!--SUMMARY_SHAPLEY_WATERFALL-->
+```
+
+The composer replaces it with the **exact** §7 Revenue-Waterfall chart from CE Health (the
+corrected 6-factor decomposition), so the front page shows the visual *then* the table. **Do
+NOT author a chart yourself** — no Plotly, no re-drawn waterfall (the §7 chart is a Query-1
+computation you don't have; re-authoring risks a different decomposition). Just emit the
+placeholder; it renders nothing if the chart is unavailable (graceful). The table follows it.
+
+One scannable `analysis-block` table, **one row per material driver** — placed **immediately after
+the headline callout** (just under the waterfall placeholder) so a reader gets the revenue
+decomposition (and what the RCA found for each driver) before the deeper per-tab digests:
+
+| Column | Content |
+|---|---|
+| Driver | the factor (Site CVR, LP Users, AOV, Completion, Take Rate, …) — canonical names |
+| Δ Contribution | Shapley magnitude + share of the revenue move ($ and %), from CE Health |
+| Dir | ▲ / ▼ |
+| What the RCA found | **one line** — the mechanism the deep dive localized |
+| ↗ | `#cehealth-shapley` for the full decomposition, plus the CVR-RCA / perf-audit block that localized it |
 
 ```html
-<div class="analysis-block" id="summary-user-context">
-  <div class="block-title">What we set out to check</div>
+<div class="analysis-block" id="summary-drivers">
+  <div class="block-title">Drivers — the revenue decomposition</div>
   <table>
-    <thead><tr><th>Analyst's input</th><th>Verdict</th><th>↗</th></tr></thead>
+    <thead><tr><th>Driver</th><th class="num">Δ Contribution</th><th>Dir</th><th>What the RCA found</th><th>↗</th></tr></thead>
     <tbody>
-      <tr>
-        <td>Prior: CVR was the driver</td>
-        <td class="pos">Confirmed — CVR is the #1 Shapley driver</td>
-        <td><a class="ref-link" href="#cehealth-shapley">↗</a></td>
+      <tr class="highlight-row">
+        <td><strong>Site CVR</strong></td>
+        <td class="num"><span class="delta delta-pos">+$8.5K · 38%</span></td>
+        <td>▲</td>
+        <td>S2C+C2O step-up, concentrated on <top-TGID> — a real rate gain, not a mix shift</td>
+        <td><a class="ref-link" href="#cehealth-shapley">↗</a> <a class="ref-link" href="#block-shapley">↗</a></td>
       </tr>
+      <!-- one row per material driver; collapse the rest into a single "others net negligible" line if useful -->
     </tbody>
   </table>
 </div>
 ```
+Show only material drivers. Render the Δ-contribution as a `.delta` pill (`.delta-pos`/`.delta-neg`)
+for consistency; use `.highlight-row` for the top driver. The full Shapley waterfall and per-driver
+detail stay in their tabs. **No charts** in the Summary (reference the tabs' charts via `↗`).
 
 ### 6. Per-tab conclusion digests — *the comprehensive core*
 **One `analysis-block` per tab that ran**, carrying that tab's conclusions/callouts **in full** —
@@ -268,40 +337,7 @@ One row per conclusion: bold aspect, a single tight clause, the number as a pill
 `.tag` chip when Slack/user-sourced. Same shape for the CE Health and Paid Performance Audit
 digests (their own aspect labels + `#cehealth-*` / `#perfaudit-*` anchors).
 
-### 7. Driver table — *the revenue decomposition*
-One scannable `analysis-block` table, **one row per material driver**:
-
-| Column | Content |
-|---|---|
-| Driver | the factor (Site CVR, LP Users, AOV, Completion, Take Rate, …) — canonical names |
-| Δ Contribution | Shapley magnitude + share of the revenue move ($ and %), from CE Health |
-| Dir | ▲ / ▼ |
-| What the RCA found | **one line** — the mechanism the deep dive localized |
-| ↗ | `#cehealth-shapley` for the full decomposition, plus the CVR-RCA / perf-audit block that localized it |
-
-```html
-<div class="analysis-block" id="summary-drivers">
-  <div class="block-title">Drivers — the revenue decomposition</div>
-  <table>
-    <thead><tr><th>Driver</th><th class="num">Δ Contribution</th><th>Dir</th><th>What the RCA found</th><th>↗</th></tr></thead>
-    <tbody>
-      <tr class="highlight-row">
-        <td><strong>Site CVR</strong></td>
-        <td class="num"><span class="delta delta-pos">+$8.5K · 38%</span></td>
-        <td>▲</td>
-        <td>S2C+C2O step-up, concentrated on <top-TGID> — a real rate gain, not a mix shift</td>
-        <td><a class="ref-link" href="#cehealth-shapley">↗</a> <a class="ref-link" href="#block-shapley">↗</a></td>
-      </tr>
-      <!-- one row per material driver; collapse the rest into a single "others net negligible" line if useful -->
-    </tbody>
-  </table>
-</div>
-```
-Show only material drivers. Render the Δ-contribution as a `.delta` pill (`.delta-pos`/`.delta-neg`)
-for consistency; use `.highlight-row` for the top driver. The full Shapley waterfall and per-driver
-detail stay in their tabs. **No charts** in the Summary (reference the tabs' charts via `↗`).
-
-### 8. Recommended next steps — *the consolidated actions*
+### 7. Recommended next steps — *the consolidated actions*
 Render each recommended action as an **`.action-card`** — the same component CVR-RCA uses for its
 Section-2 actions — **deduped across CVR-RCA's action cards and perf-audit's Recommended Actions**.
 Order by priority. Each card: a `.priority-badge` (`.p1`/`.p2`/`.p3` by impact), a `.dri-badge`
@@ -337,6 +373,29 @@ stay in their tabs. Omit this block if no tab produced actions.
       <li>Identify the checkout / pricing release behind C2O +4.95pp and guard against regression.</li>
     </ul>
   </div>
+</div>
+```
+
+### 8. What we set out to check — *did the RCA answer it?* (only if `user_context.md` is present)
+The **last table before the cross-reference** — it closes the loop on the analyst's intent. Restate
+each item the analyst gave — **focus / hypothesis priors / known events** — and for each, a one-line
+verdict on whether the RCA confirmed, refuted, or couldn't address it, with a `↗` to where. Omit
+this block entirely when there is no `user_context.md`. Pure synthesis — report what the tabs
+concluded about the prior, never adjudicate beyond that.
+
+```html
+<div class="analysis-block" id="summary-user-context">
+  <div class="block-title">What we set out to check</div>
+  <table>
+    <thead><tr><th>Analyst's input</th><th>Verdict</th><th>↗</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Prior: CVR was the driver</td>
+        <td class="pos">Confirmed — CVR is the #1 Shapley driver</td>
+        <td><a class="ref-link" href="#cehealth-shapley">↗</a></td>
+      </tr>
+    </tbody>
+  </table>
 </div>
 ```
 
@@ -390,7 +449,8 @@ The composite assembles tabs with these anchors:
 
 | Tab | Anchors |
 |---|---|
-| CE Health | **Fixed, deterministic section ids** (use exactly): `#cehealth-vitals`, `#cehealth-channels`, `#cehealth-funnel`, `#cehealth-l12m`, `#cehealth-tgids`, `#cehealth-shapley`, `#cehealth-leadtime`, `#cehealth-landing`, `#cehealth-countries`, `#cehealth-history`. Prefer the section anchor. |
+| CE Context | **Fixed section ids** (use exactly): `#cecontext-about`, `#cecontext-timeline`, `#cecontext-pastrca` (recent past RCAs), `#cecontext-constraints` (known-constraint buckets), `#cecontext-failuremodes`, `#cecontext-links`, `#cecontext-slack`. The orientation layer — corroborate analyst intent / past-RCA findings / known constraints / Slack here. |
+| CE Health | **Fixed, deterministic section ids** (use exactly): `#cehealth-vitals`, `#cehealth-channels`, `#cehealth-funnel`, `#cehealth-l12m`, `#cehealth-tgids`, `#cehealth-shapley`, `#cehealth-leadtime`, `#cehealth-landing-pages`, `#cehealth-countries`. Prefer the section anchor. (Historical/user/Slack context moved to the CE Context tab — use `#cecontext-*` for those.) |
 | CVR RCA | `block-*` / `chart-*` prefix — ids vary by investigation (e.g. `#block-cascade`, `#block-shapley`, `#block-geo`, `#block-experience`, `#block-hypotheses`, `#block-ruled-out`, `#chart-daily-c2o`); `#tab-cvr-rca` is the tab top. |
 | Paid Performance Audit | `perfaudit-*` prefix (e.g. `#perfaudit-executive-summary`, `#perfaudit-channel-breakdown`, `#perfaudit-coverage-matchmaking`, `#perfaudit-money-on-the-table`, `#perfaudit-red-flags-summary`, `#perfaudit-recommended-actions`) |
 | Summary (you) | `summary-*` — your own block ids |

@@ -547,6 +547,164 @@ def fetch_monthly_cvr(ce_id, months=36):
     return [{"month": r["month"], "cvr": r.get("cvr")} for r in results]
 
 
+def _shape_monthly_matrix(rows, months=12):
+    # type: (List[Dict[str, Any]], int) -> Dict[str, Any]
+    """Reshape (month, dim, revenue) rows into a top-N × month matrix.
+
+    Drops the partial trailing month so exactly `months` complete months remain
+    (mirrors render_ce_health's partial-trailing-month guard), keeps the top-10
+    dimensions by total revenue across the kept window, and returns:
+        {"months": ["2025-07", ..., "2026-06"],
+         "rows": [{"dim": <name>, "revenue": [v0, ..., v11], "total": <sum>}, ...]}
+    Each row's revenue list is positionally aligned to `months` (0 where absent).
+    """
+    if not rows:
+        return {"months": [], "rows": []}
+
+    # All months present, ascending; drop the partial trailing (current) month so
+    # the last `months` complete months remain.
+    all_months = sorted({str(r["month"]) for r in rows if r.get("month")})
+    cur_month = date.today().strftime("%Y-%m")
+    if all_months and all_months[-1] == cur_month:
+        all_months = all_months[:-1]
+    keep_months = all_months[-months:]
+    keep_set = set(keep_months)
+
+    # Sum revenue per (dim, month) over the kept window only.
+    by_dim = {}  # type: Dict[str, Dict[str, float]]
+    for r in rows:
+        mo = str(r.get("month") or "")
+        if mo not in keep_set:
+            continue
+        dim = r.get("dim") or "(unknown)"
+        rev = r.get("revenue") or 0
+        by_dim.setdefault(dim, {})[mo] = by_dim.get(dim, {}).get(mo, 0) + rev
+
+    shaped = []
+    for dim, month_rev in by_dim.items():
+        series = [round(month_rev.get(mo, 0) or 0, 2) for mo in keep_months]
+        shaped.append({"dim": dim, "revenue": series, "total": round(sum(series), 2)})
+
+    shaped.sort(key=lambda r: r["total"], reverse=True)
+    return {"months": keep_months, "rows": shaped[:10]}
+
+
+def fetch_monthly_revenue_by_channel(ce_id):
+    # type: (int) -> Dict[str, Any]
+    """Last 12 complete months of fct_orders revenue, grouped by month × channel.
+
+    Reuses the channel-classification CASE from _fetch_channel_window_v2 verbatim
+    and the same revenue source (fct_orders.amount_revenue_usd). Returns a
+    top-10-by-total matrix via _shape_monthly_matrix.
+    """
+    query = """
+    WITH classified AS (
+        SELECT
+            SUBSTR(CAST(DATE(created_at) AS STRING), 1, 7) AS month,
+            CASE
+                WHEN channel_name = 'Google Ads'
+                    AND REGEXP_CONTAINS(campaign_name, CONCAT('cid', CAST(combined_entity_id AS STRING)))
+                    THEN 'Google Search'
+                WHEN channel_name = 'Google Ads'
+                    AND campaign_name LIKE '1 - %%'
+                    THEN 'Bing'
+                WHEN channel_name = 'Bing Ads'
+                    AND REGEXP_CONTAINS(campaign_name, CONCAT('cid', CAST(combined_entity_id AS STRING)))
+                    THEN 'Bing'
+                WHEN channel_name = 'Google Ads'
+                    AND REGEXP_CONTAINS(LOWER(COALESCE(campaign_name, '')), r'pmax|performance.max')
+                    THEN 'Google PMax'
+                WHEN channel_name = 'Google Ads'
+                    THEN 'Google Cross-sell'
+                WHEN channel_name = 'Bing Ads'
+                    THEN 'Bing Cross-sell'
+                WHEN channel_name = 'Things to Do (Ads)'
+                    THEN 'TTD (Paid)'
+                WHEN channel_name = 'Things to Do (Organic)'
+                    THEN 'TTD (Organic)'
+                WHEN channel_name = 'Confirmation Page Recommendations'
+                    THEN 'CPR'
+                WHEN channel_name = 'Organic Search'
+                    THEN 'Organic'
+                WHEN channel_grouping = 'Direct (App)'
+                    THEN 'Direct (App)'
+                WHEN channel_grouping = 'Direct'
+                    THEN 'Direct'
+                WHEN channel_grouping = 'Affiliates'
+                    THEN 'Affiliates'
+                WHEN channel_grouping = 'Email'
+                    THEN 'Email'
+                WHEN channel_grouping = 'Referral'
+                    THEN 'Referral'
+                ELSE 'Other'
+            END AS channel,
+            amount_revenue_usd AS revenue
+        FROM `{project}.{dataset}.fct_orders`
+        WHERE combined_entity_id = '{ce_id}'
+            AND DATE(created_at) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 13 MONTH)
+            AND DATE(created_at) <= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+            AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+            AND user_type = 'Customer'
+    )
+    SELECT
+        month,
+        channel AS dim,
+        ROUND(SUM(revenue), 2) AS revenue
+    FROM classified
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """.format(
+        project=PROJECT_ID,
+        dataset=DATASET,
+        ce_id=ce_id,
+    )
+
+    rows = run_bq_query(query)
+    if not rows:
+        logger.info(
+            "fetch_monthly_revenue_by_channel: no rows for ce_id=%s", ce_id,
+        )
+        return {"months": [], "rows": []}
+    return _shape_monthly_matrix(rows)
+
+
+def fetch_monthly_revenue_by_landing_page(ce_id):
+    # type: (int) -> Dict[str, Any]
+    """Last 12 complete months of fct_orders revenue, grouped by month × landing_page.
+
+    Same revenue source (fct_orders.amount_revenue_usd) and filters used by the
+    landing-page snapshot. Returns a top-10-by-total matrix via _shape_monthly_matrix.
+    """
+    query = """
+    SELECT
+        SUBSTR(CAST(DATE(created_at) AS STRING), 1, 7) AS month,
+        landing_page AS dim,
+        ROUND(SUM(amount_revenue_usd), 2) AS revenue
+    FROM `{project}.{dataset}.fct_orders`
+    WHERE combined_entity_id = '{ce_id}'
+        AND DATE(created_at) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 13 MONTH)
+        AND DATE(created_at) <= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+        AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
+        AND user_type = 'Customer'
+        AND landing_page IS NOT NULL
+        AND landing_page != ''
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """.format(
+        project=PROJECT_ID,
+        dataset=DATASET,
+        ce_id=ce_id,
+    )
+
+    rows = run_bq_query(query)
+    if not rows:
+        logger.info(
+            "fetch_monthly_revenue_by_landing_page: no rows for ce_id=%s", ce_id,
+        )
+        return {"months": [], "rows": []}
+    return _shape_monthly_matrix(rows)
+
+
 def _fetch_channel_window_v2(ce_id, start, end):
     # type: (int, date, date) -> List[Dict[str, Any]]
     """Revenue (fct_orders) + paid metrics (ads_campaign_stats + pmax_asset_stats).
@@ -837,13 +995,17 @@ def _fetch_vendor_window(ce_id, start, end):
     return rows
 
 
-def fetch_vendor_breakdown(ce_id, cur, pri):
-    # type: (int, tuple, tuple) -> Dict[str, List[Dict[str, Any]]]
-    """Vendor breakdown for the supply/sales landscape: current + prior windows
-    (prior enables the MoM revenue delta). cur/pri are (start, end) date tuples."""
+def fetch_vendor_breakdown(ce_id, cur, pri, ly_cur=None):
+    # type: (int, tuple, tuple, Optional[tuple]) -> Dict[str, List[Dict[str, Any]]]
+    """Vendor breakdown for the supply/sales landscape: current + prior + LY windows.
+    `prior` enables the MoM revenue delta; `ly_cur` (LY same-period) enables the
+    LY-share comparison (how each vendor's revenue share moved YoY). cur/pri/ly_cur
+    are (start, end) date tuples. ly_cur is optional/back-compatible: when omitted,
+    the 'ly' key is an empty list and the renderer simply skips the LY-share columns."""
     return {
         "current": _fetch_vendor_window(ce_id, cur[0], cur[1]),
         "prior": _fetch_vendor_window(ce_id, pri[0], pri[1]),
+        "ly": _fetch_vendor_window(ce_id, ly_cur[0], ly_cur[1]) if ly_cur else [],
     }
 
 
@@ -853,7 +1015,7 @@ def fetch_vendor_breakdown(ce_id, cur, pri):
 
 def _fetch_funnel_by_dim(ce_id, dim_col, start, end, top_n=12):
     # type: (int, str, date, date, int) -> List[Dict[str, Any]]
-    """Per-dimension funnel (LP2S/S2C/C2O/CVR) from the page-funnel table, one
+    """Per-dimension funnel (LP2S/S2C/C2O/S2O/CVR) from the page-funnel table, one
     window. Per-user MAX-flag dedup (mirrors cvr-rca q2 + fetch_lp_funnel grain);
     no page-type whitelist so cuts stay comparable to the LP cut already in §4.
     `dim_col` is a real column (channel_name | language)."""
@@ -877,6 +1039,7 @@ def _fetch_funnel_by_dim(ce_id, dim_col, start, end, top_n=12):
         ROUND(SAFE_DIVIDE(SUM(sel), COUNT(*)) * 100, 1) AS lp2s,
         ROUND(SAFE_DIVIDE(SUM(chk), NULLIF(SUM(sel), 0)) * 100, 1) AS s2c,
         ROUND(SAFE_DIVIDE(SUM(ord), NULLIF(SUM(chk), 0)) * 100, 1) AS c2o,
+        ROUND(SAFE_DIVIDE(SUM(ord), NULLIF(SUM(sel), 0)) * 100, 1) AS s2o,
         ROUND(SAFE_DIVIDE(SUM(ord), COUNT(*)) * 100, 2) AS cvr
     FROM base
     GROUP BY dim_value
@@ -1841,6 +2004,8 @@ def fetch_lp_funnel(ce_id, tw_start, tw_end, ly_start=None, ly_end=None):
                   COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_select_page_viewed THEN user_id END)) * 100 AS l4w_s2c,
       SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_order_completed THEN user_id END),
                   COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_checkout_started THEN user_id END)) * 100 AS l4w_c2o,
+      SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_order_completed THEN user_id END),
+                  COUNT(DISTINCT CASE WHEN event_date BETWEEN '{tw_s}' AND '{tw_e}' AND has_select_page_viewed THEN user_id END)) * 100 AS l4w_s2o,
       COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' THEN user_id END) AS ly_users,
       SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' AND has_select_page_viewed THEN user_id END),
                   COUNT(DISTINCT CASE WHEN event_date BETWEEN '{ly_s}' AND '{ly_e}' THEN user_id END)) * 100 AS ly_lp2s,
@@ -1872,6 +2037,7 @@ def fetch_lp_funnel(ce_id, tw_start, tw_end, ly_start=None, ly_end=None):
             "l4w_lp2s": float(r.get("l4w_lp2s") or 0),
             "l4w_s2c": float(r.get("l4w_s2c") or 0),
             "l4w_c2o": float(r.get("l4w_c2o") or 0),
+            "l4w_s2o": float(r.get("l4w_s2o") or 0),
             "ly_users": int(r.get("ly_users") or 0),
             "ly_lp2s": float(r.get("ly_lp2s") or 0),
             "ly_s2c": float(r.get("ly_s2c") or 0),

@@ -187,7 +187,7 @@ def render_table2(t2):
     rows = [
         "**Table 2: Paid Performance (Google Search + PMax + Bing)**",
         "",
-        "| Period | Paid Rev | Paid ROI | RPC | CPC | Ad Spend | Clicks | CTR | Paid CVR | CM1 | Paid TR | Paid CR |",
+        "| Period | Paid Rev | Paid ROI | RPC | CPC | Ad Spend | Clicks | CTR | CVR | CM1 | Paid TR | Paid CR |",
         "|--------|----------|----------|-----|-----|----------|--------|-----|-----|-----|---------|---------|",
     ]
     for label, d in [("L4W", l), ("P4W", p), ("LY", y)]:
@@ -365,7 +365,7 @@ def render_cohort_table(cohorts):
     total_cm1 = sum(_g(r, "cm1", 0) for r in tw)
 
     rows = [
-        "| Cohort | Window | Spend | CPC | Clicks | CTR | Conv | CM1 | Rev | AOV | Paid CVR | ROI | RPC | TR | CR | SIS | CM1 % |",
+        "| Cohort | Window | Spend | CPC | Clicks | CTR | Conv | CM1 | Rev | AOV | CVR | ROI | RPC | TR | CR | SIS | CM1 % |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
@@ -444,13 +444,58 @@ _BUDGET_HEADER = [
 
 def render_budget_table(budget):
     # type: (List) -> str
-    """Active campaigns only (spend > $0) for main body."""
+    """Summary by bidding type (Individual vs Portfolio) for main body."""
     if not budget:
         return "*Budget data unavailable.*"
     active = [b for b in budget if _g(b, "spend", 0) > 0]
     if not active:
         return "*No active campaigns in L4W.*"
-    return "\n".join(_BUDGET_HEADER + _budget_rows(active))
+
+    types = {}  # type: Dict[str, Dict]
+    for b in active:
+        ctype = b.get("campaign_type") or "Unknown"
+        if ctype not in types:
+            types[ctype] = {"count": 0, "spend": 0, "cm1": 0, "clicks": 0,
+                            "conv": 0, "sis_num": 0, "sis_den": 0,
+                            "rank_num": 0, "rank_den": 0, "budget_limited": []}
+        t = types[ctype]
+        t["count"] += 1
+        sp = _g(b, "spend", 0)
+        t["spend"] += sp
+        t["cm1"] += _g(b, "cm1", 0)
+        t["clicks"] += _g(b, "clicks", 0)
+        t["conv"] += _g(b, "conversions", 0)
+        if _g(b, "sis") is not None:
+            t["sis_num"] += _g(b, "sis", 0) * sp
+            t["sis_den"] += sp
+        if _g(b, "rank_lost_is") is not None:
+            t["rank_num"] += _g(b, "rank_lost_is", 0) * sp
+            t["rank_den"] += sp
+        if _g(b, "budget_lost_is", 0) > 10:
+            name = (b.get("campaign_name") or "")[:30]
+            t["budget_limited"].append(f"{name} {_g(b,'budget_lost_is'):.0f}%")
+
+    rows = [
+        "**Bidding Summary**",
+        "",
+        "| Bidding Type | Campaigns | L4W Spend | ROI | CVR | Avg SIS | Avg Rank Lost | Budget Limited |",
+        "|-------------|-----------|-----------|-----|-----|---------|---------------|----------------|",
+    ]
+    for ctype in ["Individual", "Portfolio", "Unknown"]:
+        t = types.get(ctype)
+        if not t:
+            continue
+        sp = t["spend"]
+        roi = t["cm1"] / sp * 100 if sp else None
+        cvr = t["conv"] / t["clicks"] * 100 if t["clicks"] else None
+        avg_sis = t["sis_num"] / t["sis_den"] if t["sis_den"] else None
+        avg_rank = t["rank_num"] / t["rank_den"] if t["rank_den"] else None
+        bl = ", ".join(t["budget_limited"][:2]) if t["budget_limited"] else "No"
+        rows.append(
+            f"| {ctype} | {t['count']} | {fm(sp)} | {fp1(roi)} | {fp1(cvr)} | "
+            f"{fp1(avg_sis)} | {fp1(avg_rank)} | {bl} |"
+        )
+    return "\n".join(rows)
 
 
 def render_budget_table_full(budget):
@@ -493,8 +538,8 @@ def render_geo_table(geo, customers, customers_ly=None):
                 cust_ly_map[cc] = _g(r, "orders", 0) / cust_ly_total * 100
 
     rows = [
-        "| Country | Ad Clicks (\u0394 LY) | Click Share (\u0394 LY) | Customer Share (\u0394 LY) | Gap | CPC (\u0394 LY) | Conv (\u0394 LY) |",
-        "|---------|------------------|-------------------|------------------------|-----|------------|-------------|",
+        "| Country | Ad Clicks (\u0394 LY) | Click Share (\u0394 LY) | Customer Share (\u0394 LY) | Gap | CPC (\u0394 LY) |",
+        "|---------|------------------|-------------------|------------------------|-----|------------|",
     ]
 
     for r in l4w:
@@ -524,15 +569,12 @@ def render_geo_table(geo, customers, customers_ly=None):
         cpc_str = fd(_g(r, "cpc"))
         if ly_r and _g(ly_r, "cpc") is not None:
             cpc_str += f" ({dp(_g(r,'cpc'), _g(ly_r,'cpc'))})"
-        conv_str = fi(_g(r, "conversions"))
-        if ly_r and _g(ly_r, "conversions") is not None:
-            conv_str += f" ({dp(_g(r,'conversions'), _g(ly_r,'conversions'))})"
 
         rows.append(
             f"| {country} | {click_str} | {share_str} | "
             f"{cust_str} | "
             f"{f'{gap:+.1f}pp' if gap is not None else '\u2014'} | "
-            f"{cpc_str} | {conv_str} |"
+            f"{cpc_str} |"
         )
     return "\n".join(rows)
 
@@ -541,26 +583,20 @@ def render_geo_table(geo, customers, customers_ly=None):
 # MONEY ON THE TABLE (Section 4c-iii)
 # ============================================================================
 
-def render_money_on_table(cohorts):
-    # type: (Dict) -> str
-    tw = cohorts.get("tw") or []
-    if not tw:
-        return "*Money on the Table data unavailable.*"
+def _render_cohort_opportunity(c, total_cm1):
+    # type: (Dict, float) -> Optional[List[str]]
+    """Render money-on-table for a single cohort. Returns lines or None if no SIS data."""
+    cm1_pct = _g(c, "cm1", 0) / total_cm1 * 100 if total_cm1 else 0
+    cohort_name = _cohort_display(c.get("cohort", "Unknown"))
+    sis = _g(c, "avg_sis")
+    rank_lost = _g(c, "avg_rank_lost", 0) * 100
+    budget_lost = _g(c, "avg_budget_lost", 0) * 100
+    impressions = _g(c, "impressions", 0)
+    clicks = _g(c, "clicks", 0)
+    rpc = _g(c, "rpc")
 
-    largest = max(tw, key=lambda c: _g(c, "cm1", 0))
-    total_cm1 = sum(_g(c, "cm1", 0) for c in tw)
-    cm1_pct = _g(largest, "cm1", 0) / total_cm1 * 100 if total_cm1 else 0
-
-    cohort_name = _cohort_display(largest.get("cohort", "Unknown"))
-    sis = _g(largest, "avg_sis")
-    rank_lost = _g(largest, "avg_rank_lost", 0) * 100
-    budget_lost = _g(largest, "avg_budget_lost", 0) * 100
-    impressions = _g(largest, "impressions", 0)
-    clicks = _g(largest, "clicks", 0)
-    rpc = _g(largest, "rpc")
-
-    if not sis or not impressions:
-        return "*Money on the Table: SIS data unavailable.*"
+    if not sis or not impressions or sis >= 50:
+        return None
 
     eligible = impressions / (sis / 100)
     rank_lost_searches = eligible * (rank_lost / 100) if rank_lost else 0
@@ -569,7 +605,6 @@ def render_money_on_table(cohorts):
     gap_to_50 = max(50 - sis_int, 1)
 
     def scenario(pp):
-        # type: (int) -> Tuple[int, int]
         add_impr = eligible * pp / 100
         add_cl = int(round(add_impr * ctr_raw))
         add_rev = int(round(add_cl * rpc)) if rpc else 0
@@ -582,7 +617,7 @@ def render_money_on_table(cohorts):
     constraint = "budget" if budget_lost > rank_lost else "rank"
     other = "rank" if constraint == "budget" else "budget"
 
-    lines = [
+    return [
         f"**{cohort_name} ({cm1_pct:.1f}% of Google Search CM1):**",
         f"- Current SIS: {sis:.1f}% | Rank-Lost IS: {rank_lost:.1f}% | Budget-Lost IS: {budget_lost:.0f}%",
         f"- Eligible searches (L4W): ~{fi(eligible)} | We show in: ~{fi(impressions)}",
@@ -593,10 +628,224 @@ def render_money_on_table(cohorts):
         f"| +10pp SIS ({sis_int}%\u2192{sis_int+10}%) | +10pp | +{fi(cl_10)} | **+${fi(rev_10)}/L4W** |",
         f"| +{gap_to_50}pp SIS ({sis_int}%\u219250%) | +{gap_to_50}pp | +{fi(cl_50)} | **+${fi(rev_50)}/L4W** |",
         "",
-        f"At current RPC ({fd(rpc)}), every 1pp of SIS gained = ~{fi(cl_1)} clicks = ~${fi(rev_1)}/L4W.",
-        f"The constraint is **{constraint}, not {other}** ({budget_lost:.0f}% budget-lost).",
+        f"Every 1pp SIS = ~{fi(cl_1)} clicks = ~${fi(rev_1)}/L4W at current RPC ({fd(rpc)}).",
+        f"Constraint: **{constraint}** ({budget_lost:.0f}% budget-lost).",
     ]
+
+
+def render_money_on_table(cohorts):
+    # type: (Dict) -> str
+    tw = cohorts.get("tw") or []
+    if not tw:
+        return "*Money on the Table data unavailable.*"
+
+    total_cm1 = sum(_g(c, "cm1", 0) for c in tw)
+
+    # Rank by opportunity: highest revenue potential = lowest SIS × highest RPC × most spend
+    # Filter to cohorts with SIS data and meaningful spend (>$500)
+    candidates = [c for c in tw if _g(c, "avg_sis") and _g(c, "spend", 0) > 500]
+    if not candidates:
+        return "*Money on the Table: SIS data unavailable.*"
+
+    # Sort by opportunity: rank-lost % × RPC × eligible searches (descending)
+    def opportunity_score(c):
+        sis = _g(c, "avg_sis", 0)
+        rpc = _g(c, "rpc", 0) or 0
+        impr = _g(c, "impressions", 0)
+        eligible = impr / (sis / 100) if sis else 0
+        rank_lost_pct = _g(c, "avg_rank_lost", 0)
+        return eligible * rank_lost_pct * rpc
+
+    ranked = sorted(candidates, key=opportunity_score, reverse=True)
+
+    lines = []
+    for c in ranked[:3]:
+        section = _render_cohort_opportunity(c, total_cm1)
+        if section:
+            lines.extend(section)
+            lines.append("")
+
+    return "\n".join(lines) if lines else "*Money on the Table: no cohorts with SIS < 50%.*"
+
+
+# ============================================================================
+# PAID VALUE SHAPLEY (Section 4 — driver attribution)
+# ============================================================================
+
+def _signed_money(v):
+    # type: (Optional[float]) -> str
+    if v is None:
+        return '—'
+    return f"+{fm(v)}" if v >= 0 else fm(v)
+
+
+def _shapley_cells(decomp):
+    # type: (Dict) -> Tuple[Dict[str, Tuple[str, str]], bool]
+    """Per-factor (contribution, share) cells for one comparison + the net-flat flag.
+
+    When the net change is near zero but drivers are large and offsetting (e.g.
+    clicks down cancelled by avg CM1 up), "share of Δ" explodes and is meaningless —
+    so the share switches to "share of gross movement" (contribution ÷ Σ|contrib|)
+    and net_flat is returned True so the caller can label the column accordingly.
+    """
+    total = decomp.get("total_delta") or 0.0
+    names = ["clicks", "cvr", "avg_cm1"]
+    contribs = {nm: (decomp.get(nm) or {}).get("contribution") for nm in names}
+    gross = sum(abs(c) for c in contribs.values() if c is not None) or 1.0
+    net_flat = abs(total) < 0.30 * gross
+    out = {}
+    for nm in names:
+        c = contribs.get(nm)
+        if c is None:
+            out[nm] = ('—', '—')
+        elif net_flat:
+            out[nm] = (_signed_money(c), f"{c / gross * 100:+.0f}%")
+        else:
+            share = (decomp.get(nm) or {}).get("share_pct")
+            out[nm] = (_signed_money(c), f"{share:+.0f}%" if share is not None else '—')
+    return out, net_flat
+
+
+def render_paid_shapley(shapley):
+    # type: (Optional[Dict]) -> str
+    """Render the paid-value Shapley decomposition (Clicks x CVR x Avg CM1)."""
+    if not shapley:
+        return "*Paid value decomposition unavailable.*"
+    w = shapley.get("windows") or {}
+    cur = w.get("l4w") or {}
+    pri = w.get("p4w") or {}
+    lyw = w.get("ly") or {}
+    if not cur.get("cm1") and not pri.get("cm1") and not lyw.get("cm1"):
+        return "*Paid value decomposition: no paid CM1 in any window.*"
+
+    mom_cells, mom_flat = _shapley_cells(shapley.get("mom") or {})
+    yoy_cells, yoy_flat = _shapley_cells(shapley.get("yoy") or {})
+    mom_hdr = "MoM Share*" if mom_flat else "MoM Share of Δ"
+    yoy_hdr = "YoY Share*" if yoy_flat else "YoY Share of Δ"
+
+    factors = [
+        ("clicks", "Clicks (volume)", lambda win: fi(win.get("clicks"))),
+        ("cvr", "CVR (conv/click)", lambda win: fp1((win.get("cvr") or 0) * 100)),
+        ("avg_cm1", "Avg CM1 (CM1/conv)", lambda win: fd(win.get("avg_cm1"))),
+    ]
+
+    lines = [
+        f"Paid CM1 (Google Search + PMax + Bing): "
+        f"MoM {da(cur.get('cm1'), pri.get('cm1'))} ({fm(pri.get('cm1'))} → {fm(cur.get('cm1'))}) · "
+        f"YoY {da(cur.get('cm1'), lyw.get('cm1'))} ({fm(lyw.get('cm1'))} → {fm(cur.get('cm1'))}).",
+        "",
+        f"| Factor | L4W | P4W | LY | MoM Contrib | {mom_hdr} | YoY Contrib | {yoy_hdr} |",
+        "|--------|-----|-----|----|-------------|-----------|-------------|----------------|",
+    ]
+    for nm, disp, fmt in factors:
+        mc, ms = mom_cells.get(nm, ('—', '—'))
+        yc, ys = yoy_cells.get(nm, ('—', '—'))
+        lines.append(
+            f"| {disp} | {fmt(cur)} | {fmt(pri)} | {fmt(lyw)} | {mc} | {ms} | {yc} | {ys} |"
+        )
+    lines.append(
+        f"| **Paid CM1** | {fm(cur.get('cm1'))} | {fm(pri.get('cm1'))} | {fm(lyw.get('cm1'))} | "
+        f"**{da(cur.get('cm1'), pri.get('cm1'))}** | — | **{da(cur.get('cm1'), lyw.get('cm1'))}** | — |"
+    )
+    lines.append("")
+    note = (
+        "*Shapley decomposition of paid CM1 = Clicks × CVR × Avg CM1; contributions sum to the total Δ. "
+        "Avg CM1 (CM1/conv) absorbs AOV × TR × CR — if it leads, value-per-conversion (take rate / mix) moved, not volume.*"
+    )
+    if mom_flat or yoy_flat:
+        note += (
+            "\n*\\* Net ≈ flat block (large offsetting drivers): Share shows share of gross movement "
+            "(÷ Σ|contributions|), not share of Δ.*"
+        )
+    lines.append(note)
     return "\n".join(lines)
+
+
+# ============================================================================
+# PRODUCT MIX — TGID / EXPERIENCE (Section 4 — assortment shift)
+# ============================================================================
+
+def render_tgid_table(tgid):
+    # type: (Optional[Dict]) -> str
+    """Render the top-experiences (TGID) revenue + assortment-shift table."""
+    if not tgid or not tgid.get("rows"):
+        return "*Product mix (TGID) data unavailable.*"
+    rows = tgid["rows"]
+
+    out = [
+        "| TGID | Experience | L4W Rev | Share | LY Rev | LY Share | Δ Share | Orders | AOV | CR | TR | Net Rev/Ord | CM1/Ord |",
+        "|------|-----------|---------|-------|--------|----------|---------|--------|-----|----|----|-------------|---------| ",
+    ]
+    for r in rows:
+        name = r["experience_name"]
+        if len(name) > 30:
+            name = name[:29] + "…"
+        tag = ""
+        if r.get("is_new"):
+            tag = " \U0001f195"          # new hero this year
+        elif r.get("is_dropped"):
+            tag = " ⚠️"        # dropped vs LY
+        ds = r.get("delta_share") or 0.0
+        ds_s = f"{ds:+.1f}pp" if abs(ds) >= 0.05 else "~0pp"
+        out.append(
+            f"| {r['tgid']} | {name}{tag} | {fm(r['l4w_rev'])} | {fp1(r['l4w_share'])} | "
+            f"{fm(r['ly_rev'])} | {fp1(r['ly_share'])} | {ds_s} | {fi(r.get('orders'))} | "
+            f"{fd(r['aov'])} | {fp1(r['cr'])} | {fp1(r['tr'])} | "
+            f"{fd(r.get('net_rev_per_order'))} | {fd(r.get('cm1_per_order'))} |"
+        )
+
+    footer = (
+        f"\n*Top experiences by L4W net revenue (+ any LY ≥5%-share product that decayed). "
+        f"Catalogue breadth: {tgid.get('n_l4w', 0)} TGIDs L4W vs {tgid.get('n_ly', 0)} LY. "
+        f"Δ Share = L4W share − LY share (the assortment-shift signal). "
+        f"Net Rev/Ord = net revenue per order (AOV × CR × TR, Headout's take); "
+        f"CM1/Ord = (net revenue − direct costs) / order (true per-order margin). "
+        f"Source: `fct_orders.experience_id`, net revenue.*"
+    )
+    return "\n".join(out) + footer
+
+
+def render_campaign_product_mix(campaign_product, top_n=15):
+    # type: (Optional[Dict], int) -> str
+    """Render the paid campaign × product (TGID) join — which campaign sells what.
+
+    Summary mini-table (top_n pairs by net revenue) for the report; the full
+    matrix lives in the Google Sheet (Tab 7).
+    """
+    if not campaign_product or not campaign_product.get("rows"):
+        return "*Campaign × product data unavailable.*"
+    rows = campaign_product["rows"]
+
+    out = [
+        "| Campaign | Channel | Product (TGID) | Orders | Net Rev | Share | AOV | TR | CM1/Ord |",
+        "|----------|---------|----------------|--------|---------|-------|-----|----|---------|",
+    ]
+    for r in rows:
+        camp = r.get("campaign_name") or "(no campaign)"
+        # Strip the common "Paris - " / market prefix noise and trim for scanability.
+        camp = camp.replace(" - All - Search - All", "").replace(" - Search - All", "")
+        if len(camp) > 34:
+            camp = camp[:33] + "…"
+        name = r.get("experience_name") or "(unknown)"
+        if len(name) > 24:
+            name = name[:23] + "…"
+        prod = f"{r.get('tgid')} {name}"
+        out.append(
+            f"| {camp} | {r.get('channel', '—')} | {prod} | {fi(r.get('orders'))} | "
+            f"{fm(r.get('net_rev'))} | {fp1(r.get('share'))} | {fd(r.get('aov'))} | "
+            f"{fp1(r.get('tr'))} | {fd(r.get('cm1_per_order'))} |"
+        )
+
+    n_all = len(campaign_product.get("all", rows))
+    footer = (
+        f"\n*Top {len(rows)} paid (campaign × product) pairs by L4W net revenue "
+        f"({n_all} pairs total — full matrix in Google Sheet Tab 7). "
+        f"Paid scope only (Google/Bing campaign-attributed orders). "
+        f"Margin from `fct_orders`: TR = net rev / GMV-completed; CM1/Ord = "
+        f"(net rev − direct costs) / order. Spend is campaign-level only, so ROI "
+        f"can't split by product — TR/CM1 are the per-product margin read.*"
+    )
+    return "\n".join(out) + footer
 
 
 # ============================================================================
@@ -628,11 +877,9 @@ def render_funnel(funnel_data):
     lw, pw, yw = stages
 
     rows = [
-        "_Paid-session funnel (Google-Ads attributed); rates are session-based._",
-        "",
         "| Stage | L4W | P4W | LY | \u0394 LY (pp) | \u0394 P4W (pp) |",
         "|-------|-----|-----|----|-----------|-----------| ",
-        f"| Paid sessions | {fi(lw['lp'])} | {fi(pw['lp'])} | {fi(yw['lp'])} | {dp(lw['lp'], yw['lp'])} | {dp(lw['lp'], pw['lp'])} |",
+        f"| LP Sessions | {fi(lw['lp'])} | {fi(pw['lp'])} | {fi(yw['lp'])} | {dp(lw['lp'], yw['lp'])} | {dp(lw['lp'], pw['lp'])} |",
         f"| LP2S | {fp1(lw['lp2s'])} | {fp1(pw['lp2s'])} | {fp1(yw['lp2s'])} | {dpp(lw['lp2s'], yw['lp2s'])} | {dpp(lw['lp2s'], pw['lp2s'])} |",
         f"| S2C | {fp1(lw['s2c'])} | {fp1(pw['s2c'])} | {fp1(yw['s2c'])} | {dpp(lw['s2c'], yw['s2c'])} | {dpp(lw['s2c'], pw['s2c'])} |",
         f"| C2O | {fp1(lw['c2o'])} | {fp1(pw['c2o'])} | {fp1(yw['c2o'])} | {dpp(lw['c2o'], yw['c2o'])} | {dpp(lw['c2o'], pw['c2o'])} |",
@@ -643,6 +890,52 @@ def render_funnel(funnel_data):
 # ============================================================================
 # LANDING PAGE TABLE
 # ============================================================================
+
+
+def render_lp_funnel_table(lp_funnel, top_n=8):
+    # type: (Optional[List], int) -> str
+    """On-site funnel per LP from mixpanel_user_page_funnel_progression."""
+    if not lp_funnel:
+        return "*LP funnel data unavailable.*"
+    rows = [r for r in lp_funnel if r.get("l4w_users", 0) >= 500]
+    if not rows:
+        return "*No LPs with >= 500 users in L4W.*"
+    rows = rows[:top_n]
+
+    lines = [
+        "| Page URL | Users | CVR | LP2S | S2C | C2O | \u0394 LP2S | \u0394 S2C | \u0394 C2O |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        url = r.get("page_url", "")
+        if len(url) > 50:
+            url = "..." + url.split(".com", 1)[-1] if ".com" in url else url[:47] + "..."
+        users = r.get("l4w_users", 0)
+        u_str = "{:.1f}K".format(users / 1000) if users >= 1000 else str(users)
+        cvr = r.get("l4w_cvr")
+        lp2s = r.get("l4w_lp2s")
+        s2c = r.get("l4w_s2c")
+        c2o = r.get("l4w_c2o")
+        ly_lp2s = r.get("ly_lp2s")
+        ly_s2c = r.get("ly_s2c")
+        ly_c2o = r.get("ly_c2o")
+
+        def _fp(v):
+            return "{:.1f}%".format(v) if v is not None else "\u2014"
+
+        def _dp(a, b):
+            if a is not None and b is not None and b > 0:
+                return "{:+.1f}pp".format(a - b)
+            return "\u2014"
+
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                url, u_str, _fp(cvr), _fp(lp2s), _fp(s2c), _fp(c2o),
+                _dp(lp2s, ly_lp2s), _dp(s2c, ly_s2c), _dp(c2o, ly_c2o),
+            )
+        )
+    return "\n".join(lines)
+
 
 def render_landing_page_table(landing_pages):
     # type: (Optional[Dict]) -> str
@@ -744,7 +1037,7 @@ def render_ad_group_table(ad_groups):
     rows = [
         "**Ad Group Coverage**",
         "",
-        "| Ad Group Type | Ad Groups | Languages | Clicks | Spend | Paid CVR | CPC | ROI |",
+        "| Ad Group Type | Ad Groups | Languages | Clicks | Spend | CVR | CPC | ROI |",
         "|---------------|-----------|-----------|--------|-------|-----|-----|-----|",
     ]
     for ag_type, t in sorted(type_totals.items(), key=lambda x: x[1]["clicks"], reverse=True):
@@ -764,6 +1057,53 @@ def render_ad_group_table(ad_groups):
             f"| {ag_type} | {t['ag_count']} | {langs} | {fi(cl)} | {fm(sp)} | {cvr} | {cpc} | {roi} |"
         )
     return "\n".join(rows)
+
+
+def render_ad_group_audit(ad_group_audit):
+    # type: (Optional[Dict]) -> str
+    """Ad-group-level audit: per-ad-group performance + bid-headroom opportunity."""
+    if not ad_group_audit or not ad_group_audit.get("rows"):
+        return "*Ad-group audit data unavailable.*"
+    rows = ad_group_audit["rows"]
+
+    out = [
+        "| Ad Group | Type | Lang | Spend | Clicks | CVR | CPC | ROI | tROAS | vs Tgt | Flag |",
+        "|----------|------|------|-------|--------|-----|-----|-----|-------|--------|------|",
+    ]
+    for r in rows:
+        name = r.get("ad_group_name") or ""
+        if len(name) > 30:
+            name = name[:29] + "\u2026"
+        vt = r.get("vs_target")
+        vt_s = f"{vt:+.0f}pp" if vt is not None else "\u2014"
+        # MoM trend inlined into Spend and ROI cells, e.g. "$19.3K (-2%)" / "135.6% (-3pp)".
+        sp_s = fm(r.get("spend"))
+        smp = r.get("spend_mom_pct")
+        if smp is not None:
+            sp_s += f" ({smp:+.0f}%)"
+        roi_s = fp1(r.get("roi"))
+        rmp = r.get("roi_mom_pp")
+        if rmp is not None:
+            roi_s += f" ({rmp:+.0f}pp)"
+        out.append(
+            f"| {name} | {r.get('ag_type', '\u2014')} | {r.get('language', '\u2014')} | "
+            f"{sp_s} | {fi(r.get('clicks'))} | {fp1(r.get('cvr'))} | "
+            f"{fd(r.get('cpc'))} | {roi_s} | {fp1(r.get('target_pct')) if r.get('target_pct') else '\u2014'} | "
+            f"{vt_s} | {r.get('flag', '\u2014')} |"
+        )
+    footer = (
+        f"\n*Top {len(rows)} ad groups by L4W spend (of {ad_group_audit.get('n_total', 0)}; "
+        f"full set in Google Sheet Tab 8). Opportunity = **bid headroom vs the ad group's tROAS target** "
+        f"(no impression-share at ad-group grain). **Scale** = ROI \u2265 target \u00d71.15 at material spend "
+        f"(under-bid \u2014 volume left on the table); **Leak** = ROI <130% at material spend (spend at risk); "
+        f"vs Tgt = actual ROI \u2212 target. Scale candidates: {ad_group_audit.get('scale_count', 0)} "
+        f"({fm(ad_group_audit.get('scale_spend'))} spend) \u00b7 Leaks: {ad_group_audit.get('leak_count', 0)} "
+        f"({fm(ad_group_audit.get('leak_spend'))} spend). Spend and ROI carry the **MoM \u0394 inline** "
+        f"(vs P4W) \u2014 a worsening Leak reads differently from a recovering one; full MoM columns in Tab 8. "
+        f"No YoY (ad-group names churn across the consolidation). Ad group \u00d7 product (experience_id) is not "
+        f"available \u2014 fct_orders has no ad_group_id; the Type column is the product-intent proxy.*"
+    )
+    return "\n".join(out) + footer
 
 
 # ============================================================================
@@ -800,7 +1140,7 @@ def render_appendix(channels, cohorts, budget, targeting=None):
     lines.extend(["", "### A2. Monthly Paid Performance (L12M)"])
     if monthly:
         lines.extend(["",
-            "| Month | Ad Spend | CPC | Clicks | Paid CVR | CM1 | Paid ROI |",
+            "| Month | Ad Spend | CPC | Clicks | CVR | CM1 | Paid ROI |",
             "|-------|----------|-----|--------|-----|-----|----------|"])
         for m in monthly:
             paid_roi = _g(m, "paid_roi")
@@ -812,30 +1152,6 @@ def render_appendix(channels, cohorts, budget, targeting=None):
                 f"{fm(_g(m,'paid_cm1'))} | "
                 f"{fp1(paid_roi * 100 if paid_roi else None)} |"
             )
-    else:
-        lines.append("*Data unavailable.*")
-
-    # A3: Monthly SIS/CPC/Clicks trend from cohort monthly
-    lines.extend(["", "### A3. Monthly Paid Metrics Trend"])
-    cohort_monthly = cohorts.get("monthly") or []
-    if cohort_monthly:
-        month_agg = {}  # type: Dict[str, Dict[str, float]]
-        for r in cohort_monthly:
-            mo = r.get("month")
-            if mo not in month_agg:
-                month_agg[mo] = {"spend": 0, "clicks": 0, "cm1": 0}
-            month_agg[mo]["spend"] += _g(r, "spend", 0)
-            month_agg[mo]["clicks"] += _g(r, "clicks", 0)
-            month_agg[mo]["cm1"] += _g(r, "cm1", 0)
-
-        lines.extend(["",
-            "| Month | CPC | Clicks | ROI |",
-            "|-------|-----|--------|-----|"])
-        for mo in sorted(month_agg.keys()):
-            a = month_agg[mo]
-            cpc = a["spend"] / a["clicks"] if a["clicks"] else None
-            roi = a["cm1"] / a["spend"] * 100 if a["spend"] else None
-            lines.append(f"| {mo} | {fd(cpc)} | {fi(a['clicks'])} | {fp1(roi)} |")
     else:
         lines.append("*Data unavailable.*")
 
@@ -856,6 +1172,52 @@ def render_appendix(channels, cohorts, budget, targeting=None):
     return "\n".join(lines)
 
 
+def render_signals_checklist(signals):
+    # type: (Optional[List[Dict]]) -> str
+    """Render the coverage-gate 'Signals to Close' table (Phase 3).
+
+    One row per engine-enumerated material mover, each with its basis, MoM recency,
+    and L12M trajectory, plus an empty Disposition cell Claude must fill
+    (CONFIRMED / RULED OUT / DATA GAP). This is the gate: a row that exists here
+    cannot be silently dropped.
+    """
+    if not signals:
+        return "*No material signals enumerated — all movements within thresholds.*"
+
+    def lab(s, n):
+        x = s.get("label") or ""
+        return x[:n - 1] + "…" if len(x) > n else x
+
+    high = [s for s in signals if s.get("severity_hint") == "high"]
+    rest = [s for s in signals if s.get("severity_hint") != "high"]
+
+    out = []
+    # Primary: HIGH-severity movers — disposed inline with reasoning.
+    out.append("**Material movers (HIGH) — dispose each inline:**")
+    out.append("")
+    out.append("| # | Signal | Win | Basis | MoM | L12M | Disposition |")
+    out.append("|---|--------|-----|-------|-----|------|-------------|")
+    if high:
+        for i, s in enumerate(high, 1):
+            out.append(
+                f"| {i} | {lab(s, 44)} | {s.get('window','')} | {s.get('basis','')} | "
+                f"{s.get('mom_recency','')} | {s.get('trajectory','')} | _(dispose)_ |"
+            )
+    else:
+        out.append("| — | _(no HIGH-severity movers)_ | | | | | — |")
+
+    # Secondary: everything else — terse, one-line dispositions (most RULED OUT).
+    if rest:
+        out.append("")
+        out.append(f"**Also enumerated ({len(rest)}) — one-line disposition each (do not narrate individually):**")
+        out.append("")
+        out.append("| # | Signal | Basis | L12M | Disposition |")
+        out.append("|---|--------|-------|------|-------------|")
+        for j, s in enumerate(rest, len(high) + 1):
+            out.append(f"| {j} | {lab(s, 40)} | {s.get('basis','')} | {s.get('trajectory','')} | _(dispose)_ |")
+    return "\n".join(out)
+
+
 def render_data_sources():
     # type: () -> str
     return """## B. Data Sources
@@ -864,15 +1226,15 @@ def render_data_sources():
 |--------|----------|
 | combined_entity_stats | Section 2 (CE Overview), Appendix A1 |
 | ads_campaign_stats | Section 4 (Paid Deep Dive), cohorts, Appendix A2-A3 |
-| google_ads_pmax_asset_stats | Section 4 PMax metrics |
-| fct_orders | Section 3 (Channel Breakdown), cohorts revenue |
+| google_ads_pmax_asset_stats | Section 4 PMax metrics, Paid Value Shapley |
+| fct_orders | Section 3 (Channel Breakdown), cohorts revenue, Section 4 Product Mix (TGID) |
 | google_ads_campaign_stats | Section 5 Budget/Bidding, Cohort paid |
 | google_ads_campaign_budget_stats | Section 5 Budget |
 | google_ads_ad_group_geo_stats | Section 5 Geography |
 | google_ads_ad_group_stats | Section 8 Ad Group Coverage |
 | google_ads_campaign_page_stats | Section 4 Landing Pages |
 | stg_google_ads_new__campaigns | Appendix A7 Campaign Targeting |
-| mixpanel_user_funnel_progression | Section 7 Funnel (Claude queries) |
+| /cvr-rca skill | Section 7 Funnel (calls CVR-RCA, reads summary.json) |
 | Ahrefs | Section 6a Demand (if available) |
 | Search terms CSV | Section 8 Clusters (if uploaded) |"""
 
@@ -896,11 +1258,16 @@ def render_audit(
     budget,           # type: List
     geo,              # type: Dict
     customers,        # type: List
-    funnel=None,      # type: Optional[Dict]
     customers_ly=None,  # type: Optional[List]
     landing_pages=None, # type: Optional[Dict]
+    lp_funnel=None,   # type: Optional[List]
     targeting=None,   # type: Optional[List]
     ad_groups=None,   # type: Optional[List]
+    ad_group_audit=None,  # type: Optional[Dict]
+    shapley=None,     # type: Optional[Dict]
+    tgid=None,        # type: Optional[Dict]
+    campaign_product=None,  # type: Optional[Dict]
+    signals=None,     # type: Optional[List[Dict]]
 ):
     # type: (...) -> str
     """Assemble full audit skeleton with pre-formatted tables and NARRATIVE markers."""
@@ -924,12 +1291,39 @@ def render_audit(
 
     # Section 4: Paid Deep Dive (Search + PMax + Bing)
     s.append("\n---\n\n## 4. Paid Deep Dive\n")
-    s.append(render_table2(paid_perf))
+    s.append("\n### Paid Value Decomposition (Clicks × CVR × Avg CM1)\n")
+    s.append(render_paid_shapley(shapley))
+    s.append("\n<!-- NARRATIVE: Lead with the dominant driver from the Shapley (the factor with the largest |contribution|). "
+             "State it in the driver order clicks → avg CM1 → CVR. e.g. 'Paid CM1 fell $Xk MoM — clicks drove ~Y% (volume), "
+             "avg CM1 drove ~Z% (value/conv). CVR was immaterial.' Do NOT narrate a CVR story if CVR's share is small. "
+             "If avg CM1 is the lead driver, route to the TR/CR + product-mix (TGID) tables below. -->\n")
+    s.append("\n" + render_table2(paid_perf))
     s.append("\n<!-- NARRATIVE: Paid performance story. CPC justified by RPC? Efficiency trend. PMax contribution. -->\n")
     if landing_pages and len(landing_pages.get("l4w", [])) > 1:
-        s.append("\n### Landing Pages\n")
+        s.append("\n### Landing Pages — Ad Performance\n")
         s.append(render_landing_page_table(landing_pages))
-        s.append("\n<!-- NARRATIVE: CTR comparison across landing pages. Dedicated LP vs generic — is there merit? -->\n")
+        s.append("\n*Source: Google Ads.*\n")
+    if lp_funnel:
+        s.append("\n### Landing Pages — On-Site Funnel\n")
+        s.append(render_lp_funnel_table(lp_funnel))
+        s.append("\n*Source: `mixpanel_user_page_funnel_progression`, unique users (matches Omni). Mixpanel collapses language variants into root URL. Full dump in Google Sheet Tab 6.*\n")
+    s.append("\n<!-- NARRATIVE: Ad LP CTR by language. On-site funnel: which stage leaks, which pages, product-level vs page-specific. Mobile vs desktop S2C gap if >5pp. -->\n")
+    s.append("\n### Product Mix — Top Experiences (TGID)\n")
+    s.append(render_tgid_table(tgid))
+    s.append("\n<!-- NARRATIVE: Did the product mix shift? Flag any TGID with |Δ Share| > 5pp. A new hero (🆕) or a decayed/dropped product (⚠️) "
+             "means revenue/CVR/RPC moved because of assortment, not funnel or traffic quality. Connect to the avg CM1 driver above: "
+             "if a low-TR or low-AOV product grew share, that drags blended avg CM1 → constrains bidding. Route lost heroes to Supply, "
+             "new low-economics products to Product/pricing. If mix is stable (all |Δ Share| < 5pp), say 'product mix stable' and move on. -->\n")
+    if campaign_product and campaign_product.get("rows"):
+        s.append("\n### Campaign × Product — Which Campaign Sells What (paid)\n")
+        # Table is backend reference only (full matrix lives in Google Sheet Tab 7).
+        # The report shows the *insight*, not the table — keep it tight.
+        s.append("<!-- DATA (backend — do NOT render this table in the report; full matrix in Sheet Tab 7):\n"
+                 + render_campaign_product_mix(campaign_product)
+                 + "\n-->\n")
+        s.append("\n<!-- NARRATIVE: 2-3 sentences, NO table. State only the campaign × product *insight* from the data above: "
+                 "(1) any high-volume campaign concentrated in a LOW-TR product (e.g. dining ~10% vs tickets ~24%) dragging blended economics — tie to the Avg CM1 Shapley driver + TGID mix; "
+                 "(2) which channel sells the hero SKU (coverage signal). Route low-margin concentrations to Product/pricing. Point to Sheet Tab 7 for the full matrix. If everything maps to healthy-TR products, say so in one line. -->\n")
 
     # Section 5: Coverage + Matchmaking
     s.append("\n---\n\n## 5. Coverage + Matchmaking\n")
@@ -950,13 +1344,20 @@ def render_audit(
     s.append("\n### 6c. Money on the Table\n")
     s.append(render_money_on_table(cohorts))
 
-    # Section 7: Funnel
+    # Section 7: Funnel (via /cvr-rca)
     s.append("\n\n---\n\n## 7. Funnel\n")
-    if funnel:
-        s.append(render_funnel(funnel))
-    else:
-        s.append("<!-- Run funnel query: BQ mixpanel_user_funnel_progression for L4W/P4W/LY, paid-filtered. -->\n")
-    s.append("\n<!-- NARRATIVE: Which stage leaks? Accelerating or recovering? Size the impact. Route to owner. -->\n")
+    s.append("<!-- Run /cvr-rca <CE_ID> <P4W_START> <P4W_END> <L4W_START> <L4W_END>\n"
+             "Read summary.json. Validate: CVR-RCA Google Ads CVR delta vs cohort table TOTAL CVR delta (Section 5).\n"
+             "\n"
+             "Write narrative from CVR-RCA output:\n"
+             "- Shapley: which step drove the change (LP2S vs S2C vs C2O %)\n"
+             "- C2O split: C2A (checkout submission) vs A2O (payment success)\n"
+             "- Device: mobile vs desktop concentration\n"
+             "- Top experiences by |Δrate| per significant step\n"
+             "- LY gap: structural vs seasonal\n"
+             "- Link CVR-RCA HTML report\n"
+             "\n"
+             "If CVR-RCA unavailable: use cohort CVR + SIS from Section 5. -->\n")
 
     # Section 8: Search Intelligence (ad group coverage + CSV cluster analysis)
     s.append("\n---\n\n## 8. Search Intelligence\n")
@@ -964,6 +1365,13 @@ def render_audit(
         s.append("\n### Ad Group Coverage\n")
         s.append(render_ad_group_table(ad_groups))
         s.append("\n<!-- NARRATIVE: Which ad group types drive performance? Any language gaps? Cross-reference with experience archetypes if assortment data available. -->\n")
+    if ad_group_audit and ad_group_audit.get("rows"):
+        s.append("\n### Ad Group Audit — performance & bid headroom\n")
+        s.append(render_ad_group_audit(ad_group_audit))
+        s.append("\n<!-- NARRATIVE: the ad-group-level audit (the type-level coverage above is the rollup). "
+                 "Lead with the opportunity: name the **Scale** ad groups (ROI well above target = the algorithm is under-bidding a profitable group — Perf can raise budget / lower tROAS to capture volume; you set the magnitude) and the **Leak** ad groups (ROI <130% at material spend — say the $ at risk and route to LP/quality/match-type or trim). "
+                 "Cross-check Leaks against the §4 Campaign × Product read (a low-TR product can explain a low-ROI ad group — that's a Product call, not a paid one). "
+                 "If no Scale/Leak flags, say 'ad groups are on-target' and move on. Note: ad group × product isn't available (no ad_group_id on fct_orders) — use the Type column as the intent proxy. -->\n")
     s.append("\n### Search Term Clusters\n")
     s.append("<!-- If search terms CSV uploaded:\n"
              "Cluster analysis — map search terms to clusters. Cross-reference with ad group types above.\n"
@@ -972,13 +1380,27 @@ def render_audit(
              "\n"
              "If no CSV: abbreviate — use keyword IS data from Section 5 budget table + cohort SIS only. -->\n")
 
-    # Section 9: Red Flags
+    # Section 9: Red Flags \u2014 coverage gate (Signals to Close) then ranked Red Flags
     s.append("\n---\n\n## 9. Red Flags Summary\n")
-    s.append("<!-- NARRATIVE: Consolidated table \u2014 | Severity | Category | Issue | Section | -->\n")
+    # Coverage gate = backend discipline only. Disposed inside a comment (NOT rendered
+    # in the report); the visible \u00a79 is just the ranked Red Flags table.
+    s.append("<!-- COVERAGE GATE (backend \u2014 do NOT render this checklist in the report). "
+             "Close every signal here as CONFIRMED / RULED OUT / DATA GAP + one-line reason + \u00a7ref so "
+             "nothing material is silently dropped (EVAL checks this). HIGH rows get real reasoning "
+             "(DIAGNOSTICS.md \u00a70 + per-signal trees + L12M trajectory); 'Also enumerated' rows get one line each. "
+             "The visible Red Flags table below is the CONFIRMED subset.\n\n"
+             + render_signals_checklist(signals)
+             + "\n-->\n")
+    s.append("\n<!-- NARRATIVE: the ranked Red Flags table = the CONFIRMED rows from the coverage gate above, "
+             "HIGH first, plus any qualitative flag (data caveats, competitor surges). "
+             "Columns: | Severity | Category | Issue | Section |. Lead with the 3\u20134 HIGH conclusions; do not drown them. -->\n")
 
-    # Section 10: Actions
-    s.append("\n---\n\n## 10. Recommended Actions\n")
-    s.append("<!-- NARRATIVE: | # | Action | Owner | Est. Impact | Timeline | Evidence | \u2014 Specific, sized, owned, timed. Crisp. -->\n")
+    # Section 10: Conclusions (forwardable, not bid-prescriptive)
+    s.append("\n---\n\n## 10. Conclusions\n")
+    s.append("<!-- NARRATIVE: Table | # | Conclusion (lever) | Sized Opportunity | Owner | Constraint / why | Evidence |. "
+             "Every row carries a lever + $ size + owner + constraint \u2014 forwardable. Name the lever and let Perf set the magnitude; "
+             "do NOT prescribe a bid/tROAS number or cut bids >5%. No vague 'monitor/investigate' rows \u2014 each has a sized lever + owner. "
+             "Order by $ opportunity (largest first). -->\n")
 
     # Appendix
     s.append("\n---\n")

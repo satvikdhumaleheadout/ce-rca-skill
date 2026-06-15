@@ -44,8 +44,11 @@ and move on.
 An MMP doc is the **richest single CE-context source** — mine it for all five of
 the structured outputs below (not just priors/events), filtered to THIS CE:
 1. `read_file_content` → markdown.
-2. **About this CE** — a 2–4 line overview of what the CE is / how it's run
-   (channel mix, supply structure, seasonality, positioning). Orientation only.
+2. **About this CE** — a scannable **labeled brief** written as a **markdown bullet
+   list** (one `- **Label:** value` per line, NOT a paragraph): **What** (what the CE is
+   / how it's run) · **Market** (market / management type) · **Paid** (channel mix +
+   structure) · **Supply** (vendor structure) · **Status** (standing / notable claim).
+   Use only labels the doc supports; omit the rest. Orientation only.
 3. **Hypothesis priors** — recurring/known issues, past-RCA conclusions, structural
    quirks. Convert each into a **falsifiable prior** the deep dive can test and rule
    out — not a conclusion.
@@ -89,7 +92,15 @@ content. Keep it lean.
 ```
 <<<USER_CONTEXT>>>
 ## About this CE
-- [2–4 line overview]  (source: MMP doc "<title>")
+- **What:** [what the CE is / how it's run]
+- **Market:** [market / management type]
+- **Paid:** [channel mix + structure]
+- **Supply:** [vendor structure]
+- **Status:** [standing / notable claim]
+(omit any label the doc doesn't support · source: MMP doc "<title>")
+## Aliases
+- [any short-forms / nicknames the doc uses for this CE — e.g. "KSC", "Vatican" —
+   so they can pre-fill the alias confirm (1d). Omit if the doc names none.]
 ## Hypothesis priors
 - [falsifiable prior]  (source: MMP doc "<title>")
 ## Known events

@@ -48,9 +48,11 @@ from helpers import (
 # ─────────────────────────────────────────────────────────────────────────────
 _SUBDIR = {
     "summary_report.html": "tabs",
+    "ce_context_report.html": "tabs",
     "ce_health_tab.html": "tabs",
     "ce_health_report.md": "reports",
     "cvr_rca_report.html": "tabs",
+    "perf_audit_tab.html": "tabs",
     "perf_audit_report.md": "reports",
     "followups.html": "tabs",
     "meta.json": "data",
@@ -104,6 +106,17 @@ TAB_SPECS = [
         "anchor_prefix": "summary-",
     },
     {
+        # Orientation layer — the analyst's context, prior-RCA history, and Slack
+        # standing context, plus a context timeline. Authored by the /ce-context
+        # sub-skill (render_ce_context.py). Sits right after Summary; absent on a
+        # run where CE Context didn't produce a fragment, so the tab just vanishes.
+        "id": "cecontext",
+        "label": "CE Context",
+        "source": "ce_context_report.html",
+        "type": "html-fragment",
+        "anchor_prefix": "cecontext-",
+    },
+    {
         "id": "cehealth",
         "label": "CE Health",
         # Primary: the beautified body fragment authored by render_ce_health.py
@@ -131,9 +144,22 @@ TAB_SPECS = [
     {
         "id": "perfaudit",
         "label": "Paid Performance Audit",
-        "source": "perf_audit_report.md",
-        "type": "markdown",
+        # Primary: the beautified body fragment authored by render_perf_audit.py
+        # (visual_kit chrome — per-section cards, the §1 verdict banner, styled
+        # tables, grey supporting prose). Embedded verbatim like CE Health; the
+        # perf-audit WORDING is preserved (only the verdict line is relocated and
+        # the layout restyled).
+        "source": "perf_audit_tab.html",
+        "type": "html-fragment",
         "anchor_prefix": "perfaudit-",
+        # Fallback: if the render step didn't run (or failed), fall back to the
+        # verbatim markdown render of perf-audit's report — a failed
+        # beautification never costs us the tab.
+        "fallback": {
+            "source": "perf_audit_report.md",
+            "type": "markdown",
+            "anchor_prefix": "perfaudit-",
+        },
     },
     {
         # Output layer (Step 5 playground). Authored incrementally by the master
@@ -301,6 +327,42 @@ def build_header(meta: dict) -> str:
 </header>"""
 
 
+# Placeholder the Summary fragment leaves where the driver waterfall should go.
+# Invisible (HTML comment) if compose doesn't fill it — so the Summary degrades
+# cleanly on an older composer.
+_SUMMARY_SHAPLEY_PLACEHOLDER = "<!--SUMMARY_SHAPLEY_WATERFALL-->"
+# Grab the §7 chart (div + its contiguous Plotly script) from the rendered CE Health tab.
+_SHAPLEY_CHART_RE = re.compile(
+    r'<div id="chart-cehealth-shapley".*?</script>', re.DOTALL
+)
+
+
+def inject_summary_shapley(summary_html: str, run_dir: Path) -> str:
+    """Reuse the EXACT §7 Shapley waterfall from the rendered CE Health tab in the
+    Summary, at the placeholder the Summary agent leaves. We clone the chart (re-id'd
+    `chart-summary-shapley` so the two Plotly instances don't collide) rather than let
+    the Summary re-author it — guaranteeing one identical decomposition across tabs.
+    Graceful: no placeholder → unchanged; no chart (CE Health unrendered / Query-1
+    failed) → placeholder removed."""
+    if _SUMMARY_SHAPLEY_PLACEHOLDER not in summary_html:
+        return summary_html
+    ceh = resolve(run_dir, "ce_health_tab.html")
+    chart = ""
+    if ceh.exists():
+        m = _SHAPLEY_CHART_RE.search(ceh.read_text(encoding="utf-8"))
+        if m:
+            cloned = m.group(0).replace("chart-cehealth-shapley", "chart-summary-shapley")
+            chart = (
+                '<div class="analysis-block" id="summary-shapley">'
+                '<div class="block-title">Revenue driver waterfall</div>'
+                f'{cloned}'
+                '<div style="font-size:12px;color:#8892a4;margin-top:6px;">'
+                'Full decomposition + verdict in CE Health '
+                '<a class="ref-link" href="#cehealth-shapley">↗</a></div></div>'
+            )
+    return summary_html.replace(_SUMMARY_SHAPLEY_PLACEHOLDER, chart)
+
+
 def build_tabs(run_dir: Path) -> tuple[str, str, str]:
     """Build (tab_bar_html, panes_html, chart_scripts_html) from present artifacts."""
     present = []
@@ -343,6 +405,10 @@ def build_tabs(run_dir: Path) -> tuple[str, str, str]:
             # no markdown conversion, no extraction, no chart-script handling
             # (the Summary references the tabs' charts via ↗ links, it has none).
             pane_body = src_path.read_text(encoding="utf-8")
+            if spec["id"] == "summary":
+                # Front-page the §7 driver waterfall by cloning the exact CE Health
+                # chart into the Summary's placeholder (consistency over re-authoring).
+                pane_body = inject_summary_shapley(pane_body, run_dir)
             if spec["id"] == "followups":
                 # The Follow-ups tab is hand-authored each run; auto-colour its
                 # signed-delta cells (sign-based, deterministic) so every table

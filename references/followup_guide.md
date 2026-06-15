@@ -162,9 +162,10 @@ markdown** (this tab is embedded verbatim, not markdown-rendered).
 - Trivial clarifications are **not** promoted — they live only in chat.
 
 ### Valid cross-tab anchor ids (cite only these)
+- **CE Context:** `#cecontext-about`, `#cecontext-timeline`, `#cecontext-pastrca`, `#cecontext-constraints`, `#cecontext-failuremodes`, `#cecontext-links`, `#cecontext-slack`.
 - **CE Health:** `#cehealth-vitals`, `#cehealth-channels`, `#cehealth-funnel`, `#cehealth-l12m`,
-  `#cehealth-tgids`, `#cehealth-shapley`, `#cehealth-leadtime`, `#cehealth-landing`,
-  `#cehealth-countries`, `#cehealth-history`.
+  `#cehealth-tgids`, `#cehealth-shapley`, `#cehealth-leadtime`, `#cehealth-landing-pages`,
+  `#cehealth-countries`.
 - **CVR-RCA:** `#block-*` and `#chart-*` (ids vary per investigation — confirm the exact id exists
   in `cvr_rca_report.html` before citing; e.g. `#block-cascade`, `#block-shapley`, `#block-geo`).
 - **Paid Performance Audit:** `#perfaudit-*` (e.g. `#perfaudit-money-on-the-table`).

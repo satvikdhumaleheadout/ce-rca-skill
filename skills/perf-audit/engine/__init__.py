@@ -1,1 +1,1 @@
-"""Perf Audit v6.1 engine — BQ queries + markdown renderer."""
+"""Perf Audit v6.1 — BQ data layer + markdown skeleton renderer."""

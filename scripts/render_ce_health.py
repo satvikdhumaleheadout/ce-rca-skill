@@ -74,6 +74,56 @@ def pp_delta(cur, pri):
     return (f"{'+' if dpp >= 0 else ''}{dpp:.1f}pp", cls)
 
 
+def _arrow(cls):
+    # Direction arrow for the vitals pill, by delta colour class. delta-flat → no
+    # arrow (a near-flat move shouldn't read as a direction); pos/neg get ↑/↓ so the
+    # arrow + colour are unambiguous (↓ + red = decrease).
+    return "↑ " if cls == "delta-pos" else ("↓ " if cls == "delta-neg" else "")
+
+
+def vitals_pill(abs_txt, rel_txt, cls):
+    """Vitals-card pill text: arrow + absolute change + · + relative %, e.g.
+    '↓ −$135K · −32%' or '↓ −0.63pp · −31%'. No 'Δ' (that stays in table headers).
+    The arrow follows `cls` (delta-pos/neg/flat). `abs_txt` is the metric-formatted
+    absolute change (money / comma-int / pp); `rel_txt` is the relative % string."""
+    parts = [p for p in (abs_txt, rel_txt) if p]
+    return _arrow(cls) + " · ".join(parts)
+
+
+def _signed_money(delta):
+    # Absolute money change with an explicit sign and a unicode minus, matching the
+    # money() magnitude formatting ($NNN.NK / $N.NM): e.g. -135000 → "−$135K".
+    return ("−" if delta < 0 else "+") + money(abs(delta))
+
+
+def _signed_int(delta):
+    # Absolute comma-integer change with an explicit sign + unicode minus.
+    return ("−" if delta < 0 else "+") + f"{abs(int(round(delta))):,}"
+
+
+def _signed_pp(cur, pri):
+    # Absolute pp change with an explicit sign + unicode minus, 2 dp (e.g. "−0.63pp").
+    d = cur - pri
+    return ("−" if d < 0 else "+") + f"{abs(d):.2f}pp"
+
+
+def rel_pct_of_pp(cur, pri):
+    # Relative % for a rate metric: pp change / prior × 100, signed (e.g. "−31%").
+    if not pri:
+        return ""
+    r = (cur - pri) / pri * 100
+    return f"{'+' if r >= 0 else '−'}{abs(r):.0f}%"
+
+
+def rel_pct(cur, pri):
+    # Relative % change for a money/count metric, signed with a unicode minus
+    # (e.g. "−32%") so the vitals pill reads consistently with the pp variant.
+    if not pri:
+        return ""
+    r = (cur - pri) / pri * 100
+    return f"{'+' if r >= 0 else '−'}{abs(r):.0f}%"
+
+
 def numparse(s):
     s = s.replace(",", "").replace("$", "").replace("%", "").strip(); mult = 1
     if s.endswith("K"): mult = 1e3; s = s[:-1]
@@ -150,8 +200,10 @@ CEH_TABLE_STYLE = (
     "#tab-cehealth tr.ceh-conc td{background:#eafaf0;}"
     "#tab-cehealth .ceh-class{display:inline-block;margin:0 0 8px;padding:3px 10px;"
     "border-radius:6px;font-size:11px;font-weight:700;background:#eef2fb;color:#3a4a8a;}"
-    # Conditional-formatting backgrounds for the TGID table cells.
+    # Conditional-formatting backgrounds for table cells (completion rate < 80%).
     "#tab-cehealth td.ceh-cr-low{background:#fdecea;}"
+    # Completion-rate < 80% on a metric card → red value (same threshold, card form).
+    "#tab-cehealth .metric-card .post.ceh-cr-low-val{color:#c0392b;}"
     "#tab-cehealth .ceh-prime{display:inline-block;margin-left:6px;padding:1px 6px;"
     "border-radius:9px;font-size:10px;font-weight:700;background:#e8edf7;color:#3a4a8a;}"
     # Truncate long experience names (TGID sticky 2nd column) with ellipsis; the
@@ -231,6 +283,21 @@ def _cell_split(c):
     return _cell(c)
 
 
+def _lead_num(s):
+    """Numeric value of a cell that may carry a trailing delta / 'new' / no-prior
+    token (e.g. '88.1% -1.8pp' → 88.1, '97.3% —' → 97.3). Plain `numparse` returns
+    None on such combined cells because it tries to float the whole string — so any
+    threshold/colour-scale formatting that reads raw value+delta cells stays dormant
+    unless it first peels off the leading value. Falls back to numparse for clean
+    cells (the value columns of split tables) and returns None for em-dashes."""
+    s = (s or "").strip()
+    for rx in (_TRAIL_DELTA, _TRAIL_NEW, _TRAIL_NOPRIOR):
+        m = rx.match(s)
+        if m:
+            return numparse(m.group("main"))
+    return numparse(s)
+
+
 def styled_table(hdr, rows, highlight_first=False, maxrows=None, sticky_cols=0,
                  sticky_widths=None, split_deltas=False, groups=None,
                  div_cols=None, row_classes=None, cell_classes=None, cell_html=None):
@@ -308,6 +375,31 @@ def styled_table(hdr, rows, highlight_first=False, maxrows=None, sticky_cols=0,
             tds += "<td" + cls + style_attr + ">" + inner + "</td>"
         trs += f"<tr{rcls}>{tds}</tr>"
     return f'<div style="overflow-x:auto;"><table><thead>{grp}<tr>{th}</tr></thead><tbody>{trs}</tbody></table></div>'
+
+
+def _sparkline(values, w=90, h=22):
+    """Inline SVG polyline sparkline for a row's monthly trend. `values` is a list
+    of floats/None; normalised to the row's own min/max so the shape (not the
+    absolute level) reads. No JS, no Plotly. Returns a small inline <svg>."""
+    pts = [v for v in values if v is not None]
+    if len(pts) < 2:
+        return ""
+    lo, hi = min(pts), max(pts)
+    span = (hi - lo) or 1.0
+    pad = 2
+    n = len(values)
+    step = (w - 2 * pad) / (n - 1) if n > 1 else 0
+    coords = []
+    for i, v in enumerate(values):
+        x = pad + i * step
+        vv = pts[0] if v is None else v
+        y = (h - pad) - ((vv - lo) / span) * (h - 2 * pad)
+        coords.append(f"{x:.1f},{y:.1f}")
+    poly = " ".join(coords)
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" '
+            f'style="vertical-align:middle;" preserveAspectRatio="none">'
+            f'<polyline fill="none" stroke="#4a6fd4" stroke-width="1.5" '
+            f'stroke-linejoin="round" stroke-linecap="round" points="{poly}"/></svg>')
 
 
 def block(title, bid, inner, verdict=None, summary=None, collapsed=False):
@@ -396,9 +488,12 @@ CEH_FDIM_SCRIPT = (
 )
 
 
-def build_fdim_dropdown(panels):
+def build_fdim_dropdown(panels, label="Break funnel down by:"):
     """panels: list of (key, label, html). Returns a dropdown widget showing one
-    panel at a time (first open by default). Empty string if no panels."""
+    panel at a time (first open by default). `label` is the prompt text (e.g.
+    "Compare current vs:" for the TGID MoM/YoY toggle). Empty string if no panels.
+    The shared CEH_FDIM_SCRIPT is a delegated listener over every .ceh-fdim-wrap on
+    the page, so multiple independent dropdowns coexist with no extra JS."""
     if not panels:
         return ""
     opts = "".join('<option value="{}">{}</option>'.format(k, _html.escape(lbl))
@@ -408,8 +503,9 @@ def build_fdim_dropdown(panels):
             k, "" if i == 0 else ' style="display:none"', h)
         for i, (k, lbl, h) in enumerate(panels))
     return ('<div class="ceh-fdim-wrap"><label style="font-size:12px;color:#777;'
-            'margin-right:6px;">Break funnel down by:</label>'
-            '<select class="ceh-fdim-sel">{}</select>{}</div>'.format(opts, divs))
+            'margin-right:6px;">{}</label>'
+            '<select class="ceh-fdim-sel">{}</select>{}</div>'.format(
+                _html.escape(label), opts, divs))
 
 
 def _subhead(t):
@@ -541,8 +637,11 @@ def _decompose(pre, post):
     return {f: sh[f] / n for f in _FAC}
 
 
-def build_shapley_block(raw, windows):
-    """The §7 corrected 6-factor booking-revenue waterfall (Plotly)."""
+def build_shapley_block(raw, windows, insight=None):
+    """The §7 corrected 6-factor booking-revenue waterfall (Plotly). When `insight`
+    is given (the LLM section callout), it becomes the section-top `summary` and the
+    deterministic `verdict` is dropped (the drag/lift detail is already in the chart);
+    otherwise the deterministic verdict renders as before."""
     pf, qf = _facs(raw["pre"]), _facs(raw["post"])
     contrib = _decompose(pf, qf)
     pre_rev, post_rev = raw["pre"]["revenue"], raw["post"]["revenue"]
@@ -587,17 +686,19 @@ def build_shapley_block(raw, windows):
     yaxis:{{title:'Revenue (USD)',tickprefix:'$',gridcolor:'#eef',zerolinecolor:'#ccc'}},
     xaxis:{{tickangle:15}}}},
     {{responsive:true,displayModeBar:false}});</script>'''
-    return block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner, verdict=verdict)
+    return block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner,
+                 verdict=(None if insight else verdict), summary=insight)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Build the fragment
 # ─────────────────────────────────────────────────────────────────────────────
 
-def card(label, post_val, delta_txt, delta_cls, pre_val=None):
+def card(label, post_val, delta_txt, delta_cls, pre_val=None, post_class=""):
     pre_html = f'<span class="pre">{pre_val}</span>' if pre_val else ''
+    pc = f' {post_class}' if post_class else ''
     return (f'<div class="metric-card"><div class="label">{label}</div>'
-            f'<div class="values">{pre_html}<span class="post">{post_val}</span></div>'
+            f'<div class="values">{pre_html}<span class="post{pc}">{post_val}</span></div>'
             f'<div class="delta {delta_cls}">{delta_txt}</div></div>')
 
 
@@ -1191,9 +1292,9 @@ def build_tgid_main(hdr, rows):
         b = int(234 + frac * (240 - 234))
         return f'background:rgb({r},{g},{b});'
 
-    s2c_vals = [numparse(r[s2c_i]) for r in nrows] if s2c_i >= 0 else []
-    c2o_vals = [numparse(r[c2o_i]) for r in nrows] if c2o_i >= 0 else []
-    s2o_vals = [numparse(r[s2o_i]) for r in nrows] if s2o_i >= 0 else []
+    s2c_vals = [_lead_num(r[s2c_i]) for r in nrows] if s2c_i >= 0 else []
+    c2o_vals = [_lead_num(r[c2o_i]) for r in nrows] if c2o_i >= 0 else []
+    s2o_vals = [_lead_num(r[s2o_i]) for r in nrows] if s2o_i >= 0 else []
 
     def _scale_range(vals):
         v = [x for x in vals if x is not None]
@@ -1201,7 +1302,7 @@ def build_tgid_main(hdr, rows):
     s2c_lo, s2c_hi = _scale_range(s2c_vals)
     c2o_lo, c2o_hi = _scale_range(c2o_vals)
     s2o_lo, s2o_hi = _scale_range(s2o_vals)
-    traf_vals = [numparse(r[traf_i]) for r in nrows] if traf_i >= 0 else []
+    traf_vals = [_lead_num(r[traf_i]) for r in nrows] if traf_i >= 0 else []
     traf_v = [x for x in traf_vals if x is not None]
     traf_med = sorted(traf_v)[len(traf_v) // 2] if traf_v else None
 
@@ -1216,7 +1317,7 @@ def build_tgid_main(hdr, rows):
                                          f'{_cell(full)}</span>')
         # CR < 80% → red highlight.
         if cr_i >= 0 and cr_i < len(r):
-            cv = numparse(r[cr_i])
+            cv = _lead_num(r[cr_i])
             if cv is not None and cv < 80:
                 cell_classes[(k, cr_i)] = 'ceh-cr-low'
         # S2C / C2O colour scale (style override via cell_html wrapping not needed —
@@ -1224,7 +1325,7 @@ def build_tgid_main(hdr, rows):
         for ci, lo, hi in ((s2c_i, s2c_lo, s2c_hi), (c2o_i, c2o_lo, c2o_hi),
                            (s2o_i, s2o_lo, s2o_hi)):
             if ci >= 0 and ci < len(r):
-                vv = numparse(r[ci])
+                vv = _lead_num(r[ci])
                 if vv is not None and hi > lo:
                     frac = (vv - lo) / (hi - lo)
                     cell_html[(k, ci)] = (f'<span style="display:block;{_scale_bg(frac)}'
@@ -1233,7 +1334,7 @@ def build_tgid_main(hdr, rows):
         # Derived S2O = S2C × C2O (presentation approximation; exact engine value is a
         # later wave). Flag high-traffic + low-S2O TGIDs.
         if s2c_i >= 0 and c2o_i >= 0 and traf_i >= 0 and traf_med is not None:
-            s2c = numparse(r[s2c_i]); c2o = numparse(r[c2o_i]); tf = numparse(r[traf_i])
+            s2c = _lead_num(r[s2c_i]); c2o = _lead_num(r[c2o_i]); tf = _lead_num(r[traf_i])
             if None not in (s2c, c2o, tf):
                 s2o = s2c / 100.0 * c2o / 100.0 * 100  # %
                 # high traffic vs median, low S2O (< TGID_LOW_S2O_PCT) → flag.
@@ -1258,6 +1359,109 @@ def build_tgid_main(hdr, rows):
             'making up ~80% of revenue (sorted by Share). CR&lt;80% flagged red; S2C/C2O/S2O '
             'on a colour scale. S2O is a presentation-derived approximation (S2C×C2O), '
             'pending an exact engine figure (Wave B).</p>')
+    return pill + table + note
+
+
+def _landing_groups(hdr):
+    """Grouped header bands for the Top-Landing-Pages sales table: a blank band over
+    the 'Landing Page' identity column, 'Revenue' over Rev/Share, 'Order Metrics' over
+    the rest (Orders/AOV/CR/TR)."""
+    def label_of(h):
+        n = h.strip().lower()
+        if 'landing' in n or 'page' in n:
+            return ''
+        if 'rev' in n or n == 'share':
+            return 'Revenue'
+        return 'Order Metrics'
+    bands = []
+    for h in hdr:
+        lbl = label_of(h)
+        if bands and bands[-1][0] == lbl:
+            bands[-1][1] += 1
+        else:
+            bands.append([lbl, 1])
+    return bands if any(lbl for lbl, _ in bands) else None
+
+
+def build_landing_main(hdr, rows):
+    """Build the Top-Landing-Pages SALES table — revenue / order metrics straight from
+    fct_orders, single 'Landing Page' identity column. 80%-revenue concentration green
+    (sorted by Share), CR<80% red, blue group dividers, full-URL hover. No funnel
+    columns or colour scale: the per-page funnel lives in its own section (§10), and
+    fct_orders.landing_page ↔ mixpanel page_url is not a reliable per-row join."""
+    nhdr = list(hdr)
+    nrows = [list(r) for r in rows]
+
+    share_i = _col_idx(nhdr, "share")
+    cr_i = _col_idx(nhdr, "cr")
+    lp_i = _col_idx(nhdr, "landing")
+
+    # Sort rows desc by Share (TOTAL rows, if any, sink to the bottom).
+    def share_val(r):
+        if share_i < 0 or share_i >= len(r):
+            return -1
+        v = numparse(r[share_i])
+        return v if v is not None else -1
+    is_total = [r[0].strip().strip("*").upper() == "TOTAL" for r in nrows]
+    idxd = list(range(len(nrows)))
+    idxd.sort(key=lambda k: (is_total[k], -share_val(nrows[k])))
+    nrows = [nrows[k] for k in idxd]
+
+    # Concentration: green until cumulative Share >= 80%; classification label.
+    row_classes = [''] * len(nrows)
+    cum = 0.0
+    conc_rows = 0
+    top_share = 0.0
+    for k, r in enumerate(nrows):
+        if r[0].strip().strip("*").upper() == "TOTAL":
+            continue
+        sv = share_val(r)
+        if sv < 0:
+            continue
+        if k == 0:
+            top_share = sv
+        if cum < TGID_CONCENTRATION_PCT:
+            row_classes[k] = 'ceh-conc'
+            conc_rows += 1
+        cum += sv
+    if top_share > TGID_CONCENTRATION_PCT:
+        cls_label = "Concentrated"
+        cls_note = f"one landing page is {top_share:.0f}% of revenue"
+    elif conc_rows <= 3:
+        cls_label = "Normal"
+        cls_note = f"top {conc_rows} landing pages carry ~{TGID_CONCENTRATION_PCT:.0f}% of revenue"
+    else:
+        cls_label = "Fragmented"
+        cls_note = f"~{conc_rows} landing pages needed to reach {TGID_CONCENTRATION_PCT:.0f}% of revenue"
+
+    # Conditional formatting: CR<80% red + full-URL hover on the identity column.
+    cell_classes = {}
+    cell_html = {}
+    for k, r in enumerate(nrows):
+        if r[0].strip().strip("*").upper() == "TOTAL":
+            continue
+        if lp_i >= 0 and lp_i < len(r):
+            full = r[lp_i].strip().strip("*")
+            if full:
+                cell_html[(k, lp_i)] = (f'<span class="ceh-exp" title="{_html.escape(full)}">'
+                                        f'{_cell(full)}</span>')
+        if cr_i >= 0 and cr_i < len(r):
+            cv = _lead_num(r[cr_i])
+            if cv is not None and cv < 80:
+                cell_classes[(k, cr_i)] = 'ceh-cr-low'
+
+    groups = _landing_groups(nhdr)
+    div_cols = _band_divider_cols(groups, len(nhdr)) if groups else set()
+    pill = (f'<div class="ceh-class">LP classification: {cls_label}'
+            f' <span style="font-weight:400;color:#5a6478;">— {cls_note}</span></div>')
+
+    table = styled_table(nhdr, nrows, sticky_cols=1, sticky_widths=[320],
+                         split_deltas=True, groups=groups, div_cols=div_cols,
+                         row_classes=row_classes, cell_classes=cell_classes,
+                         cell_html=cell_html)
+    note = ('<p style="font-size:11px;color:#888;margin-top:6px;">Green rows = landing '
+            'pages making up ~80% of revenue (sorted by Share). CR&lt;80% flagged red. '
+            'Per-page funnel metrics are in the Funnel section (§10), not joined here.</p>')
     return pill + table + note
 
 
@@ -1336,11 +1540,43 @@ def build_funnel_cards(hdr, rows, period_label="MoM"):
     return f'<div class="metric-cards" style="grid-template-columns:repeat(4,1fr);">{cards}</div>'
 
 
+def _load_insights(run_dir: Path) -> dict:
+    """Load the LLM-authored per-section callouts written by the CE-Health-insights
+    sub-agent (see references/ce_health_insights_guide.md). Shape:
+    { "<section_id>": {"insight": "<HTML>", "sentiment": "pos|neg|flat"}, ... }.
+    Absent / invalid / wrong-shape → {} so the renderer falls back to the
+    deterministic summaries (§3/§9/§7) and shows no callout on the gap sections.
+    Never raises — a failed sub-agent must never blank or break the tab."""
+    f = run_dir / "ce_health_insights.json"
+    try:
+        if not f.exists():
+            return {}
+        obj = json.loads(f.read_text())
+        return obj if isinstance(obj, dict) else {}
+    except Exception:  # noqa: BLE001 — graceful: bad JSON → no insights
+        return {}
+
+
 def build_fragment(run_dir: Path) -> str:
     d = json.loads((run_dir / "ce_health_report.json").read_text())
     md = (run_dir / "ce_health_report.md").read_text()
     V, W = d["vitals"], d["windows"]
     cur, pri = V["current"], V["prior"]
+
+    # LLM-authored per-section callouts (grounded in the facts pack, enriched from CE
+    # Context with ↗ tie-ins). section_insight(bid) returns the HTML string for a
+    # section id or None; each section's block(...) prefers it over the deterministic
+    # summary. Absent/partial → deterministic fallback (§3/§9/§7) / no callout.
+    _insights = _load_insights(run_dir)
+
+    def section_insight(bid):
+        rec = _insights.get(bid)
+        if isinstance(rec, dict):
+            ins = rec.get("insight")
+            return ins if (isinstance(ins, str) and ins.strip()) else None
+        if isinstance(rec, str) and rec.strip():
+            return rec
+        return None
 
     # Window-agnostic delta label: a calendar-month run is MoM; any custom window
     # gets the neutral "vs prior" (the literal "MoM" is wrong for custom ranges).
@@ -1348,13 +1584,23 @@ def build_fragment(run_dir: Path) -> str:
     # bits (columns / Shapley / 4-window table) already carry their own dates.
     period_label = "MoM" if d.get("range") == "month" else "vs prior"
 
-    # §2 — vitals metric cards (TM = post, LM = pre, Δ MoM). Revenue card uses
-    # CE Health's normalised revenue (matches the §2 table); §7 decomposes booking.
+    # §2 — vitals metric cards (TM = post, LM = pre). Pill = arrow + absolute change
+    # + · + relative % (NOT "Δ"; Δ stays in table headers). Revenue card uses CE
+    # Health's normalised revenue (matches the §2 table); §7 decomposes booking.
+    # Money/count cards: abs = post − pre (money/comma-int), rel = pct_delta colour +
+    # rel_pct. Rate cards: abs = pp change, rel = pp / pre. Colour class drives the
+    # arrow (pos ↑ / neg ↓ / flat none) so direction + colour are unambiguous.
     rev_d = pct_delta(cur["revenue"], pri["revenue"]); roi_d = pp_delta(cur["roi_1"], pri["roi_1"])
     tr_d = pp_delta(cur["tr"], pri["tr"]); cr_d = pp_delta(cur["cr"], pri["cr"])
     aov_d = pct_delta(cur["aov"], pri["aov"]); ord_d = pct_delta(cur["orders"], pri["orders"])
+    rev_pill = vitals_pill(_signed_money(cur["revenue"] - pri["revenue"]), rel_pct(cur["revenue"], pri["revenue"]), rev_d[1])
+    ord_pill = vitals_pill(_signed_int(cur["orders"] - pri["orders"]), rel_pct(cur["orders"], pri["orders"]), ord_d[1])
+    aov_pill = vitals_pill(_signed_money(cur["aov"] - pri["aov"]), rel_pct(cur["aov"], pri["aov"]), aov_d[1])
+    tr_pill = vitals_pill(_signed_pp(cur["tr"], pri["tr"]), rel_pct_of_pp(cur["tr"], pri["tr"]), tr_d[1])
+    cr_pill = vitals_pill(_signed_pp(cur["cr"], pri["cr"]), rel_pct_of_pp(cur["cr"], pri["cr"]), cr_d[1])
+    roi_pill = vitals_pill(_signed_pp(cur["roi_1"], pri["roi_1"]), rel_pct_of_pp(cur["roi_1"], pri["roi_1"]), roi_d[1])
     # CVR = funnel CVR (orders/users) from vitals[*].cvr (added by the engine). It's
-    # the SAME metric as the Shapley CVR factor. Rendered as a rate card (pp delta);
+    # the SAME metric as the Shapley CVR factor. Rendered as a rate card (pp + rel %);
     # cards are added per-window grid width below. None-safe (older sidecars omit it).
     cvr_cur, cvr_pri = cur.get("cvr"), pri.get("cvr")
     has_cvr = cvr_cur is not None and cvr_pri is not None
@@ -1362,18 +1608,20 @@ def build_fragment(run_dir: Path) -> str:
     n_cards = 6
     if has_cvr:
         cvr_d = pp_delta(cvr_cur, cvr_pri)
-        cvr_card = card("CVR", f"{cvr_cur:.2f}%", f"Δ {cvr_d[0]} {period_label}", cvr_d[1], f"{cvr_pri:.2f}%")
+        cvr_pill = vitals_pill(_signed_pp(cvr_cur, cvr_pri), rel_pct_of_pp(cvr_cur, cvr_pri), cvr_d[1])
+        cvr_card = card("CVR", f"{cvr_cur:.2f}%", cvr_pill, cvr_d[1], f"{cvr_pri:.2f}%")
         n_cards = 7
     # Card order: Revenue · Orders · CVR · AOV · Take Rate · Completion · ROI. CVR
     # sits with the rate cards (right after Orders, leading the conversion metrics).
     cards = "".join([
-        card("Revenue", money(cur["revenue"]), f"Δ {rev_d[0]} {period_label}", rev_d[1], money(pri["revenue"])),
-        card("Orders", f"{cur['orders']:,}", f"Δ {ord_d[0]} {period_label}", ord_d[1], f"{pri['orders']:,}"),
+        card("Revenue", money(cur["revenue"]), rev_pill, rev_d[1], money(pri["revenue"])),
+        card("Orders", f"{cur['orders']:,}", ord_pill, ord_d[1], f"{pri['orders']:,}"),
         cvr_card,
-        card("AOV", f"${cur['aov']:.0f}", f"Δ {aov_d[0]} {period_label}", aov_d[1], f"${pri['aov']:.0f}"),
-        card("Take Rate", f"{cur['tr']:.1f}%", f"Δ {tr_d[0]} {period_label}", tr_d[1], f"{pri['tr']:.1f}%"),
-        card("Completion", f"{cur['cr']:.1f}%", f"Δ {cr_d[0]} {period_label}", cr_d[1], f"{pri['cr']:.1f}%"),
-        card("ROI(1)", f"{cur['roi_1']:.0f}%", f"Δ {roi_d[0]} {period_label}", roi_d[1], f"{pri['roi_1']:.0f}%"),
+        card("AOV", f"${cur['aov']:.0f}", aov_pill, aov_d[1], f"${pri['aov']:.0f}"),
+        card("Take Rate", f"{cur['tr']:.1f}%", tr_pill, tr_d[1], f"{pri['tr']:.1f}%"),
+        card("Completion", f"{cur['cr']:.1f}%", cr_pill, cr_d[1], f"{pri['cr']:.1f}%",
+             post_class=("ceh-cr-low-val" if (cur.get('cr') is not None and cur['cr'] < 80) else "")),
+        card("ROI(1)", f"{cur['roi_1']:.0f}%", roi_pill, roi_d[1], f"{pri['roi_1']:.0f}%"),
     ])
     rev_norm_pct = pct_delta(cur["revenue"], pri["revenue"])[0]
     book_cur, book_pri = cur.get("revenue_actual"), pri.get("revenue_actual")
@@ -1405,9 +1653,30 @@ def build_fragment(run_dir: Path) -> str:
 
     # §2 — cards + full 4-window table. The primary driver is the Shapley factor with
     # the largest |contribution|; if it maps to a vitals row, bold/mark that row.
-    vh, vr = tables_in(section(md, "CE Vitals"))[0]
-    v_rowcls = [''] * len(vr)
+    # The cards come from the JSON sidecar (always present); the full 4-window table
+    # comes from the md §2. If that md section is missing/empty (unexpected), degrade
+    # to cards-only rather than crash — and the rest of the tab still renders.
+    _vit_tables = tables_in(section(md, "CE Vitals"))
+    if _vit_tables:
+        vh, vr = _vit_tables[0]
+        v_rowcls = [''] * len(vr)
+    else:
+        print("WARN: CE Vitals 4-window table missing — rendering cards only.", file=sys.stderr)
+        vh, vr, v_rowcls = None, None, []
     v_cellhtml = {}
+    v_cellcls = {}
+    # Completion-rate < 80% → red across the vitals 4-window table (same rule as cards/TGID).
+    if vr is not None:
+        for _k, _row in enumerate(vr):
+            _lbl0 = _row[0].strip().strip('*').lower() if _row else ''
+            # The vitals 4-window row for completion rate is labelled "CR" (the card
+            # is "Completion"); match either. Value cols are clean, delta cols (Δ …)
+            # parse to None and are skipped — only level cells < 80 go red.
+            if _row and (_lbl0 == 'cr' or 'completion' in _lbl0):
+                for _i in range(1, len(_row)):
+                    _v = _lead_num(_row[_i])
+                    if _v is not None and _v < 80:
+                        v_cellcls[(_k, _i)] = 'ceh-cr-low'
     driver_note = ""
     if shap_contrib:
         td = shapley_top_driver(shap_contrib)
@@ -1419,18 +1688,23 @@ def build_fragment(run_dir: Path) -> str:
                 'border-left:3px solid #6c8ebf;border-radius:4px;padding:8px 12px;'
                 'margin:8px 0 0;"><strong>Primary driver (Shapley):</strong> '
                 f'{_html.escape(_FLBL[fac])} ({sign}{money(abs(amt))})</p>')
-            pm_k = shapley_top_vitals_row(vh, vr, fac)
-            if pm_k is not None and pm_k < len(vr):
-                v_rowcls[pm_k] = 'highlight-row'
-                nm = vr[pm_k][0].strip().strip("*")
-                v_cellhtml[(pm_k, 0)] = (f'<strong>{_html.escape(nm)}</strong>'
-                                         '<span class="ceh-prime">primary driver</span>')
+            if vr is not None:  # only mark a row if we have the 4-window table
+                pm_k = shapley_top_vitals_row(vh, vr, fac)
+                if pm_k is not None and pm_k < len(vr):
+                    v_rowcls[pm_k] = 'highlight-row'
+                    nm = vr[pm_k][0].strip().strip("*")
+                    v_cellhtml[(pm_k, 0)] = (f'<strong>{_html.escape(nm)}</strong>'
+                                             '<span class="ceh-prime">primary driver</span>')
+    _vit_table_html = (_subhead("Full 4-window comparison")
+                       + styled_table(vh, vr, split_deltas=True, row_classes=v_rowcls,
+                                      cell_classes=v_cellcls, cell_html=v_cellhtml)
+                       ) if vr is not None else ""
     s2 = block("1. CE Vitals", "cehealth-vitals",
                f'<div class="metric-cards" style="grid-template-columns:repeat({n_cards},1fr);">{cards}</div>'
-               + _subhead("Full 4-window comparison")
-               + styled_table(vh, vr, split_deltas=True, row_classes=v_rowcls, cell_html=v_cellhtml)
+               + _vit_table_html
                + driver_note
-               + vit_note)
+               + vit_note,
+               summary=section_insight("cehealth-vitals"))
 
     # §3 Channel Breakdown — Revenue + Share moved to the LEFT (current state first),
     # rule-based benchmark flags on Share, deterministic 2–3 line collapsed summary.
@@ -1454,7 +1728,7 @@ def build_fragment(run_dir: Path) -> str:
             ch_cellhtml[(k, new_sh_i)] = _cell_split(ch_r[k][new_sh_i]) + chip
     s3 = block("4. Channel Breakdown", "cehealth-channels",
                styled_table(ch_h, ch_r, split_deltas=True, cell_html=ch_cellhtml),
-               summary=ch_summary or None)
+               summary=section_insight("cehealth-channels") or ch_summary or None)
 
     # §4 Funnel — 4 KPI cards (MoM Δ) on top, then the 4-window table as YoY detail,
     # then the §10 Landing Pages table folded in as a funnel lens.
@@ -1513,7 +1787,8 @@ def build_fragment(run_dir: Path) -> str:
         '<span style="font-size:11px;font-weight:600;color:#6b7280;background:#eef0f2;'
         'border-radius:10px;padding:2px 8px;margin-left:10px;letter-spacing:.04em;'
         'vertical-align:middle;">EXCLUDES PMAX</span>',
-        "cehealth-funnel", s4_inner)
+        "cehealth-funnel", s4_inner,
+        summary=section_insight("cehealth-funnel"))
 
     # §5 Multi-Year Trajectory — charts replace the two monthly tables (same data),
     # plus a YoY pivot (Predicted Revenue, month × year) rendered beneath the chart.
@@ -1522,6 +1797,21 @@ def build_fragment(run_dir: Path) -> str:
     t_health, t_paid = _l12_tables[0], _l12_tables[-1]
     h_hdr = t_health[0]; hr = t_health[1]
     p_hdr = t_paid[0]; pr_ = t_paid[1]
+
+    # Partial-month guard: the monthly query ends at CURRENT_DATE()-1, so when the run
+    # happens mid-month the trailing month is incomplete (e.g. a run on the 5th gives
+    # ~4 days). Plotted as a full month it reads as a sharp end-of-series drop that's
+    # really just truncation. Drop any trailing row whose month == the generated month
+    # (generated_at's YYYY-MM) so no phantom dip survives. Applied to BOTH monthly
+    # tables since they share this builder. The month label is the first column.
+    _gen_month = str(d.get("generated_at", ""))[:7]
+
+    def _drop_partial_trailing(rows):
+        if _gen_month and rows and str(rows[-1][0]).strip()[:7] == _gen_month:
+            return rows[:-1]
+        return rows
+    hr = _drop_partial_trailing(hr)
+    pr_ = _drop_partial_trailing(pr_)
 
     # Locate monthly-table columns by header name (robust to column reorders / a market
     # that omits a column). A missing column → that series/hover field is omitted, not
@@ -1556,8 +1846,26 @@ def build_fragment(run_dir: Path) -> str:
     p_roi_i = _col_idx(p_hdr, "paid roi", "roi")
     p_cvr_i = _col_idx(p_hdr, "cvr")
     clicks = _series(pr_, p_clicks_i); paidroi = _series(pr_, p_roi_i)
-    c_rev = ('<div id="chart-cehealth-l12m-rev" class="chart-container" style="width:100%"></div>'
-             f'''<script>Plotly.newPlot('chart-cehealth-l12m-rev',[{{type:'bar',name:'Revenue',x:{json.dumps(months)},y:{json.dumps(rev)},customdata:{json.dumps(h_custom)},hovertemplate:{json.dumps(rev_hover)},marker:{{color:'#6c8ebf'}}}},{{type:'scatter',mode:'lines+markers',name:'Orders',x:{json.dumps(months)},y:{json.dumps(orders)},customdata:{json.dumps(h_custom)},hovertemplate:{json.dumps(rev_hover)},line:{{color:'#c62828',width:2}},yaxis:'y2'}}],{{height:300,autosize:true,margin:{{l:62,r:55,t:14,b:55}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},legend:{{orientation:'h',y:-0.25}},yaxis:{{title:'Revenue',tickprefix:'$',gridcolor:'#eef'}},yaxis2:{{title:'Orders',overlaying:'y',side:'right',showgrid:false}}}},{{responsive:true,displayModeBar:false}});</script>''')
+    # CVR-chart source resolution (honesty fix). The monthly CVR YoY chart must never
+    # conflate Site CVR (funnel: converters / LP-users, what §2 vitals show) with Paid
+    # CVR (ad conv / ad clicks). Prefer a monthly *Site* CVR column if the engine
+    # surfaces one (header matches "site_cvr" / "site cvr"); look in the health table
+    # first, then the paid table. If none exists yet, fall back to the existing paid
+    # CVR column BUT title the chart "Paid CVR (monthly)" so the basis is explicit.
+    # (Engine handoff to add a monthly site_cvr series is pending; this auto-prefers it.)
+    h_site_cvr_i = _col_idx(h_hdr, "site_cvr", "site cvr")
+    p_site_cvr_i = _col_idx(p_hdr, "site_cvr", "site cvr")
+    if h_site_cvr_i >= 0:
+        cvr_chart_rows, cvr_chart_hdr, cvr_chart_i = hr, h_hdr, h_site_cvr_i
+        cvr_chart_title, cvr_chart_label = "Site CVR (monthly)", "Site CVR"
+    elif p_site_cvr_i >= 0:
+        cvr_chart_rows, cvr_chart_hdr, cvr_chart_i = pr_, p_hdr, p_site_cvr_i
+        cvr_chart_title, cvr_chart_label = "Site CVR (monthly)", "Site CVR"
+    else:
+        cvr_chart_rows, cvr_chart_hdr, cvr_chart_i = pr_, p_hdr, p_cvr_i
+        cvr_chart_title, cvr_chart_label = "Paid CVR (monthly)", "Paid CVR"
+    # (The old Revenue+Orders dual-axis chart is replaced by the single-metric
+    # selector chart `c_metric`, built below once the CVR series is resolved.)
     c_paid = ('<div id="chart-cehealth-l12m-paid" class="chart-container" style="width:100%"></div>'
               f'''<script>Plotly.newPlot('chart-cehealth-l12m-paid',[{{type:'bar',name:'Clicks',x:{json.dumps(months)},y:{json.dumps(clicks)},marker:{{color:'#90a4d4'}}}},{{type:'scatter',mode:'lines+markers',name:'Paid ROI %',x:{json.dumps(months)},y:{json.dumps(paidroi)},line:{{color:'#43A047',width:2}},yaxis:'y2'}}],{{height:300,autosize:true,margin:{{l:62,r:55,t:14,b:55}},plot_bgcolor:'#fff',paper_bgcolor:'#fff',font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},legend:{{orientation:'h',y:-0.25}},yaxis:{{title:'Clicks',gridcolor:'#eef'}},yaxis2:{{title:'Paid ROI %',overlaying:'y',side:'right',showgrid:false,ticksuffix:'%'}}}},{{responsive:true,displayModeBar:false}});</script>''')
     # Year-overlay charts: group monthly YYYY-MM data into one trace per calendar year,
@@ -1621,16 +1929,63 @@ def build_fragment(run_dir: Path) -> str:
     yoy_html = yoy_chart("chart-cehealth-yoy-rev", "Revenue YoY", "Revenue",
                          months, rev, tickprefix="$",
                          cmap=rev_cmap, hovertemplate=yoy_rev_hover)
-    # CVR lives in the paid table; show CVR + clicks/paid-ROI context (all by header name).
-    cvr_keys = [_mkey(r, p_month_i) for r in pr_]
-    cvr_vals = _series(pr_, p_cvr_i)
-    cvr_cmap = {_mkey(r, p_month_i): [_cell_at(r, p_cvr_i), _cell_at(r, p_clicks_i),
-                                      _cell_at(r, p_roi_i)] for r in pr_}
-    yoy_cvr_hover = ("<b>%{x} %{data.name}</b><br>CVR %{customdata[0]}"
+    # CVR chart: plot the resolved CVR source (Site CVR if a monthly site_cvr column
+    # exists, else Paid CVR — see resolution above). Title states the basis explicitly
+    # so Site vs Paid is never conflated. clicks/paid-ROI context come from the paid
+    # table (matched by month key) regardless of which CVR series is plotted.
+    cvr_month_i = _col_idx(cvr_chart_hdr, "month")
+    cvr_keys = [_mkey(r, cvr_month_i) for r in cvr_chart_rows]
+    cvr_vals = _series(cvr_chart_rows, cvr_chart_i)
+    # Paid clicks/ROI by month key for the hover context.
+    _paid_ctx = {_mkey(r, p_month_i): [_cell_at(r, p_clicks_i), _cell_at(r, p_roi_i)] for r in pr_}
+    cvr_cmap = {_mkey(r, cvr_month_i): [_cell_at(r, cvr_chart_i)]
+                + _paid_ctx.get(_mkey(r, cvr_month_i), ["", ""]) for r in cvr_chart_rows}
+    yoy_cvr_hover = ("<b>%{x} %{data.name}</b><br>" + cvr_chart_label + " %{customdata[0]}"
                      "<br>Clicks %{customdata[1]}<br>Paid ROI %{customdata[2]}<extra></extra>")
-    yoy_html += yoy_chart("chart-cehealth-yoy-cvr", "CVR YoY", "CVR %",
+    yoy_html += yoy_chart("chart-cehealth-yoy-cvr", cvr_chart_title, cvr_chart_label + " %",
                           cvr_keys, cvr_vals, ticksuffix="%",
                           cmap=cvr_cmap, hovertemplate=yoy_cvr_hover)
+    # §2 metric-selector chart — replaces the old Revenue+Orders dual-axis chart.
+    # ONE always-visible Plotly line chart + native `updatemenus` buttons that swap the
+    # shown metric AND reformat the y-axis. Single-metric only (no multi-axis problem;
+    # each metric auto-scales its own axis). All series come from the monthly health
+    # table (Revenue/Orders/ROI/CR/TR/AOV) + the resolved CVR series, aligned to `months`.
+    _cvr_by_month = {k: v for k, v in zip(cvr_keys, cvr_vals)}
+    _cvr_aligned = [_cvr_by_month.get(m) for m in months]
+    _sel = [
+        ("Revenue", rev, "$", "", "Revenue"),
+        ("Orders", orders, "", "", "Orders"),
+        ("ROI", _series(hr, h_roi_i), "", "%", "ROI %"),
+        ("Completion", _series(hr, h_cr_i), "", "%", "Completion %"),
+        ("Take Rate", _series(hr, h_tr_i), "", "%", "Take Rate %"),
+        ("AOV", _series(hr, h_aov_i), "$", "", "AOV"),
+        (cvr_chart_label, _cvr_aligned, "", "%", cvr_chart_label + " %"),
+    ]
+    _sel_traces = [{"type": "scatter", "mode": "lines+markers", "name": nm,
+                    "x": months, "y": ys, "visible": (i == 0),
+                    "line": {"color": _COLORS[i % len(_COLORS)], "width": 2},
+                    "marker": {"size": 4}}
+                   for i, (nm, ys, _tp, _ts, _tt) in enumerate(_sel)]
+    _sel_buttons = [{"method": "update", "label": nm,
+                     "args": [{"visible": [j == i for j in range(len(_sel))]},
+                              {"yaxis": {"title": tt, "tickprefix": tp, "ticksuffix": ts,
+                                         "gridcolor": "#eef"}}]}
+                    for i, (nm, _ys, tp, ts, tt) in enumerate(_sel)]
+    _sel_layout = {"height": 320, "autosize": True,
+                   "margin": {"l": 64, "r": 30, "t": 48, "b": 55},
+                   "plot_bgcolor": "#fff", "paper_bgcolor": "#fff",
+                   "font": {"family": "-apple-system,sans-serif", "size": 11, "color": "#1a1a2e"},
+                   "showlegend": False,
+                   "yaxis": {"title": "Revenue", "tickprefix": "$", "gridcolor": "#eef"},
+                   "updatemenus": [{"type": "buttons", "direction": "right",
+                                    "x": 0, "xanchor": "left", "y": 1.16, "yanchor": "top",
+                                    "showactive": True, "active": 0, "bgcolor": "#f6f6fa",
+                                    "pad": {"r": 4, "t": 4}, "font": {"size": 11},
+                                    "buttons": _sel_buttons}]}
+    c_metric = ('<div id="chart-cehealth-l12m-metric" class="chart-container" style="width:100%"></div>'
+                f'<script>Plotly.newPlot("chart-cehealth-l12m-metric",{json.dumps(_sel_traces)},'
+                f'{json.dumps(_sel_layout)},{{responsive:true,displayModeBar:false}});</script>')
+
     # "(new)" pill when history is thin (no LY) — engine emits has_ly/history_months.
     new_pill = "" if d.get("has_ly", True) else '<span class="ceh-new">new</span>'
     # Linear ↔ YoY view toggle so the 4 charts aren't stacked. Default = Linear.
@@ -1659,20 +2014,26 @@ def build_fragment(run_dir: Path) -> str:
                    "try{window.Plotly.Plots.resize(el);}catch(err){}});});})();</script>")
     traj_body = (traj_toggle
                  + '<div class="ceh-traj ceh-traj-linear active">'
-                 + _subhead("CE Health (Monthly)") + c_rev
+                 + _subhead("CE Health (Monthly)") + c_metric
                  + _subhead("Paid Performance (Monthly)") + c_paid + '</div>'
                  + '<div class="ceh-traj ceh-traj-yoy">' + yoy_html + '</div>'
                  + traj_script)
-    s5 = block("2. Revenue Trajectory" + (" " if new_pill else ""), "cehealth-l12m",
+    s5 = block("2. Metric trajectory" + (" " if new_pill else ""), "cehealth-l12m",
                (traj_style + new_pill + traj_body
                 + '<p style="font-size:12px;color:#777;margin-top:8px;">Charts visualise CE Health\'s '
-                'monthly tables (same data). The full monthly tables remain in the CE Health source.</p>'))
+                'monthly tables (same data). The full monthly tables remain in the CE Health source.</p>'),
+               summary=section_insight("cehealth-l12m"))
 
     # §6 Top TGIDs — single main table (Order/Funnel groups + blue dividers, RPC in
     # Funnel, 80%-concentration green, classification pill, CR<80% / S2C / C2O
     # conditional formatting, derived-S2O flag), plus a SEPARATE TGID × Lead-time mix
     # table below, plus the §9 CE-level lead-time cohorts (its own collapsible block).
-    tg = tables_in(section(md, "Top TGIDs"))[0]
+    # The engine emits up to TWO TGID tables: [0] MoM (current vs prior), [1] YoY
+    # (current vs LY-same-period; present only when LY data exists). Render the MoM
+    # table as the main view; when a YoY table is present, wrap both in a "Compare
+    # current vs" toggle (same panel-switch widget as the funnel-by-dimension drop).
+    _tg_tbls = tables_in(section(md, "Top TGIDs"))
+    tg = _tg_tbls[0]
     try:
         tgid_main = build_tgid_main(tg[0], tg[1])
         tgid_lead = build_tgid_leadtime(tg[0], tg[1])
@@ -1681,63 +2042,135 @@ def build_fragment(run_dir: Path) -> str:
         tgid_main = styled_table(tg[0], tg[1], sticky_cols=2, sticky_widths=[64, 210],
                                  split_deltas=True, groups=_tgid_groups(tg[0]))
         tgid_lead = ""
-    s6_inner = tgid_main
+    tgid_yoy = None
+    if len(_tg_tbls) > 1:
+        try:
+            tgid_yoy = build_tgid_main(_tg_tbls[1][0], _tg_tbls[1][1])
+        except Exception as e:  # noqa: BLE001 — YoY is additive; drop it if it fails
+            print(f"WARN: TGID YoY view failed ({e}); MoM only.", file=sys.stderr)
+            tgid_yoy = None
+    if tgid_yoy:
+        s6_inner = build_fdim_dropdown(
+            [("mom", "vs Pre period", tgid_main), ("yoy", "vs LY (same period)", tgid_yoy)],
+            label="Compare current vs:")
+    else:
+        s6_inner = tgid_main
     if tgid_lead:
         s6_inner += _subhead("TGID × Lead-time mix") + tgid_lead
-    s6 = block("6. Top TGIDs", "cehealth-tgids", s6_inner)
+    s6 = block("6. Top TGIDs", "cehealth-tgids", s6_inner,
+               summary=section_insight("cehealth-tgids"))
+
+    # §6b Top Landing Pages — sales matrix at landing-page grain, mirroring the TGID
+    # table but with a single identity column. Graceful: empty string if the source
+    # markdown lacks the section (e.g. older runs), so the block silently drops.
+    # The engine emits up to TWO landing tables: [0] MoM (current vs prior), [1] YoY
+    # (current vs LY-same-period; present only when LY data exists). Mirror the TGID
+    # toggle: render MoM as the main view, and when YoY is present wrap both in a
+    # "Compare current vs" dropdown (same widget as TGID / funnel-by-dimension).
+    _lp_tbls = tables_in(section(md, "Top Landing Pages"))
+    if _lp_tbls:
+        try:
+            lp_main = build_landing_main(_lp_tbls[0][0], _lp_tbls[0][1])
+        except Exception as e:  # noqa: BLE001 — never emit a broken table
+            print(f"WARN: landing-page enrichment failed ({e}); plain table fallback.", file=sys.stderr)
+            lp_main = styled_table(_lp_tbls[0][0], _lp_tbls[0][1], split_deltas=True)
+        lp_yoy = None
+        if len(_lp_tbls) > 1:
+            try:
+                lp_yoy = build_landing_main(_lp_tbls[1][0], _lp_tbls[1][1])
+            except Exception as e:  # noqa: BLE001 — YoY is additive; drop it if it fails
+                print(f"WARN: landing-page YoY view failed ({e}); MoM only.", file=sys.stderr)
+                lp_yoy = None
+        if lp_yoy:
+            lp_inner = build_fdim_dropdown(
+                [("mom", "vs Pre period", lp_main), ("yoy", "vs LY (same period)", lp_yoy)],
+                label="Compare current vs:")
+        else:
+            lp_inner = lp_main
+        s_landing = block("7. Top Landing Pages", "cehealth-landing-pages", lp_inner,
+                          summary=section_insight("cehealth-landing-pages"))
+    else:
+        s_landing = ""
 
     # Vendor Breakdown — supply/sales landscape, right after TGID. Two-line
     # value+delta cells (MoM revenue Δ); graceful: empty string if absent.
     _vb = tables_in(section(md, "Vendor Breakdown"))
-    s_vendor = (block("7. Vendor Breakdown", "cehealth-vendors",
-                      styled_table(*_vb[0], split_deltas=True))
+    s_vendor = (block("8. Vendor Breakdown", "cehealth-vendors",
+                      styled_table(*_vb[0], split_deltas=True),
+                      summary=section_insight("cehealth-vendors"))
                 if _vb else "")
 
     # §7 Driver Diagnosis (Shapley) — corrected 6-factor waterfall, reusing the
     # `shap_raw` already pulled above (no double-query). On any Query-1 failure
     # (shap_raw is None), fall back to CE Health's §7 table, verbatim.
+    _shap_ins = section_insight("cehealth-shapley")
     if shap_raw is not None:
-        s7 = build_shapley_block(shap_raw, W)
+        # When an LLM insight exists it becomes the section-top callout and the
+        # deterministic verdict is dropped (drag/lift detail is already in the chart);
+        # absent → the deterministic verdict renders as before.
+        s7 = build_shapley_block(shap_raw, W, insight=_shap_ins)
         print("§7 Shapley: corrected 6-factor waterfall (Query 1 OK)")
     else:
         print("WARN: Query 1 unavailable; rendering CE Health's §7 table verbatim.", file=sys.stderr)
         sec7 = section(md, "Driver Diagnosis")
         tbls = tables_in(sec7)
         inner = styled_table(*tbls[0], split_deltas=True) if tbls else f'<div class="md-content">{render_markdown_to_html(sec7)}</div>'
-        s7 = block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner)
+        s7 = block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner,
+                   summary=_shap_ins)
 
-    # §8 Historical Context — CE Health's markdown, plus our institutional memory
-    # (prior RCAs for this CE) and any user-provided context captured this run.
-    hist = ce_history_block(run_dir)          # synthesised trajectory (sub-agent)
-    prior = prior_runs_block(run_dir, ce_id)  # deterministic prior-run index + links
-    uctx = user_context_subsection(run_dir)   # user-provided + recent Slack
-    # Strip CE Health's filesystem-search placeholders + the interactive "Add your
-    # context" prompt — neither belongs in a report. After stripping, CE Health's
-    # own §8 is often empty (no thoughts/shared dir in the bundle), so we render its
-    # block ONLY when something real survives — otherwise it's an empty box.
-    hist_md = _clean_history_md(section(md, "Historical Context")).strip()
-    parts = []
-    if hist_md:
-        parts.append(f'<div class="md-content">{render_markdown_to_html(hist_md)}</div>')
-    parts += [hist, prior, uctx]
-    inner = "".join(p for p in parts if p and p.strip())
-    if not inner.strip():  # first-ever run, no Slack, no context → don't show an empty card
-        inner = ('<div class="md-content"><p style="color:#8a8a8a;">'
-                 'No prior RCAs or added context for this CE yet.</p></div>')
-    s8 = block("9. Historical Context", "cehealth-history", inner)
+    # Historical Context (CE history + prior-run index + user context) has MOVED to
+    # its own "CE Context" tab (render_ce_context.py, which imports the three block
+    # builders — ce_history_block / prior_runs_block / user_context_subsection — from
+    # this module). CE Health is now a pure data/metrics tab; no §Historical block here.
 
-    # §9 Lead Time Cohorts — all rows + rule-based dominant-band callout (collapsed).
+    # Lead Time Cohorts — all rows + rule-based dominant-band callout (collapsed).
     lt_h, lt_r = tables_in(section(md, "Lead Time Cohorts"))[0]
     lt_summary = leadtime_summary(lt_h, lt_r)
-    s9 = block("8. Lead Time Cohorts", "cehealth-leadtime",
+    s9 = block("9. Lead Time Cohorts", "cehealth-leadtime",
                styled_table(lt_h, lt_r, split_deltas=True),
                summary=lt_summary or None)
 
     # §10 Landing Pages — folded into the Funnel block (§4) as a funnel lens.
 
-    # §11 Customer Countries — ALL rows
+    # Customer Countries — ALL rows
     s11 = block("10. Customer Countries", "cehealth-countries",
-                styled_table(*tables_in(section(md, "Customer Countries"))[0], split_deltas=True))
+                styled_table(*tables_in(section(md, "Customer Countries"))[0], split_deltas=True),
+                summary=section_insight("cehealth-countries"))
+
+    # "Where are bookings coming from?" — L12M revenue matrix with a Channel /
+    # Landing Page dropdown. Each panel is a wide table (first column sticky/frozen,
+    # 12 month columns, scrolls horizontally) plus an inline-SVG sparkline of each
+    # row's 12-month trend. Graceful: a missing table → a short note; both missing
+    # → the whole section is omitted.
+    _na = '<p style="color:#8a8a8a;">Monthly revenue not available for this dimension.</p>'
+
+    def _rev_matrix_panel(sec_name):
+        tabs = tables_in(section(md, sec_name))
+        if not tabs:
+            return None
+        hdr, rows = tabs[0]
+        hdr = hdr + ["Trend"]
+        out_rows = []
+        cell_html = {}
+        for k, r in enumerate(rows):
+            vals = [numparse(c) for c in r[1:]]  # skip the dimension-name column
+            out_rows.append(r + [""])
+            spark = _sparkline(vals)
+            cell_html[(k, len(hdr) - 1)] = spark or "—"
+        return styled_table(hdr, out_rows, sticky_cols=1, cell_html=cell_html)
+
+    bs_panels = []
+    _bs_ch = _rev_matrix_panel("Monthly Revenue by Channel")
+    bs_panels.append(("channel", "Channel", _bs_ch if _bs_ch else _na))
+    _bs_lp = _rev_matrix_panel("Monthly Revenue by Landing Page")
+    bs_panels.append(("landing", "Landing Page", _bs_lp if _bs_lp else _na))
+    if _bs_ch is None and _bs_lp is None:
+        s_bookings_src = ""
+    else:
+        s_bookings_src = block(
+            "Last 12-month revenue over channel/Landing Pages",
+            "cehealth-bookings-source",
+            build_fdim_dropdown(bs_panels, label="Break revenue down by:"))
 
     footer = (f'<footer style="text-align:center;font-size:12px;color:#aaa;padding:18px;">'
               f'CE Health v2.0 | {d.get("generated_at", "")} | {d.get("range", "month")} windows</footer>')
@@ -1745,19 +2178,21 @@ def build_fragment(run_dir: Path) -> str:
               "if(window.Plotly)document.querySelectorAll('#tab-cehealth .js-plotly-plot')"
               ".forEach(function(el){try{window.Plotly.Plots.resize(el);}catch(e){}});},200);});</script>")
 
-    # Page order (Wave A): Vitals → Revenue trajectory → Channels → Funnel (Landing
-    # folded in) → TGID (+ TGID×lead-time) → Lead-time cohorts → Historical → Driver
-    # diagnosis → Customer countries.
+    # Page order: Vitals → Revenue trajectory → Driver diagnosis (Shapley) → Channels
+    # → Funnel (Landing folded in) → TGIDs → Top Landing Pages → Vendors → Lead-time
+    # cohorts → Customer countries. (Historical/user/Slack context now lives in the
+    # separate CE Context tab — see render_ce_context.py.)
     ordered = [
         ("cehealth-vitals", s2),
         ("cehealth-l12m", s5),
         ("cehealth-shapley", s7),
         ("cehealth-channels", s3),
+        ("cehealth-bookings-source", s_bookings_src),
         ("cehealth-funnel", s4),
         ("cehealth-tgids", s6),
+        ("cehealth-landing-pages", s_landing),
         ("cehealth-vendors", s_vendor),
         ("cehealth-leadtime", s9),
-        ("cehealth-history", s8),
         ("cehealth-countries", s11),
     ]
     # Apply the default-open set centrally: collapse every block NOT in
@@ -1779,15 +2214,418 @@ def build_fragment(run_dir: Path) -> str:
             + footer + '</div>' + CEH_COLLAPSE_SCRIPT + CEH_FDIM_STYLE + CEH_FDIM_SCRIPT + resize)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Facts pack (--emit-facts) — the compact, grounded data backbone the CE-Health
+# insights sub-agent phrases into per-section one-liners. NO bq, NO raw table
+# dumps: every number here is read from ce_health_report.{md,json} and the existing
+# deterministic generators, so the facts pack is fast + reproducible. The sub-agent
+# (see references/ce_health_insights_guide.md) may cite ONLY these numbers in a
+# section's data line, then enrich from the CE Context artifacts with a ↗ tie-in.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _round(v, n=1):
+    """Round a float for the facts pack; None passes through. Keeps the JSON small
+    and the numbers human-cite-able (no 12-dp noise)."""
+    try:
+        return round(float(v), n)
+    except (TypeError, ValueError):
+        return None
+
+
+def _funnel_facts(md):
+    """Worst rate-stage MoM drop (LP2S/S2C/C2O) + whether the others held — mirrors
+    the §4 worst-step flag in build_fragment. Returns {} on odd shapes."""
+    tbls = tables_in(section(md, "Funnel"))
+    if not tbls:
+        return {}
+    hdr, rows = tbls[0]
+    di = _col_idx(hdr, "vs prior")
+    if di < 0:
+        di = _col_idx(hdr, "mom")
+    cur_i = 1  # first value column = current window
+    stage_d = {}
+    for r in rows:
+        nm = r[0].strip().strip("*").lower()
+        if nm in ("lp2s", "s2c", "c2o") and 0 <= di < len(r):
+            m = re.search(r'[+\-−]?[\d.,]+', r[di].replace('−', '-'))
+            if m:
+                try:
+                    stage_d[nm.upper()] = float(m.group().replace(',', ''))
+                except ValueError:
+                    pass
+    if not stage_d:
+        return {}
+    worst = min(stage_d, key=stage_d.get)
+    others_ok = all(v > -1.0 for k, v in stage_d.items() if k != worst)
+    cur_vals = {}
+    for r in rows:
+        nm = r[0].strip().strip("*").lower()
+        if nm in ("lp2s", "s2c", "c2o") and cur_i < len(r):
+            cur_vals[nm.upper()] = numparse(r[cur_i])
+    return {
+        "worst_step": worst,
+        "delta_pp": _round(stage_d[worst], 1),
+        "stage_deltas_pp": {k: _round(v, 1) for k, v in stage_d.items()},
+        "current_pct": {k: _round(v, 1) for k, v in cur_vals.items()},
+        "others_ok": others_ok,
+    }
+
+
+def _share_table_facts(md, name, id_kw, top_n=3):
+    """Generic 'top-N by Share' concentration facts for the TGID / Landing / Vendor /
+    Country tables: top item name + share %, topN cumulative share %, item count.
+    `id_kw` matches the identity column. Returns {} on odd shapes."""
+    tbls = tables_in(section(md, name))
+    if not tbls:
+        return {}
+    hdr, rows = tbls[0]
+    share_i = _col_idx(hdr, "share")
+    name_i = _col_idx(hdr, *id_kw)
+    if name_i < 0:
+        name_i = 0
+    if share_i < 0:
+        return {}
+    items = []
+    for r in rows:
+        if share_i >= len(r):
+            continue
+        nm = r[name_i].strip().strip("*") if name_i < len(r) else ""
+        if nm.upper() == "TOTAL" or not nm:
+            continue
+        v = numparse(r[share_i])
+        if v is not None:
+            items.append((nm, v))
+    if not items:
+        return {}
+    items.sort(key=lambda x: -x[1])
+    topn = items[:top_n]
+    return {
+        "item_count": len(items),
+        "top_item": topn[0][0][:60],
+        "top_share_pct": _round(topn[0][1], 1),
+        f"top{top_n}_share_pct": _round(sum(v for _, v in topn), 1),
+        "top_items": [{"name": n[:60], "share_pct": _round(s, 1)} for n, s in topn],
+    }
+
+
+def _tgid_facts(md):
+    """TGID concentration facts, reusing build_tgid_main's classification + the share
+    backbone. Adds the flagship (top-share) TGID's notable MoM moves (C2O/CR if the
+    columns carry deltas)."""
+    base = _share_table_facts(md, "Top TGIDs", ("experience", "tgid"), top_n=3)
+    if not base:
+        return {}
+    tbls = tables_in(section(md, "Top TGIDs"))
+    hdr, rows = tbls[0]
+    share_i = _col_idx(hdr, "share")
+    # Flagship = highest-share row; pull any trailing-delta moves on its rate columns.
+    flagship = None
+    if share_i >= 0:
+        best = None
+        for r in rows:
+            if r and r[0].strip().strip("*").upper() == "TOTAL":
+                continue
+            v = numparse(r[share_i]) if share_i < len(r) else None
+            if v is not None and (best is None or v > best[0]):
+                best = (v, r)
+        if best:
+            r = best[1]
+            moves = {}
+            for col in ("c2o", "s2c", "cr", "rpc"):
+                ci = _col_idx(hdr, col)
+                if 0 <= ci < len(r):
+                    m = _TRAIL_DELTA.match(r[ci].strip())
+                    if m:
+                        moves[col.upper()] = m.group("delta")
+            flagship = {"moves": moves} if moves else None
+    # Classify like build_tgid_main: count rows until cumulative Share >= ~80%
+    # (Concentrated if one TGID alone clears it, Normal if <=3 rows, else Fragmented).
+    top_share = base.get("top_share_pct") or 0
+    cum = 0.0
+    conc_rows = 0
+    for it in base.get("top_items", []):
+        if cum < TGID_CONCENTRATION_PCT:
+            conc_rows += 1
+        cum += it.get("share_pct") or 0
+    # top_items is capped at top_n; if 80% isn't reached within it, treat as fragmented.
+    reached_80 = (sum((it.get("share_pct") or 0) for it in base.get("top_items", []))
+                  >= TGID_CONCENTRATION_PCT)
+    if top_share > TGID_CONCENTRATION_PCT:
+        cls = "Concentrated"
+    elif reached_80 and conc_rows <= 3:
+        cls = "Normal"
+    else:
+        cls = "Fragmented"
+    base["classification"] = cls
+    if flagship:
+        base["flagship_moves"] = flagship["moves"]
+    return base
+
+
+def _vitals_facts(d):
+    """Headline vitals deltas from the JSON sidecar (no bq). Each metric carries its
+    current value, prior value, and signed % / pp delta — the exact figures the §2
+    cards show. The Shapley primary driver lives in the `shapley` facts (needs bq),
+    so it is NOT duplicated here."""
+    V = d.get("vitals", {})
+    cur, pri = V.get("current", {}), V.get("prior", {})
+
+    def _pct(k):
+        return pct_delta(cur.get(k), pri.get(k))[0] if cur.get(k) is not None and pri.get(k) else None
+
+    def _pp(k):
+        if cur.get(k) is None or pri.get(k) is None:
+            return None
+        return _round(cur[k] - pri[k], 2)
+
+    out = {
+        "revenue": cur.get("revenue"), "revenue_delta_pct": _pct("revenue"),
+        "revenue_actual": cur.get("revenue_actual"),
+        "orders": cur.get("orders"), "orders_delta_pct": _pct("orders"),
+        "aov": _round(cur.get("aov"), 0), "aov_delta_pct": _pct("aov"),
+        "cr_pct": _round(cur.get("cr"), 1), "cr_delta_pp": _pp("cr"),
+        "tr_pct": _round(cur.get("tr"), 1), "tr_delta_pp": _pp("tr"),
+        "roi_1_pct": _round(cur.get("roi_1"), 0), "roi_1_delta_pp": _pp("roi_1"),
+    }
+    if cur.get("cvr") is not None:
+        out["cvr_pct"] = _round(cur.get("cvr"), 2)
+        out["cvr_delta_pp"] = _pp("cvr")
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _shapley_facts(md):
+    """Top drag + top lift + net Δ from CE Health's own §7 Driver Diagnosis table
+    (md, no bq — the renderer's corrected 6-factor waterfall needs Query 1 and is
+    NOT recomputed here). Embeds the table's own factor list as `det_summary`."""
+    tbls = tables_in(section(md, "Driver Diagnosis"))
+    if not tbls:
+        return {}
+    hdr, rows = tbls[0]
+    fac_i = 0
+    imp_i = _col_idx(hdr, "impact", "$")
+    if imp_i < 0:
+        imp_i = 1
+    facs = []
+    for r in rows:
+        if imp_i >= len(r):
+            continue
+        nm = r[fac_i].strip().strip("*")
+        v = numparse(r[imp_i])
+        if nm and v is not None:
+            facs.append((nm, v))
+    if not facs:
+        return {}
+    drags = sorted([f for f in facs if f[1] < 0], key=lambda x: x[1])
+    lifts = sorted([f for f in facs if f[1] > 0], key=lambda x: -x[1])
+    return {
+        "top_drag": ({"factor": drags[0][0], "usd": _round(drags[0][1], 0)} if drags else None),
+        "top_lift": ({"factor": lifts[0][0], "usd": _round(lifts[0][1], 0)} if lifts else None),
+        "factors": [{"factor": n, "usd": _round(v, 0)} for n, v in facs],
+        "det_summary": ("CE Health §7 names "
+                        + (f"{drags[0][0]} as the primary drag" if drags else "no drag")
+                        + (f", offset by {lifts[0][0]}" if lifts else "")
+                        + " (this is CE Health's own 5-factor table; the rendered tab "
+                          "uses a corrected 6-factor waterfall)."),
+    }
+
+
+def _channels_facts(md):
+    """Primary channel + its share + the deterministic flag summary, reusing
+    channel_flags_and_summary (the same function that feeds the §4 callout)."""
+    tbls = tables_in(section(md, "Channel Breakdown"))
+    if not tbls:
+        return {}
+    hdr, rows = tbls[0]
+    chips, summary = channel_flags_and_summary(hdr, rows)
+    share_i = _col_idx(hdr, "share")
+    name_i = _col_idx(hdr, "channel")
+    if name_i < 0:
+        name_i = 0
+    primary, primary_share = None, None
+    if share_i >= 0:
+        best = None
+        for r in rows:
+            nm = r[name_i].strip().strip("*") if name_i < len(r) else ""
+            if nm.upper() == "TOTAL" or not nm:
+                continue
+            v = numparse(r[share_i]) if share_i < len(r) else None
+            if v is not None and (best is None or v > best[1]):
+                best = (nm, v)
+        if best:
+            primary, primary_share = best
+    return {
+        "primary_channel": primary,
+        "share_pct": _round(primary_share, 1),
+        "flag_count": len(chips),
+        "det_summary": summary or None,
+    }
+
+
+def _leadtime_facts(md):
+    """Dominant lead-time band + its share + skew flag, reusing leadtime_summary for
+    the deterministic callout text."""
+    tbls = tables_in(section(md, "Lead Time Cohorts"))
+    if not tbls:
+        return {}
+    hdr, rows = tbls[0]
+    summary = leadtime_summary(hdr, rows)
+    band_i = _col_idx(hdr, "band")
+    if band_i < 0:
+        band_i = 0
+    share_i = _col_idx(hdr, "share")
+    bands = []
+    if share_i >= 0:
+        for r in rows:
+            if share_i >= len(r):
+                continue
+            nm = r[band_i].strip().strip("*") if band_i < len(r) else ""
+            if nm.upper() == "TOTAL" or not nm:
+                continue
+            v = numparse(r[share_i])
+            if v is not None:
+                bands.append((nm, v))
+    dom = max(bands, key=lambda x: x[1]) if bands else (None, None)
+    return {
+        "dominant_band": dom[0],
+        "share_pct": _round(dom[1], 1),
+        "skew": (None if not dom[0] else ("near-term" if str(dom[0]).startswith("0-2") else "long-lead")),
+        "det_summary": summary or None,
+    }
+
+
+def _l12m_facts(d, md):
+    """Trajectory facts: history depth + LY availability, plus a compact revenue-trend
+    story parsed from the §5 'CE Health (Monthly)' table (direction, latest vs peak) so
+    the insight agent can phrase the trajectory, paired with the §2 YoY in `vitals`."""
+    out = {"has_ly": bool(d.get("has_ly", False))}
+    if d.get("history_months") is not None:
+        out["history_months"] = d.get("history_months")
+
+    def _rev(s):
+        s = s.strip().replace("$", "").replace(",", "")
+        mult = 1.0
+        if s[-1:] == "K":
+            mult, s = 1e3, s[:-1]
+        elif s[-1:] == "M":
+            mult, s = 1e6, s[:-1]
+        try:
+            return float(s) * mult
+        except ValueError:
+            return None
+
+    try:
+        tbls = tables_in(section(md, "Multi-Year Trajectory"))
+        _hdr, rows = tbls[0]  # CE Health (Monthly): Month | Revenue | ...
+        series = [(r[0], _rev(r[1])) for r in rows if len(r) > 1 and _rev(r[1]) is not None]
+        if len(series) >= 3:
+            vals = [v for _, v in series]
+            latest_m, latest_v = series[-1]
+            peak_m, peak_v = max(series, key=lambda x: x[1])
+            # The final monthly bucket is the in-progress (partial) month when it
+            # coincides with the run's post-window cutoff — don't read it as a decline.
+            _cur = (d.get("windows") or {}).get("current") or []
+            post_end = _cur[1] if len(_cur) >= 2 else None
+            partial = bool(post_end and latest_m == str(post_end)[:7])
+            complete_m, complete_v = (series[-2] if partial and len(series) >= 2 else series[-1])
+            first3, last3 = sum(vals[:3]) / 3, sum(vals[-3:]) / 3
+            trend = ("rising" if last3 > first3 * 1.1
+                     else "falling" if last3 < first3 * 0.9 else "flat/volatile")
+            out["months_count"] = len(series)
+            out["latest"] = {"month": latest_m, "revenue": round(latest_v), "partial": partial}
+            out["last_complete"] = {"month": complete_m, "revenue": round(complete_v)}
+            out["peak"] = {"month": peak_m, "revenue": round(peak_v)}
+            out["last_complete_vs_peak_pct"] = round((complete_v / peak_v - 1) * 100) if peak_v else None
+            out["trend"] = trend
+    except Exception as e:  # noqa: BLE001 — never sink the pack on a trajectory parse
+        print(f"WARN: l12m trajectory facts failed ({e}).", file=sys.stderr)
+    return out
+
+
+def compute_facts(run_dir: Path) -> dict:
+    """Compact, grounded facts pack keyed by CE Health section id. Read from
+    ce_health_report.{md,json} + the deterministic generators only — no bq, no raw
+    table dumps. Each section degrades to {} (never raises) so a thin/odd source
+    still yields a usable pack. Consumed by the CE-Health-insights sub-agent."""
+    d = json.loads((run_dir / "ce_health_report.json").read_text())
+    md = (run_dir / "ce_health_report.md").read_text()
+
+    def _safe(fn, *a):
+        try:
+            return fn(*a) or {}
+        except Exception as e:  # noqa: BLE001 — one bad section never sinks the pack
+            print(f"WARN: facts for a section failed ({e}).", file=sys.stderr)
+            return {}
+
+    facts = {
+        "meta": {
+            "ce_id": d.get("ce_id"),
+            "ce_name": d.get("ce_name"),
+            "range": d.get("range"),
+            "windows": d.get("windows"),
+        },
+        "vitals": _safe(_vitals_facts, d),
+        "l12m": _safe(_l12m_facts, d, md),
+        "shapley": _safe(_shapley_facts, md),
+        "channels": _safe(_channels_facts, md),
+        "funnel": _safe(_funnel_facts, md),
+        "tgids": _safe(_tgid_facts, md),
+        "landing-pages": _safe(_share_table_facts, md, "Top Landing Pages", ("landing", "page"), 3),
+        "vendors": _safe(_share_table_facts, md, "Vendor Breakdown", ("vendor",), 3),
+        "leadtime": _safe(_leadtime_facts, md),
+        "countries": _safe(_share_table_facts, md, "Customer Countries", ("country",), 3),
+    }
+    return facts
+
+
+def _write_standalone(run_dir: Path, frag: str):
+    """Wrap the body fragment into a full openable `report.html` (standalone runs).
+    Reuses the shared `standalone_report.wrap_fragment`; graceful if it's unreachable."""
+    try:
+        from standalone_report import wrap_fragment, build_header_meta, build_rich_header
+    except Exception as e:  # noqa: BLE001
+        print(f"standalone wrap unavailable ({e}) — fragment written, no report.html")
+        return
+    try:
+        d = json.loads((run_dir / "ce_health_report.json").read_text())
+    except Exception:  # noqa: BLE001
+        d = {}
+    md = d.get("metadata", {}) or {}
+    ce_id = d.get("ce_id") or md.get("combined_entity_id")
+    ce_name = d.get("ce_name") or md.get("combined_entity_name") or ""
+    # Full composite-style header: identity + pre/post + Omni pill + the 5 CE
+    # metadata chips (category/subcategory/evolution/management/status), from the sidecar.
+    meta = build_header_meta(md, ce_id=ce_id, ce_name=ce_name, windows=d.get("windows"))
+    title = f"CE Health — {ce_name or ('CE ' + str(ce_id) if ce_id else 'CE')}"
+    banner = build_rich_header(meta, eyebrow="CE Health")
+    doc = wrap_fragment(frag, scope_id="tab-cehealth", title=title, banner_html=banner)
+    out = run_dir / "report.html"
+    out.write_text(doc, encoding="utf-8")
+    print(f"wrote {out} ({len(doc)} bytes) [standalone]")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Render the beautified CE Health tab fragment.")
     ap.add_argument("--run-dir", required=True, help="Run directory with CE Health artifacts.")
+    ap.add_argument("--emit-facts", action="store_true",
+                    help="Compute the compact CE Health facts pack (no bq, no render) and "
+                         "write <run_dir>/ce_health_facts.json, then exit. Feeds the "
+                         "CE-Health-insights sub-agent (references/ce_health_insights_guide.md).")
+    ap.add_argument("--standalone", action="store_true",
+                    help="Also wrap the fragment into an openable standalone report.html.")
     args = ap.parse_args()
     run_dir = Path(args.run_dir).expanduser()
+    if args.emit_facts:
+        facts = compute_facts(run_dir)
+        out = run_dir / "ce_health_facts.json"
+        out.write_text(json.dumps(facts, indent=2), encoding="utf-8")
+        print(f"wrote {out} ({len(json.dumps(facts))} bytes)")
+        return
     frag = build_fragment(run_dir)
     out = run_dir / "ce_health_tab.html"
     out.write_text(frag, encoding="utf-8")
     print(f"wrote {out} ({len(frag)} bytes)")
+    if args.standalone:
+        _write_standalone(run_dir, frag)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ Before scoring, read five things in this order:
    - `DIAGNOSTICS.md` — the cascading hypothesis tree, escalation map, cause-detection-action patterns
 2. **The report you wrote** — read it as if you've never seen this CE before. Does it hold together? Would you trust the conclusions?
 3. **Your investigation transcript** — recall what data you queried, what you skipped, what you decided at each fork. The reasoning matters as much as the conclusion.
-4. **The BQ script output and MCP results** — check that claims in the report are grounded in actual data, not inferences from partial data.
+4. **The BQ script output, CSV uploads, and Ahrefs/Slack results** — check that claims in the report are grounded in actual data, not inferences from partial data.
 5. **The fct_orders channel breakdown** — this is the ground truth for "which channels exist." Cross-check Table 3 (Channel Breakdown) against it. This single check would have caught the Antelope Canyon Bing/PMax error.
 
 Reading the skill files first is what makes the failure mode classification (Section 4) possible. You cannot say "the instruction was missing" unless you have actually looked.
@@ -54,7 +54,7 @@ Every gap gets a **Why** line. Use exactly one of these four tags:
 | `[MISSING_INSTRUCTION]` | The skill files contain no instruction for this behavior. Claude had no way to know it was expected. |
 | `[AMBIGUOUS_INSTRUCTION]` | An instruction exists but is vague, incomplete, or conflicting enough that Claude reasonably interpreted it differently. |
 | `[EXEC_ERROR]` | The instruction was clear and present. Claude attempted to follow it but reasoned incorrectly (wrong data source, faulty inference, incomplete check). |
-| `[DATA_LIMIT]` | The data needed to do this correctly was unavailable (MCP gap, BQ schema limit, context exhausted). Skipping or noting the absence was the right call. |
+| `[DATA_LIMIT]` | The data needed to do this correctly was unavailable (CSV not uploaded, BQ schema limit, Ahrefs unavailable, context exhausted). Skipping or noting the absence was the right call. |
 
 ### Grounding requirement
 
@@ -120,6 +120,7 @@ Score low if:
 - The DIAGNOSTICS.md trees were not consulted — analysis followed a fixed template order instead of the highest-signal path
 - No attempt was made to distinguish what actually happened from what could have happened
 - The verdict could apply to any CE on any day ("CPC is high and competition is strong")
+- A material signal from the §9 coverage gate (the backend "Signals to Close" comment, not rendered) was left undisposed, hand-waved, or its L12M trajectory ignored (the gate requires an explicit CONFIRMED / RULED OUT / DATA GAP for every enumerated row; cap T1b at 3 if any was dropped)
 
 **Combined T1 score:** Average of 1a and 1b. Getting the right answer through sloppy process is fragile — it'll be wrong next time. Getting the wrong answer through rigorous process is fixable — the process just needs a better data source.
 
@@ -261,7 +262,7 @@ Score high if:
 - SIS MoM as primary signal, YoY as directional only
 - Geography table present with customer-vs-ad coverage comparison
 - Monthly Campaign Totals in appendix with YoY deltas
-- Google Sheet created with 5 tabs (or noted as pending with explanation)
+- Google Sheet created with 6 tabs (or noted as pending with explanation)
 - Inline deltas on every metric in campaign cohort tables
 - Every section leads with narrative, not a table
 
@@ -365,6 +366,7 @@ These are pass/fail gates. If any fails, fix before scoring.
 5. For each action — does the thing you're recommending NOT already exist? Check fct_orders and GAds campaign list.
 6. Delete every sentence that starts with "Note:" or "ROI is defined as" or "Source:". Does the report still make sense? If yes, those sentences were unnecessary.
 7. Is the report length proportional? HEALTHY with 0-1 flags: <200 lines. WARNING with 2-4 flags: 200-400 lines. FULL with 5+ flags: 400-700 lines. Over 700 lines for any CE status = too verbose.
+8. **Coverage gate (hard fail).** The coverage gate is now a **backend HTML comment** at §9 (not rendered in the report) — the visible §9 is only the ranked **Red Flags** table. Inside that comment, every row in BOTH tables (HIGH "Material movers" + "Also enumerated") has a Disposition — CONFIRMED / RULED OUT / DATA GAP — and **no `_(dispose)_` placeholder remains**. Every CONFIRMED signal appears in the visible Red Flags table. Calibration still applies: HIGH rows get reasoned dispositions; "Also enumerated" rows get **one line each**. If any signal is undisposed → report **FAILS**; if minor signals are over-narrated → fix before scoring. (To check: read the §9 comment block in the source, not the rendered output.)
 
 ---
 

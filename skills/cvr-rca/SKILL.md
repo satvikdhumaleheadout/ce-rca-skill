@@ -145,7 +145,8 @@ This produces `summary.json` inside a run folder under
 `ce<ce_id>_<pre_start>_<post_end>/`. If that folder already exists (a previous
 run on the same CE and dates), the script auto-increments: `_run2/`, `_run3/`,
 etc. The script prints the chosen folder name — call it `<run_dir>` for the
-rest of this document.
+rest of this document. (When a parent orchestrator sets `CVR_RCA_RUN_DIR`, the
+script writes straight into that dir instead — see the env var in `run_analysis.sh`.)
 
 `summary.json` contains: CE metadata, headline funnel rates, Shapley, MB/HO +
 paid/non-paid mix, mix dominance, daily pre/post trend (`trend`), and the
@@ -207,9 +208,20 @@ everything that is already computed, open branches at L1, descend to a leaf.
 
 ### Slack context — fire and forget
 
-Before reading any data, spawn the Slack context sub-agent. Pass it the values
-below (all available from `summary.json`), then continue immediately — do not
-wait for it to return. You will read its output at Step 2b check #9, not before.
+**Delegation check first (mirrors the perf-audit handshake).** Look for
+`<run_dir>/orchestration.json`. If it exists and its `slack_owner` is set to
+anything other than `"cvr-rca"` (under the CE-RCA umbrella it is `"ce-context"`), a
+parent orchestrator already owns the run's single Slack search — **skip your own
+spawn**, log `Slack spawn delegated to <slack_owner> (orchestration.json) — will
+consume shared slack_context.md at Step 2b check #9`, and continue. You still read
+`slack_context.md` at Step 2b exactly as usual (the existing wait-for-file logic
+covers any timing race). Standalone `/cvr-rca` has no orchestration file (or no
+`slack_owner`) → fire the spawn as normal, below.
+
+Otherwise (standalone, or `slack_owner == "cvr-rca"`): before reading any data,
+spawn the Slack context sub-agent. Pass it the values below (all available from
+`summary.json`), then continue immediately — do not wait for it to return. You will
+read its output at Step 2b check #9, not before.
 
 ```
 Sub-agent instruction file: "$SKILL_DIR/references/slack_context_guide.md"
@@ -801,11 +813,18 @@ exception note below). They share one model and one hard rule.
   exactly what ran). If there's no orchestration file (standalone `/cvr-rca`),
   fall back to file-presence detection: reconcile whichever of
   `slack_context.md`, `perf_audit_summary.md` / `perf_audit_report.md`,
-  `ce_health_report.md` actually exist in the run dir. Either way, **only
-  reconcile lenses that are present** — a lens that didn't run is simply absent,
-  not an error. A `user_data_*` entry (a user-provided ad-hoc data pull) is just
-  another lens — reconcile it with the same four-pattern model; cite it as
+  `ce_health_report.md`, `ce_history.md` actually exist in the run dir. Either way,
+  **only reconcile lenses that are present** — a lens that didn't run is simply
+  absent, not an error. A `user_data_*` entry (a user-provided ad-hoc data pull) is
+  just another lens — reconcile it with the same four-pattern model; cite it as
   user-provided (see `visual_kit.md`).
+  - **`ce_history.md` — institutional memory (the CE Context lens).** The CE Context
+    sub-skill's synthesised prior-RCA trajectory. Reconcile it like any other lens:
+    a recurring root cause that matches your current finding is a **Pattern A/B**
+    corroboration ("LP2S flagged in 2 of 3 prior RCAs" corroborating a fresh LP2S
+    leaf); a prior recommendation that should have moved a metric but didn't is a
+    **Pattern D** testable gap. Cite it with a `↗` to the **CE Context** tab
+    (`#cecontext-history`).
 - **One model, applied per lens.** Every lens is reconciled with the same
   four-pattern classification — **A** direct corroboration, **B** mechanism
   explanation, **C** reframing context, **D** testable gap, or **Reject**. The

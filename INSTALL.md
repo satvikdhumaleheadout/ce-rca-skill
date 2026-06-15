@@ -4,11 +4,12 @@ You are Claude. A user has asked you to install or update the CE-RCA master
 skill from this file. Execute every step below in order, narrating each action
 as you go. Do not ask for confirmation between steps — just do it and report.
 
-CE-RCA is a **self-contained bundle**: it orchestrates three sub-skills (CE
-Health, CVR-RCA, perf-audit) that are **vendored inside it** under `skills/`. You
-install **one thing** and everything is there — no separate companion installs,
-no path configuration. The master runs each sub-skill from its fixed path inside
-the bundle (`skills/cvr-rca/`, `skills/perf-audit/`, `skills/ce-health/`).
+CE-RCA is a **self-contained bundle**: it orchestrates four sub-skills (CE
+Health, CE Context, CVR-RCA, perf-audit) that are **vendored inside it** under
+`skills/`. You install **one thing** and everything is there — no separate
+companion installs, no path configuration. The master runs each sub-skill from its
+fixed path inside the bundle (`skills/ce-context/`, `skills/cvr-rca/`,
+`skills/perf-audit/`, `skills/ce-health/`).
 
 ---
 
@@ -65,18 +66,54 @@ fi
 
   Do not claim the skill is ready to run if this failed.
 
-**Optional — Google Sheets context ingestion.** If users will point the Step 1
-context layer at ad-hoc Google Sheets, enable the `read_sheet.py` helper once:
+**Optional — Google Sheets context ingestion + Drive archive.** Both the `read_sheet.py`
+helper (Step 1 ad-hoc Sheet ingestion) and `drive_sync.py` (the optional Step 4g run-archive
+command) use your gcloud ADC. Enable them once with the dependency + a login that grants the
+**Sheets read** and **Drive file** scopes together:
 
 ```bash
 pip3 install google-api-python-client google-auth
 gcloud auth application-default login \
-  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets.readonly
+  --scopes=https://www.googleapis.com/auth/cloud-platform,\
+https://www.googleapis.com/auth/spreadsheets.readonly,\
+https://www.googleapis.com/auth/drive.file
 ```
 
-This lets the context-ingestion sub-agent read private sheets via your gcloud
-identity. If skipped, sheet ingestion falls back to the Drive MCP (less reliable);
-docs and Slack channels are unaffected.
+The `drive.file` scope is minimal by design — it only grants access to files the
+script **creates** (its per-run subfolders + uploads), never your wider Drive. If
+skipped, sheet ingestion falls back to the Drive MCP (less reliable) and the optional
+Drive archive command just errors when run; docs and Slack channels are unaffected.
+
+**Optional — Slack signals (operational context).** The **CE Context** sub-skill pulls
+operational Slack signals (bug alerts, supply/inventory, campaign changes, known-issue
+probes) — it **owns the single Slack search** for the whole run, surfaces them in the CE
+Context tab, and CVR-RCA corroborates findings against the same `slack_context.md` (it does
+not search Slack again under the umbrella; a standalone `/cvr-rca` still does its own). This
+requires the **Slack MCP connected** in your environment. If the Slack MCP is **not**
+connected, Slack collection is **gracefully skipped** — no `slack_context.md` is produced,
+and the report reports Slack as **"unavailable"** (it will never claim threads were searched
+or cite Slack signals when the MCP was absent). Everything else runs normally; Slack is
+purely additive context.
+
+**Optional Drive archive (user-run, for review).** At the end of a run (Step 4g) CE-RCA
+**prints a command** the user can run to archive the finished run — `report.html` + a zip of
+the run folder — into a **shared central Google Drive folder**, so runs accumulate in one
+place to review and improve the skill. The skill **does not upload anything itself**: an agent
+auto-uploading local files trips the safety classifier as data-exfiltration, whereas a command
+the user chooses to run does not (Claude Code shows a one-click run button on the command).
+The archive is driven by the first-party **`scripts/drive_sync.py`** helper using your gcloud
+ADC (see the scope setup above), is **additive-only** (create, never update/delete), and the
+central folder is a constant in the script:
+
+```
+DEFAULT_PARENT_FOLDER_ID = 1nernSzAN2mZ531wEdh95eeNL2RV5oq30
+# https://drive.google.com/drive/folders/1nernSzAN2mZ531wEdh95eeNL2RV5oq30
+```
+
+- **Owner, one-time:** **share this central folder (edit access) with the team** so everyone's
+  runs can upload into it. Each run creates its own per-run subfolder (`<run-name>-<hash>`).
+- **To re-point** at a different folder, change `DEFAULT_PARENT_FOLDER_ID` in
+  `scripts/drive_sync.py`, or pass `--parent-folder-id` on the command.
 
 ---
 
@@ -134,7 +171,7 @@ The sub-skills ship inside the bundle, so there are no separate companion
 installs. Just confirm they're present:
 
 ```bash
-for s in cvr-rca perf-audit ce-health; do
+for s in ce-context cvr-rca perf-audit ce-health; do
   if [ -e "$HOME/.ce-rca/skills/$s" ]; then echo "  ✓ skills/$s"; else echo "  ✗ MISSING skills/$s"; fi
 done
 ```

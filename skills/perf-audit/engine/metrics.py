@@ -11,6 +11,8 @@ All percentage metrics return as percentages (148.5 = 148.5%), not ratios.
 
 from __future__ import annotations
 
+from itertools import permutations
+
 
 # ============================================================================
 # CORE METRICS
@@ -42,6 +44,18 @@ def cr(order_value_completed, order_value):
     if not order_value:
         return None
     return order_value_completed / order_value * 100
+
+
+def avg_cm1(cm1, conversions):
+    """Average CM1 per conversion = CM1 / conversions.
+    Equivalent to AOV × take_rate × completion_rate.
+    This is what the bidding algorithm optimizes for — if avg CM1 drops,
+    the algorithm can't hit tROAS targets and retreats from auctions.
+    Not in any BQ table — derived from CM1 and conversion count.
+    """
+    if not conversions:
+        return None
+    return cm1 / conversions
 
 
 # ============================================================================
@@ -120,6 +134,56 @@ def paid_cr(attr_completed, attr_value):
     if not attr_value:
         return None
     return attr_completed / attr_value * 100
+
+
+# ============================================================================
+# SHAPLEY DECOMPOSITION
+# ============================================================================
+
+def shapley_multiplicative(prior, current, factors):
+    """Exact Shapley attribution for a multiplicative metric P = f1 * f2 * ... * fn.
+
+    Decomposes the change (P_current - P_prior) into a per-factor contribution by
+    averaging each factor's marginal effect over all n! orderings in which factors
+    can flip from their prior to their current value. This is the same anchoring
+    discipline CVR-RCA uses for its CVR funnel decomposition — the attribution is
+    computed, not narrated.
+
+    Args:
+        prior:   dict factor_name -> value at the baseline period.
+        current: dict factor_name -> value at the analysed period.
+        factors: ordered list of factor names to decompose over.
+
+    Returns:
+        dict factor_name -> contribution ($ or unit of P). The contributions sum
+        exactly to (P_current - P_prior) up to floating-point rounding.
+
+    Notes:
+        - Works for any n. For paid value we use 3 factors: clicks, cvr (conv/clicks),
+          avg_cm1 (cm1/conv) — their product is paid CM1.
+        - Handles zero/negative factor values correctly (it is pure arithmetic over
+          marginal products, no logs).
+    """
+    names = list(factors)
+
+    def product(state):
+        p = 1.0
+        for nm in names:
+            p *= float(state[nm] or 0.0)
+        return p
+
+    contrib = {nm: 0.0 for nm in names}
+    perms = list(permutations(names))
+    for perm in perms:
+        state = {nm: float(prior.get(nm) or 0.0) for nm in names}
+        prev = product(state)
+        for nm in perm:
+            state[nm] = float(current.get(nm) or 0.0)
+            cur = product(state)
+            contrib[nm] += (cur - prev)
+            prev = cur
+    n_perms = len(perms)
+    return {nm: contrib[nm] / n_perms for nm in names}
 
 
 # ============================================================================

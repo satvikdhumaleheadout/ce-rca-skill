@@ -31,19 +31,28 @@ POST_END="${5:-$(_date_offset 1)}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REFS_DIR="$SCRIPT_DIR/../references"
 
-# ── Output directory — auto-increment if folder already exists ─────────────
-# CVR_RCA_OUTPUT_DIR env var overrides the default; set it in ~/.zshrc to
-# keep runs in a custom location (e.g. your existing "Test Runs" folder).
-_BASE_DIR="${CVR_RCA_OUTPUT_DIR:-${HOME}/Documents/CVR RCA Runs}/ce${CE_ID}_${PRE_START}_${POST_END}"
-if [ ! -d "$_BASE_DIR" ]; then
-  OUTPUT_DIR="$_BASE_DIR"
+# ── Output directory ───────────────────────────────────────────────────────
+# Orchestrated runs (CE-RCA): if CVR_RCA_RUN_DIR is set, write EVERYTHING directly
+# into that exact dir — no ce<id>_<dates> subfolder, no auto-increment — so the
+# whole run (summary.json, stage*.json, and later the report/findings) lives in
+# ONE folder alongside the other tabs. Fixes the "stages in one folder, report in
+# another" split under CE-RCA.
+# Standalone runs: CVR_RCA_RUN_DIR unset → self-name under CVR_RCA_OUTPUT_DIR
+# (default ~/Documents/CVR RCA Runs), auto-incrementing if the folder exists.
+if [ -n "$CVR_RCA_RUN_DIR" ]; then
+  OUTPUT_DIR="$CVR_RCA_RUN_DIR"
 else
-  _N=2
-  while [ -d "${_BASE_DIR}_run${_N}" ]; do
-    _N=$(( _N + 1 ))
-  done
-  OUTPUT_DIR="${_BASE_DIR}_run${_N}"
-  echo "Note: base folder already exists — writing to $(basename "$OUTPUT_DIR")"
+  _BASE_DIR="${CVR_RCA_OUTPUT_DIR:-${HOME}/Documents/CVR RCA Runs}/ce${CE_ID}_${PRE_START}_${POST_END}"
+  if [ ! -d "$_BASE_DIR" ]; then
+    OUTPUT_DIR="$_BASE_DIR"
+  else
+    _N=2
+    while [ -d "${_BASE_DIR}_run${_N}" ]; do
+      _N=$(( _N + 1 ))
+    done
+    OUTPUT_DIR="${_BASE_DIR}_run${_N}"
+    echo "Note: base folder already exists — writing to $(basename "$OUTPUT_DIR")"
+  fi
 fi
 export OUTPUT_DIR
 

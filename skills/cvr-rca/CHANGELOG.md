@@ -4,6 +4,21 @@ This file tracks every meaningful change pushed to this repository. Each entry c
 
 ---
 
+## [v1.30.1] — 2026-06-11 — Orchestrated runs write into the provided run dir (single-folder fix)
+
+**Vendored-copy only** — the standalone source (`~/Documents/RCA skill/cvr-rca`) is **intentionally not
+changed** this time and keeps self-naming; the two now diverge on `run_analysis.sh` + `SKILL.md` Step 1.
+
+Fixes the "`stage*.json` in one folder, report in another" split when CVR-RCA runs under CE-RCA.
+`scripts/run_analysis.sh` now honors a **`CVR_RCA_RUN_DIR`** env var: when set (the orchestrator passes
+the run dir), the script writes `summary.json` + `stage*.json` **directly into that exact dir** — no
+`ce<id>_<dates>` subfolder, no `_run2` auto-increment — so the whole run lives in **one folder** with the
+report/findings (and the CE-RCA Organize step then tidies it cleanly). Standalone runs (env unset)
+self-name under `~/Documents/CVR RCA Runs` exactly as before. `SKILL.md` Step 1 documents the orchestrated
+(`CVR_RCA_RUN_DIR=<run_dir> bash run_analysis.sh …`) vs standalone invocation.
+
+---
+
 ## [v1.30] — 2026-06-10 — Eval → on-demand maintainer tool; session recordings removed
 
 **Sync note.** Applied to the vendored copy first, then mirrored to the standalone source

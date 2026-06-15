@@ -42,14 +42,20 @@ compose unchanged — the reorganization is purely cosmetic and fully backward-c
 Tabs are emitted in this order, each only if its source artifact exists:
 
 1. **Summary** ← `summary_report.html` (present if the Step 3 synthesis ran)
-2. **CE Health** ← `ce_health_report.md` (always present — CE Health always runs)
-3. **CVR RCA** ← `cvr_rca_report.html` (present if cvr-rca was dispatched)
-4. **Paid Performance Audit** ← `perf_audit_report.md` (present if perf-audit ran)
-5. **Follow-ups & Q&A** ← `followups.html` (present only once the analyst has promoted
+2. **CE Context** ← `ce_context_report.html` (present if the CE Context sub-skill ran;
+   orientation layer, sections in order: About this CE · Timeline of changes · Recent
+   past RCAs (Pareto→impact→moved?/why) · Known constraints (bucketed Q&A) · Known
+   failure modes · Important links · raw Slack)
+3. **CE Health** ← `ce_health_report.md` (always present — CE Health always runs)
+4. **CVR RCA** ← `cvr_rca_report.html` (present if cvr-rca was dispatched)
+5. **Paid Performance Audit** ← `perf_audit_tab.html` (beautified fragment from
+   `render_perf_audit.py`), falling back to `perf_audit_report.md` (markdown);
+   present if perf-audit ran
+6. **Follow-ups & Q&A** ← `followups.html` (present only once the analyst has promoted
    at least one Step 5 follow-up; an `html-fragment` tab)
-6. **Transcript** ← any `transcript.md` / `transcript_<skill>.md` in the run dir
+7. **Transcript** ← any `transcript.md` / `transcript_<skill>.md` in the run dir
    (present if ≥1 transcript exists; **always last**)
-7. *(future top-level tabs append here — one entry in `compose.py`'s `TAB_SPECS`)*
+8. *(future top-level tabs append here — one entry in `compose.py`'s `TAB_SPECS`)*
 
 The Follow-ups tab is the **output layer** (the Step 5 playground). It is conditional
 (no promoted follow-ups → no `followups.html` → no tab) and embedded as an
@@ -115,19 +121,69 @@ mv <run_dir>/report.html <run_dir>/cvr_rca_report.html
 
 ## How each tab is rendered
 
-### Markdown tabs (perf-audit, future markdown skills)
+### Paid Performance Audit tab (structured re-render — `perf_audit_tab.html`)
 
-`compose.py` converts the markdown to HTML **verbatim** via the renderer in
+The perf-audit tab moved from **verbatim markdown embed → structured re-render
+(wording-preserving)** — the same "structured re-render" mode of the cardinal rule
+that CE Health uses, but with one hard extra constraint: **perf-audit's WORDING is
+preserved verbatim.** The renderer only **relocates** the §1 verdict line into a
+coloured banner and **restyles** the layout; it never rewrites, summarizes,
+re-words, re-rounds, drops, or reorders any prose or table cell. Visible text is
+byte-equal to the source (modulo HTML-escaping + the bold/italic markdown→HTML the
+source already used).
+
+`scripts/render_perf_audit.py` (run by the master at **Step 4c-perf**, before
+compose) reads `perf_audit_report.md` (resolved subfolder-first — `reports/` then
+root) and writes `perf_audit_tab.html` (in `tabs/` on an organized run, else the
+run-dir root). `compose.py` embeds it as an **`html-fragment`** tab. The renderer
+does **no** bq / engine work — it is pure presentation.
+
+**Card shape.** Each `## N.` / `## A.` / `## B.` section → one `.analysis-block`
+card titled by its heading (verbatim, leading number kept), id `perfaudit-<slug>`.
+Inside each card, in this order:
+
+1. **Verdict banner — only when a leading `**Status: …**` line exists** (in
+   practice only §1 Executive Summary carries one). The full Status line is shown
+   verbatim in a `.pa-verdict` banner; the colour is keyed off the Status **text
+   token, emoji ignored**: `CRITICAL` → red, `WARNING` → amber, `HEALTHY`/`OK` →
+   green. No Status line → no banner (a neutral titled card).
+2. **Beautified table(s)** — every GFM table → `styled_table(...)` (the §9
+   Red-Flags table additionally tints its severity cell by CRITICAL/HIGH/MED/LOW).
+   A scoped `#tab-perfaudit` style gives wide tables the same readable-wrap as the
+   markdown `.md-table-wrap` fix (cells wrap at ≤340px, no per-word crush).
+3. **Grey supporting prose** — every remaining paragraph (and any `###`/`####`
+   subheading) rendered verbatim as muted grey supporting text (`.pa-prose`).
+
+Tables and prose render in their original document order below the banner, so
+nothing is reshuffled. Irregular sections degrade gracefully (prose-only,
+table-only, nested `###`, multiple tables) — the renderer never crashes.
+
+Heading IDs are namespaced by tab: perf-audit → `perfaudit-<slug>` (including
+`###` subsections, e.g. `perfaudit-money-on-the-table`). The slug strips a leading
+numbered prefix (`5. ` / `4a. `), lowercases, hyphenates — **identical to the
+markdown renderer's slug**, so cross-tab `↗` citations resolve in both the
+fragment and the fallback.
+
+**Markdown fallback (failure-safe).** The perf-audit `TAB_SPECS` entry declares a
+`fallback` to `perf_audit_report.md` (markdown). If `perf_audit_tab.html` is absent
+— the render step was skipped or errored — `compose.py` renders the verbatim
+markdown instead (every section/subsection/cell/word preserved, `perfaudit-`
+anchors namespaced the same way), so a failed beautification never costs the tab.
+
+### Markdown tabs (the perf-audit fallback, future markdown skills)
+
+`compose.py` converts markdown to HTML **verbatim** via the renderer in
 `helpers.py` (vendored from cvr-rca, extended with blockquote + fenced-code).
 The conversion mapping is the one documented in `visual_kit.md → "Perf-audit tab
-rendering"`. Fidelity rules — no exceptions:
+rendering"`. This is the path the perf-audit tab takes when its fragment is absent,
+and the path any future markdown-only skill takes. Fidelity rules — no exceptions:
 
 - Every section preserved with its original heading text.
 - Every subsection (h3, h4) preserved — never collapsed into its parent.
 - Every table cell, list item, paragraph, blockquote, code block, inline element preserved.
 - No claims paraphrased, no numbers re-rounded, no sections reordered or dropped.
 
-Heading IDs are namespaced by tab: perf-audit → `perfaudit-<slug>`. The slug
+Heading IDs are namespaced by tab (e.g. perf-audit → `perfaudit-<slug>`). The slug
 strips a leading numbered prefix (`5. ` / `4a. `), lowercases, hyphenates. This
 keeps anchors collision-free across tabs and lets cross-tab `↗` citations resolve.
 
@@ -164,7 +220,7 @@ row-trimming, no reordering. The section→component map:
 | 5 | L12M Trajectory | 2 Plotly charts (Revenue+Orders; Clicks+Paid-ROI) — same data as the two monthly tables, with a "full tables remain in source" note |
 | 6 | Top TGIDs | styled table, all rows, first 2 columns frozen on horizontal scroll |
 | 7 | Driver Diagnosis (Shapley) | **the one agreed exception** — a corrected canonical 6-factor booking-revenue waterfall (see below) |
-| 8 | Historical Context | rendered faithfully from the markdown (varies per run) |
+| 8 | Historical Context | **moved out** — CE history + prior runs + user context + Slack now render in the **CE Context** tab (`render_ce_context.py`), not here. CE Health is a pure data/metrics tab. |
 | 9 | Lead Time Cohorts | styled table, all rows |
 | 10 | Landing Pages | styled table, all rows |
 | 11 | Customer Countries | styled table, all rows |
@@ -178,9 +234,30 @@ take_rate` over all 720 permutations, computed on **booking revenue**
 the Pre→Post bridge reconciles (`unattributable ≈ $0`). A verdict line names the
 drags/lifts and notes the booking-vs-normalised revenue distinction.
 
+**Per-section insight callouts (the CE Health insight layer).** Every section
+leads with a **2–3 line grounded callout** rendered through the existing
+`block(summary=…)` mechanism (visible even when the section is collapsed). It is
+**data-first**: a deterministic pass (`render_ce_health.py --emit-facts`, Step 3a)
+computes a compact per-section facts pack (`ce_health_facts.json`); a
+**CE-Health-insights sub-agent** (Step 3b, `references/ce_health_insights_guide.md`)
+phrases each section's data line from **that section's facts only**, then optionally
+**enriches** it with one genuinely-relevant CE Context item (a constraint / dated
+event / failure mode), attributed with a `↗` backlink to the right `#cecontext-*`
+anchor. Context **enriches, never overwrites** the data line, and no claim is made
+without a supporting fact. The sub-agent writes `ce_health_insights.json`
+(`{section_id: {insight, sentiment}}`), which the renderer reads at Step 4c.
+
+**Deterministic fallback (failure-safe).** If `ce_health_insights.json` is absent or
+lacks a section, the callout falls back to the existing deterministic summary:
+Channels (`channel_flags_and_summary`) and Lead-time (`leadtime_summary`) keep their
+rule-based summaries, Shapley keeps its computed `verdict`, and the gap sections
+(Vitals / Trajectory / Funnel / TGIDs / Landing / Vendor / Countries) simply show no
+callout. A failed or absent insights sub-agent never blanks or breaks the tab.
+
 **Anchors:** the `cehealth-<slug>` scheme is preserved (`cehealth-vitals`,
 `cehealth-channels`, `cehealth-shapley`, `chart-cehealth-l12m-rev`, …) so
-cross-tab `↗` links resolve exactly as for the markdown tabs.
+cross-tab `↗` links resolve exactly as for the markdown tabs. The insight callouts
+backlink the other way — into `#cecontext-*` anchors on the CE Context tab.
 
 **Authored prose** (verdict lines, notes) follows `visual_kit.md → "Styling and
 language guidelines (rules 1–7)"` — load-bearing here: rule 4 (seasonal/YoY

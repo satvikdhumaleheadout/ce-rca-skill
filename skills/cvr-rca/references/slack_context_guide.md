@@ -57,16 +57,23 @@ The main agent passes you these values when spawning you:
 
 ## Section 2 — MCP tool loading
 
-Load all three tools before first use:
+Discover the Slack MCP tools **dynamically** — never hard-code a server namespace,
+it differs per user and workspace. Search by tool name so whatever Slack MCP the
+user has connected is found:
 
 ```
-ToolSearch("select:mcp__plugin_weekly-growth-review_slack__slack_read_channel,mcp__plugin_weekly-growth-review_slack__slack_read_thread,mcp__plugin_weekly-growth-review_slack__slack_search_public_and_private,mcp__plugin_weekly-growth-review_slack__slack_search_channels")
+ToolSearch("+slack search read channel thread")
 ```
 
-(`slack_search_channels` is only needed to resolve a `user_channels` name → ID
-when it isn't in the Section 3 table.)
+Then call the tools by the **exact names ToolSearch returns** — your Slack MCP sets
+the namespace prefix (e.g. `mcp__<server-id>__slack_search_public_and_private`). The
+base tool names are always `slack_search_public_and_private`, `slack_read_channel`,
+`slack_read_thread`, and `slack_search_channels` (the last only needed to resolve a
+`user_channels` name → ID when it isn't in the Section 3 table).
 
-All tools use the namespace: `mcp__plugin_weekly-growth-review_slack__`
+**If ToolSearch returns no Slack tools, no Slack MCP is connected** — write the
+"Slack context unavailable" note (Section 1 honesty rule) and skip the searches.
+Do **not** fail the run.
 
 Always use `response_format="detailed"` — the concise format strips thread counts
 and timestamps you need.

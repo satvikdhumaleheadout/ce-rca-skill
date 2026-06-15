@@ -9,10 +9,14 @@ also be run standalone for a lightweight context-only report.
 - **BigQuery (`bq` CLI / gcloud ADC)** — only for the standalone CE-name → id
   resolution (`dim_combined_entities`). Under the umbrella, CE Health already
   resolved the CE, so no BQ call is needed here.
-- **Slack MCP (`mcp__plugin_weekly-growth-review_slack__*`)** — required for the
-  Slack standing-context stream. **This skill now owns the Slack collector for the
-  whole CE-RCA run** (CVR-RCA defers to it under the umbrella). If the Slack MCP is
-  **not connected**, the Slack stream is skipped and the report states "Slack
+- **Slack MCP (any connected Slack server)** — required for the Slack
+  standing-context stream. The tools are discovered **dynamically by name** at run
+  time (`ToolSearch("+slack search read channel thread")`), so **any** Slack MCP
+  works regardless of its server-id namespace — no specific plugin is required. The
+  base tool names are `slack_search_public_and_private`, `slack_read_channel`,
+  `slack_read_thread`, `slack_search_channels`. **This skill owns the Slack collector
+  for the whole CE-RCA run** (CVR-RCA defers to it under the umbrella). If no Slack
+  MCP is **connected**, the Slack stream is skipped and the report states "Slack
   context unavailable" — the run is never blocked (honesty rule in
   `references/slack_context_guide.md`).
 - **Prior RCA runs on disk** (`~/Documents/CE RCA Runs/`) — optional; the CE-history

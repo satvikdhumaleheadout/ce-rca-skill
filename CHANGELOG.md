@@ -5,6 +5,27 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.41.0] — 2026-06-15 — Slack made portable: dynamic tool discovery, runs on every install
+
+**Summary:** A live end-to-end validation surfaced that the Slack sub-agent silently did nothing for most people who installed the skill from GitHub. The cause was a **hard-coded Slack MCP namespace** (`mcp__plugin_weekly-growth-review_slack__…`) baked into the skill in two places. Slack now **discovers its tools dynamically by name**, so it works with **any** connected Slack MCP regardless of how that server is named in the user's environment.
+
+### What changed
+
+- **Dynamic discovery (the real fix).** Both `slack_context_guide.md` files (ce-context + cvr-rca) and `ce-health`'s Step 4 previously loaded Slack with an **exact-id** `ToolSearch("select:mcp__plugin_weekly-growth-review_slack__…")`. That returns nothing unless the user's Slack MCP happens to sit under that one specific plugin name — so for nearly everyone, no Slack tools loaded and the agent quietly skipped. They now use a **name-based** search — `ToolSearch("+slack search read channel thread")` — and call the tools by the exact names returned. Any Slack MCP namespace works.
+- **Graceful when truly absent.** Each Slack site now has an explicit branch: *no Slack tools returned → write "Slack context unavailable" and skip — never fail the run.* So users with no Slack MCP degrade cleanly, and users with one finally get Slack.
+- **De-pinned `allowed-tools`.** `ce-health` and `perf-audit` frontmatter pinned the same hard-coded Slack id in `allowed-tools`, which whitelist-blocked the real tool even after discovery (in standalone runs). Removed the pin — they now inherit the session's permissions, matching the `ce-context` sub-skill that owns the primary Slack search and never had a pin. (MCP server ids are environment-specific and can't be whitelisted at authoring time.)
+- **Docs.** `ce-context/INSTALL.md` reworded: "any connected Slack server" — no specific plugin required.
+
+### Why it matters
+
+This was the one finding from the v2.40.0 validation that genuinely broke on a fresh clone (vs. machine-local credential quirks). Anyone who installs the skill and has a Slack MCP connected now gets the operational Slack stream automatically.
+
+### Verification
+
+Zero `plugin_weekly-growth-review_slack` / `select:mcp__` references remain in any runtime file; dynamic discovery confirmed present at all four Slack call sites.
+
+---
+
 ## [v2.40.0] — 2026-06-15 — perf-audit CSV ask moved to a pre-dispatch gate (with where-to-export steps)
 
 **Summary:** The Google-Ads CSV request for perf-audit (Auction Insights → §6b, Search Terms → §8) was in the Step-1 input menu — premature and contextless, since the user hasn't yet committed to running the paid audit. Moved it to a **short, single-purpose pre-dispatch gate** that fires **only when perf-audit is in the run**, right after the user confirms the default run and just before the parallel CE-Context + CVR + perf-audit spawn. The gate now also **tells users where to export the CSVs from** (so the ask is actionable), with full parsing detail still living in perf-audit's Step 0.

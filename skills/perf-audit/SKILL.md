@@ -1,7 +1,10 @@
 ---
 name: perf-audit-v6
 description: Deep paid performance audit for a CE — zoom-out-first channel overview, campaign cohort backbone, 3 temporal windows, search intelligence, and sized actions
-allowed-tools: [Bash, Read, Write, mcp__claude_ai_Ahrefs__keywords-explorer-volume-history, mcp__claude_ai_Ahrefs__keywords-explorer-overview, mcp__plugin_weekly-growth-review_slack__slack_search_public_and_private]
+# No allowed-tools pin: Slack/Ahrefs (and any MCP) server ids are environment-specific
+# and differ per user, so a hard-coded id would silently block those tools on most
+# installs. This skill inherits the session's tool permissions; Slack/Ahrefs tools are
+# discovered dynamically at run time.
 ---
 
 # Paid Performance Audit (v6.1)

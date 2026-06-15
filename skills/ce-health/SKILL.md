@@ -1,7 +1,10 @@
 ---
 name: ce-health
 description: "CE briefing packet — metadata, vitals, channels, funnel, L12M trajectory, top TGIDs, Shapley driver diagnosis, and historical context. Usage: /ce-health <CE name or ID> --range l<N>w|l<N>m (e.g. l4w, l2m, week, month) OR --start YYYY-MM-DD --end YYYY-MM-DD. Atom skill invoked by perf-audit, weekly review, monthly review, or standalone."
-allowed-tools: [Bash, Read, Write, mcp__plugin_weekly-growth-review_slack__slack_search_public_and_private]
+# No allowed-tools pin: Slack/MCP server ids are environment-specific and differ per
+# user, so a hard-coded id would silently block Slack on most installs. This skill
+# inherits the session's tool permissions (like the ce-context sub-skill, which owns
+# the primary Slack search). Slack tools are discovered dynamically at run time.
 ---
 
 # CE Health Briefing Packet
@@ -107,7 +110,20 @@ master renders the fragment without `--standalone` and `compose.py` builds the t
 
 ### Step 4 — Search Slack for CE context
 
-Run **two searches** for the CE name:
+First **discover the Slack MCP tool dynamically** — never hard-code a server
+namespace, it differs per user. Search by tool name:
+
+```
+ToolSearch("+slack search")
+```
+
+Call the tool by the **exact name ToolSearch returns** (your Slack MCP sets the
+prefix, e.g. `mcp__<server-id>__slack_search_public_and_private`; the base name is
+always `slack_search_public_and_private`). **If ToolSearch returns no Slack tool, no
+Slack MCP is connected** — leave Section 8's Slack line as "Slack context unavailable"
+and skip the searches (never fail the run).
+
+Then run **two searches** for the CE name:
 
 ```
 slack_search_public_and_private("<CE Name> after:<6 months ago>")

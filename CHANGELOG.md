@@ -5,6 +5,19 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.42.0] — 2026-06-15 — The post-reveal "Your read" hypothesis ask becomes a pop-up too
+
+**Summary:** The driver-hypothesis ask shown after the numbers ("💡 Your read on the driver…") was the **last free-text prompt** left in the onboarding — every other step (goal, window, the constraint buckets, aliases) is now a structured `AskUserQuestion`. This converts it to match, so the whole front door is consistent.
+
+The pop-up (header **"Your read"**): a one-line question + a short example, with the **free-text box as the primary answer** (the analyst's read / where to dig) and **two quick-buttons** — **"Run the default"** and **"Let Claude infer the lead"** — both meaning "proceed with no steer" (same text-box-first, two-button shape as the 1c buckets). Behaviour is unchanged: a typed read is written to the analyst's priors/focus before dispatch (CVR-RCA opens it as a prioritised branch), either button or a no-direction reply just dispatches the default, it's asked once, and a general health check skips it.
+
+**Answering this is the dispatch trigger** — it runs the default set (CE Context + CVR-RCA + perf-audit). Letting the user **check/uncheck which skills to run** is a planned future add; the "what I'll run" panel in the reveal already previews the set.
+
+### Blast radius
+- `SKILL.md` §1e (the ask) + the post-reveal dispatch-parse block + changelog row m074; `CHANGELOG.md`; `VERSION` 2.41.0 → 2.42.0. Presentation/flow only — no `user_context.md` contract, renderer, `compose.py`, or sub-skill change.
+
+---
+
 ## [v2.41.0] — 2026-06-15 — Slack made portable: dynamic tool discovery, runs on every install
 
 **Summary:** A live end-to-end validation surfaced that the Slack sub-agent silently did nothing for most people who installed the skill from GitHub. The cause was a **hard-coded Slack MCP namespace** (`mcp__plugin_weekly-growth-review_slack__…`) baked into the skill in two places. Slack now **discovers its tools dynamically by name**, so it works with **any** connected Slack MCP regardless of how that server is named in the user's environment.

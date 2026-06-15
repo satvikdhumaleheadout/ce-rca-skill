@@ -640,32 +640,35 @@ growth in a segment the topline hides?" Omit entirely when goal and data agree.>
 **Coming soon** (not built yet): Take-rate · Completion-rate · Availability audit · Pricing audit.<if the goal points at one, flag it — e.g. "— a Pricing audit would fit your goal once it ships">
 ```
 
-**Then — the grounded hypothesis ask (diagnostic goals only).** *Now* that the user
-has seen the actual movement (and any posture reconciliation), ask for their read —
-this is where their expertise is sharpest, reacting to real numbers rather than
-guessing blind:
+**Then — the grounded driver-hypothesis ask (`AskUserQuestion`; diagnostic goals
+only).** *Now* that the user has seen the actual movement (and any posture
+reconciliation), ask for their read — this is where their expertise is sharpest,
+reacting to real numbers rather than guessing blind. Make it a **pop-up**, for
+consistency with the other onboarding questions (0b / 0c / 1c / 1d):
 
-Make it **visually stand out** as its own prompt (don't let it trail off the reveal
-as plain prose) — lead with an emoji, the same way the 1a inputs are highlighted:
+- **header:** "Your read"
+- **question** (one tight line + one short example): *"Given the numbers — what's the
+  scalable lever here, and where should I dig first?"* e.g. *"the SIS pullback is the
+  story — dig into which campaigns captured it" · "CVR lift looks interesting — was it
+  the B1G1 promo or the LP change?"*
+- **The free-text box is the primary answer** — where they type their read / steer.
+- **Two quick-buttons** (the tool's minimum; both mean "proceed with no steer"):
+  - **"Run the default"** — dispatch the default deep dives now, no steer.
+  - **"Let Claude infer the lead"** — no read; let the data-driven investigation find
+    the driver / where to start.
 
-> 💡 **Your read on the driver** — given the numbers above, what do you think is
-> driving this, and where should I dig first? *(e.g. "the direct Dixies deal scaling",
-> "broad-match expansion diluted CVR — start with the Kens LP + ad group")*
-> Drop a line, or reply **`go`** to run with the default.
+**On answer → dispatch (Step 2).** A typed read → write it to `## Hypothesis priors`
+(+ any focus to `## Focus / direction`) in `user_context.md` **before dispatch**, so
+CVR-RCA opens it as a prioritised branch at its L0; it also steers which deep dive
+leads / what to test first. Either button — or an empty / no-direction reply — just
+dispatches the default. **Asked once:** once they pick or type, proceed; never
+re-prompt "where should I dig first?" a second time (a missing read is a valid
+answer, not a question to chase). **A general health check skips this** — no driver
+to hypothesise about; its reveal confirms direction and proceeds.
 
-Write their answer to `## Hypothesis priors` (+ any focus to `## Focus / direction`)
-in `user_context.md` **before dispatch**, so CVR-RCA still opens it as a prioritised
-branch at its L0. This doubles as the **dispatch-focus steer** (which deep dive leads,
-what to test first). **A general health check skips this** — no driver to hypothesise
-about; its reveal just confirms direction and proceeds.
-
-**Ask this ONCE — it's optional, and a missing hypothesis is a valid answer.** If you
-bundle it with the 1d alias confirm (natural — "two quick things before I dispatch"),
-parse the **one** reply for both and proceed. A reply that only confirms the aliases,
-says `go`, or simply doesn't offer a direction **is** "go with the default" — dispatch
-immediately. **Never re-prompt "where should I dig first?" a second time** (don't turn
-an un-offered hypothesis into an unanswered question to chase). The only reason to come
-back is if they explicitly asked you to wait.
+*(For now, answering this triggers the **default** dispatch — CE Context + CVR-RCA +
+perf-audit. Letting the user **check/uncheck which skills to run** is a planned future
+add; the "what I'll run" panel above already previews the set.)*
 
 (The analyst's *factual* context was solicited unbiased at 1a–1c and is already in
 `user_context.md`; the reveal adds only this grounded reaction, then dispatch follows
@@ -698,16 +701,17 @@ at Step 2.)
   Resist adding paragraphs; if a point needs a paragraph, it belongs in the RCA,
   not this preview.
 
-**Then stop and wait for the user's reply — once.** Do not dispatch until they
-respond; do not re-prompt once they have. Parse their reply in natural language —
-there's no rigid command set. `go` / empty / "yes" / **a reply that only confirms the
-aliases or doesn't offer a direction** → run the fixed set (CE Context + CVR RCA +
-perf-audit) immediately, no second ask. A hypothesis/focus → capture it
+**Then wait for the 1e answer — once — and dispatch.** Do not dispatch until they
+answer the "Your read" pop-up; do not re-prompt once they have. Reading the answer:
+a **"Run the default" / "Let Claude infer the lead"** button — or a free-text reply
+that doesn't actually offer a direction → run the fixed set (CE Context + CVR RCA +
+perf-audit) immediately, no second ask. A **typed read / focus** → capture it
 (`## Hypothesis priors` / `## Focus / direction`) and let it steer *which deep dive
-leads / what to test first*. A "skip the Paid tab"-style ask → honor as presentation
+leads / what to test first*. A "skip the Paid tab"-style aside → honor as presentation
 (drop the tab; the lens still runs if a sibling needs it — say so). If they ask for a
 driver with no built sub-skill yet (e.g. take-rate, pricing), point at the matching
-"coming soon" item and proceed with what's available.
+"coming soon" item and proceed with what's available. (Per-skill check/uncheck is a
+planned future add — for now the dispatched set is fixed.)
 
 ### Recording the context — `user_context.md` (the one intake file)
 
@@ -1428,6 +1432,7 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 | --- | --- | --- |
+| m074 | 2026-06-15 | **1e grounded driver-hypothesis ask → `AskUserQuestion` pop-up (consistent with 0b/0c/1c/1d) (v2.42.0).** The post-reveal "💡 Your read on the driver" prompt was the last free-text ask in the onboarding — every other step (goal, window, buckets, aliases) is now a structured pop-up, so this one is converted to match. **header** "Your read"; **question** one tight line + a short example ("the SIS pullback is the story — dig into which campaigns captured it" / "CVR lift — was it the B1G1 promo or the LP change?"); the **free-text box is the primary answer** (their read/steer) with **two quick-buttons** — **"Run the default"** and **"Let Claude infer the lead"** — both meaning "proceed, no steer" (same 2-button + text-box shape as 1c, the tool's minimum). Semantics unchanged: a typed read → `## Hypothesis priors`/`## Focus / direction` before dispatch (CVR-RCA opens it at L0); either button or a no-direction reply → dispatch the default; **asked once**, never re-prompt; **general health check skips it**. The downstream "wait for the reply → dispatch" block was realigned to read the pop-up answer. Added an explicit note that **answering triggers the default dispatch** (CE Context + CVR-RCA + perf-audit) and that **per-skill check/uncheck is a planned future add** (the "what I'll run" panel already previews the set). Presentation/flow only — no `user_context.md` contract / renderer / `compose.py` / sub-skill change. Blast radius: `SKILL.md` §1e + the post-reveal dispatch-parse block + this row, `CHANGELOG.md`, `VERSION`. |
 | m073 | 2026-06-15 | **Slack made portable — dynamic tool discovery replaces a hard-coded MCP namespace; Slack now runs on every install (v2.41.0).** Live-validation finding: the Slack sub-agent silently no-op'd for most third-party users. Root cause was a hard-coded server namespace baked into the skill — both `slack_context_guide.md` files loaded Slack via `ToolSearch("select:mcp__plugin_weekly-growth-review_slack__…")` (an **exact-id** match that returns nothing unless the user's Slack MCP happens to sit under that exact plugin name), and `ce-health` + `perf-audit` frontmatter pinned the same id in `allowed-tools` (whitelist-blocking the real tool even once found). Fix: **(1)** both guides + `ce-health` Step 4 now **discover Slack tools by name** — `ToolSearch("+slack search read channel thread")` — and call them by the exact names returned, so **any** connected Slack MCP works regardless of its server-id prefix; added an explicit **"no Slack tools returned → write 'Slack context unavailable' and skip, never fail"** branch. **(2)** Dropped the environment-specific `allowed-tools` pin from `ce-health` + `perf-audit` (they now inherit session permissions, matching `ce-context`, which owns the primary Slack search and never had a pin) — MCP server ids can't be known at authoring time, so any pinned id or unsupported wildcard risks silently blocking the tool. **(3)** `ce-context/INSTALL.md` reworded: "any connected Slack server," no specific plugin required. Verified: zero `plugin_weekly-growth-review_slack` / `select:mcp__` refs remain in runtime files; dynamic discovery present at all four Slack sites. Blast radius: `skills/{ce-context,cvr-rca}/references/slack_context_guide.md`, `skills/{ce-health,perf-audit}/SKILL.md` (frontmatter), `skills/ce-health/SKILL.md` (Step 4), `skills/ce-context/INSTALL.md`, `CHANGELOG.md`, `VERSION`. No engine / renderer / `compose.py` change. |
 | m072 | 2026-06-15 | **perf-audit CSV ask moved from Step 1 to a pre-dispatch gate, with where-to-export instructions (v2.40.0).** The Google-Ads CSV request (Auction Insights → §6b, Search Terms → §8) was buried in the Step-1 input menu — premature/contextless (the user hasn't yet committed to running perf) and cluttering the direction-setting ask. Moved it to a **short, single-purpose pre-dispatch gate** in `SKILL.md` Step 2, posted **only when perf-audit is in the dispatch set**, right after the user confirms the run and just before the CE-Context + CVR + perf-audit parallel spawn (the only clean spot — can't prompt mid-parallel). The gate prompt now **includes the concise where-from export steps** (Auction insights tab → by week → last 8 wks + same 8 wks LY from the pre-consolidation account; Search terms report → CE campaigns → last 4 wks) so users actually know how to get the files; full parsing detail stays in perf-audit's Step 0. Capture (`<run_dir>/uploads/`, line-2 CY/LY identification) + the Step-2 dispatch hand-off (pass paths or `none`, perf skips its Step-0 prompt) are unchanged — only relocated; the Step-1 1a bullet + 1b capture paragraph are removed. `skip` → graceful degrade. Blast radius: `SKILL.md` §1a/§1b (removed) + Step-2 gate (added) + dispatch repoint, `CHANGELOG.md`, `VERSION`. No sub-skill / engine / renderer change. |
 | m071 | 2026-06-15 | **1d alias confirm now fires on EVERY run, not just when Slack input was given (v2.39.0).** CE Context always runs the Slack collector (every CE-RCA run), and aliases ("KSC" for Kennedy Space Center) are the input that lets that search find nickname-only threads — so the alias confirm must be asked **every time**, independent of whether the user pasted a Slack thread/channel or any doc at 1a. Two fixes in `SKILL.md` §1: (1) 1d opens with an explicit **"Ask this on EVERY run — not conditional on Slack input"** note (+ a call-out against the common mistake of treating it as Slack-only intake and skipping it when no Slack link was pasted); (2) the **general-health-check LIGHT path** previously went soft-context-pop-up → reveal, **skipping 1d** — it now routes **soft-context → 1d (aliases) → reveal**, so even a health check (and a bare-`skip` run) confirms aliases before the Slack search runs. Near-zero friction (auto-propose short-forms, one-tap confirm); still skippable (confirm-nothing → search falls back to name + id). Presentation/flow only — `ce_aliases` plumbing into `orchestration.json` → both Slack guides' Search 1 is unchanged. Blast radius: `SKILL.md` §1c light-path + §1d, `CHANGELOG.md`, `VERSION`. No renderer / `compose.py` / sub-skill-code change. |

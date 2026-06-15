@@ -176,7 +176,7 @@ for s in ce-context cvr-rca perf-audit ce-health; do
 done
 ```
 
-All three should be `✓`. If any is missing, the download was incomplete —
+All four should be `✓`. If any is missing, the download was incomplete —
 re-run Step 2. (Maintainers refreshing the vendored copies use
 `bash ~/.ce-rca/scripts/vendor.sh`.)
 

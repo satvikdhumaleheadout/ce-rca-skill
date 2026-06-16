@@ -5,6 +5,21 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.52.0] — 2026-06-16 — §7 Shapley: fix YoY post-window inflation + add a vitals cross-check guard
+
+**Summary:** On a **non-contiguous window** (year-over-year, or any custom pre/post with a gap), the §7 Revenue-Waterfall reconstructed a wildly wrong revenue (e.g. a Post of $3.3M / +1184% against an actual Post of ~$206K, with an impossible multi-$M "Orders / User" bar). Root cause: the booking/revenue query (`_STATS_SQL`, over `combined_entity_stats`) bucketed periods with `CASE WHEN pre THEN 'pre' ELSE 'post'` across the entire `pre_start→post_end` span — so for a YoY window the whole **intervening ~11 months** got swept into "post," inflating post orders/revenue to a full year. The funnel side (`_FUNNEL_SQL`, traffic + converters) already bucketed both windows explicitly, so only the numerator blew up — which dumped the entire artifact into the orders-per-user / Orders factor. (Confirmed on CE 2567 YoY: post `count_orders` 12,422 → 1,677, post revenue $695K → $108K once bucketed correctly.)
+
+**What changed (`scripts/render_ce_health.py` only):**
+- **`_STATS_SQL` now buckets both windows explicitly** — `WHEN pre_start..pre_end THEN 'pre' WHEN post_start..post_end THEN 'post'` and filters to only those two ranges (`pre OR post`), never the whole span. Mirrors `_FUNNEL_SQL`. Contiguous (rolling) windows are unaffected; only non-contiguous windows were ever wrong.
+- **New `_reconcile_shapley_vs_vitals` guard.** Before trusting the waterfall, it cross-checks the waterfall's per-window revenue + order count against the **independently computed §2 vitals** (`revenue_actual` / `orders`) — a basis-matched comparison (both are actual booking revenue). On any divergence beyond 2% it raises, and the renderer **disables the waterfall and falls back to CE Health's verbatim §7 table** rather than show a misleading chart. This catches window/bucketing inconsistencies that the internal `unattributable ≈ $0` reconciliation cannot (the decomposition can reconcile perfectly to the *wrong* total).
+
+**Verified:** parses; on CE 2567's YoY window the post stats now match the post window only (1,677 orders / $108K, not the full-year 12,422 / $695K); the guard passes when waterfall and vitals agree and trips (→ verbatim fallback) when they don't.
+
+### Blast radius
+- `scripts/render_ce_health.py` (`_STATS_SQL` bucketing + `_reconcile_shapley_vs_vitals` + wired into `build_fragment`) + changelog row m087; `CHANGELOG.md`; `VERSION`. No engine / `compose.py` / other-skill / contract change.
+
+---
+
 ## [v2.51.0] — 2026-06-16 — CE Context "Timeline of changes": a readable chronological table below the bubbles
 
 **Summary:** The CE Context "Timeline of changes" was a bubble swimlane that's hard to interact with when bubbles overlap — you had to click each one to read its events, and close-together bubbles are fiddly to hit. We keep the bubble chart (it's a good at-a-glance density view) and add a **chronological table below it** that lists every dated signal at once, so nothing requires clicking.

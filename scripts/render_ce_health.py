@@ -548,16 +548,25 @@ GROUP BY period
 # Booking / revenue components (combined_entity_stats), lifted from
 # ce_health.py:fetch_ce_health. `revenue` here is sum_revenue = booking revenue
 # (revenue_actual) — the figure the 5-factor identity reconstructs.
+# Both windows are bucketed EXPLICITLY (pre_start–pre_end and post_start–post_end),
+# mirroring _FUNNEL_SQL above. Do NOT use a `pre vs ELSE` shortcut over
+# pre_start→post_end: for a non-contiguous window (YoY / any custom gap) that sweeps
+# the entire intervening period into 'post', inflating post revenue/orders to a full
+# year (see the post-window reconciliation guard in build_shapley_block).
 _STATS_SQL = """
 SELECT
-  CASE WHEN report_date BETWEEN '{pre_start}' AND '{pre_end}' THEN 'pre' ELSE 'post' END AS period,
+  CASE
+    WHEN report_date BETWEEN '{pre_start}' AND '{pre_end}' THEN 'pre'
+    WHEN report_date BETWEEN '{post_start}' AND '{post_end}' THEN 'post'
+  END AS period,
   SUM(count_orders) AS count_orders,
   SUM(sum_order_value) AS gross_bookings,
   SUM(sum_order_value_completed) AS gross_bookings_completed,
   SUM(sum_revenue) AS revenue
 FROM `{project}.{dataset}.combined_entity_stats`
 WHERE combined_entity_id = '{ce_id}'
-  AND report_date BETWEEN '{pre_start}' AND '{post_end}'
+  AND (report_date BETWEEN '{pre_start}' AND '{pre_end}'
+    OR report_date BETWEEN '{post_start}' AND '{post_end}')
 GROUP BY period
 """
 
@@ -642,6 +651,37 @@ def _decompose(pre, post):
             sh[factor] += term
     n = _fact(len(_FAC))
     return {f: sh[f] / n for f in _FAC}
+
+
+def _reconcile_shapley_vs_vitals(raw, vitals, tol=0.02):
+    """Guard: the §7 waterfall must not tell a different story than the §2 vitals.
+
+    The waterfall decomposes combined_entity_stats ``sum_revenue`` over the pre/post
+    windows. The §2 vitals are computed INDEPENDENTLY (ce_health.py's own per-window
+    queries) and expose ``revenue_actual`` (= sum_revenue) and ``orders`` for the same
+    windows. If the waterfall's per-window revenue or order count diverges from the
+    vitals beyond ``tol`` (a fraction), the two surfaces are inconsistent — almost
+    always a window/date-bucketing bug (e.g. a non-contiguous YoY window pulling the
+    intervening months into 'post'). We raise so the caller disables the waterfall and
+    falls back to CE Health's verbatim §7 table rather than render a misleading chart.
+
+    This is a basis-matched cross-check (both sides are actual booking revenue), so a
+    correct run passes to the cent; only a real inconsistency trips it.
+    """
+    for period, vkey in (("pre", "prior"), ("post", "current")):
+        v = (vitals or {}).get(vkey) or {}
+        r = (raw or {}).get(period) or {}
+        for label, vfield, rfield, money_fmt in (
+            ("revenue", "revenue_actual", "revenue", True),
+            ("orders", "orders", "count_orders", False),
+        ):
+            exp, got = v.get(vfield), r.get(rfield)
+            if exp and got is not None and abs(got - exp) > tol * max(abs(exp), 1.0):
+                shown = (f"${got:,.0f} vs vitals ${exp:,.0f}" if money_fmt
+                         else f"{got:,.0f} vs vitals {exp:,.0f}")
+                raise RuntimeError(
+                    f"§7 {label} mismatch for '{period}': waterfall {shown} "
+                    f"(>{tol:.0%}) — window/bucketing inconsistency")
 
 
 def build_shapley_block(raw, windows, insight=None):
@@ -1659,9 +1699,14 @@ def build_fragment(run_dir: Path) -> str:
     shap_contrib = None
     try:
         shap_raw = query_raw(str(ce_id), W)
+        # Cross-check the waterfall against the independently-computed §2 vitals before
+        # trusting it. A mismatch (window/bucketing bug) raises → handled below.
+        _reconcile_shapley_vs_vitals(shap_raw, V)
         shap_contrib = _decompose(_facs(shap_raw["pre"]), _facs(shap_raw["post"]))
     except Exception as e:  # noqa: BLE001 — any failure → no driver note + verbatim §7
-        print(f"WARN: Query 1 failed ({e}); no primary-driver note, §7 verbatim.", file=sys.stderr)
+        print(f"WARN: §7 Shapley disabled ({e}); no primary-driver note, §7 verbatim.", file=sys.stderr)
+        shap_raw = None  # ensure build_shapley_block falls back to the verbatim §7 table
+        shap_contrib = None
 
     # §2 — cards + full 4-window table. The primary driver is the Shapley factor with
     # the largest |contribution|; if it maps to a vitals row, bold/mark that row.

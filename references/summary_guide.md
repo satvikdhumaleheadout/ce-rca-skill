@@ -305,6 +305,11 @@ Show only material drivers. Render the Δ-contribution as a `.delta` pill (`.del
 for consistency; use `.highlight-row` for the top driver. The full Shapley waterfall and per-driver
 detail stay in their tabs. **No charts** in the Summary (reference the tabs' charts via `↗`).
 
+**Annotation (required).** Directly under the driver table, add one small caption line:
+*"Shapley drivers are calculated including PMax (all channels) so contributions reconcile to total
+revenue; CE Health vitals exclude PMax (Omni basis) and may read differently."* — e.g. a
+`<p style="font-size:12px;color:#777;">…</p>` after the closing `</div>`.
+
 ### 6. Per-tab conclusion digests — *the comprehensive core*
 **One `analysis-block` per tab that ran**, carrying that tab's conclusions/callouts **in full** —
 not its supporting cuts. Lay each digest out as a **2-column `.conclusions-table`** (not a bullet

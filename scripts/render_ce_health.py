@@ -529,8 +529,11 @@ WITH base AS (
   FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
   WHERE combined_entity_id = '{ce_id}'
     AND event_date BETWEEN '{pre_start}' AND '{post_end}'
-    -- No page_type whitelist: matches the Omni dashboard funnel + §4 funnel cards (all LP types).
-    AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
+    -- No page_type whitelist: all LP types.
+    -- PMax INCLUDED here (no exclusion): the §7 Shapley decomposes the all-channels
+    -- revenue numerator (combined_entity_stats), so its traffic + converter basis must
+    -- be all-channels too for the 6-factor identity to reconcile. NOTE: this diverges
+    -- from the Omni dashboard funnel + the §4 funnel cards, which stay PMax-excluded.
   GROUP BY 1, 3
 )
 SELECT
@@ -685,7 +688,8 @@ def build_shapley_block(raw, windows, insight=None):
     font:{{family:'-apple-system,sans-serif',size:11,color:'#1a1a2e'}},showlegend:false,
     yaxis:{{title:'Revenue (USD)',tickprefix:'$',gridcolor:'#eef',zerolinecolor:'#ccc'}},
     xaxis:{{tickangle:15}}}},
-    {{responsive:true,displayModeBar:false}});</script>'''
+    {{responsive:true,displayModeBar:false}});</script>
+  <p style="font-size:12px;color:#777;margin-top:8px;">Shapley drivers are calculated <strong>including PMax</strong> (all channels), so contributions reconcile to total revenue. The §2 vitals cards and the funnel section exclude PMax (Omni basis) and may read differently.</p>'''
     return block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner,
                  verdict=(None if insight else verdict), summary=insight)
 
@@ -1611,23 +1615,17 @@ def build_fragment(run_dir: Path) -> str:
         cvr_pill = vitals_pill(_signed_pp(cvr_cur, cvr_pri), rel_pct_of_pp(cvr_cur, cvr_pri), cvr_d[1])
         cvr_card = card("CVR", f"{cvr_cur:.2f}%", cvr_pill, cvr_d[1], f"{cvr_pri:.2f}%")
         n_cards = 7
-    # Orders / Converter = orders ÷ converting-users — the SAME §7 Shapley factor
-    # (vitals[*].orders_per_converter, added by the engine). A level/ratio metric → %
-    # delta (signed absolute + rel %). None-safe (older sidecars omit it).
-    opc_cur, opc_pri = cur.get("orders_per_converter"), pri.get("orders_per_converter")
-    opc_card = ""
-    if opc_cur is not None and opc_pri is not None:
-        opc_d = pct_delta(opc_cur, opc_pri)
-        opc_pill = vitals_pill(f"{opc_cur - opc_pri:+.2f}", rel_pct(opc_cur, opc_pri), opc_d[1])
-        opc_card = card("Orders / Converter", f"{opc_cur:.2f}", opc_pill, opc_d[1], f"{opc_pri:.2f}")
-        n_cards += 1
-    # Card order: Revenue · Orders · CVR · Orders/Converter · AOV · Take Rate · Completion
-    # · ROI. CVR + Orders/Converter sit with the conversion metrics (right after Orders).
+    # NOTE: the "Orders / Converter" vitals card was deliberately removed — it is rarely
+    # a headline mover, and its Omni (PMax-excluded) basis would contradict the §7 Shapley
+    # "Orders / Converter" driver, which is computed all-channels (incl PMax). The metric
+    # survives only as a Shapley driver. The engine still emits vitals[*].orders_per_converter
+    # (now display-dead).
+    # Card order: Revenue · Orders · CVR · AOV · Take Rate · Completion · ROI.
+    # CVR sits with the conversion metrics (right after Orders).
     cards = "".join([
         card("Revenue", money(cur["revenue"]), rev_pill, rev_d[1], money(pri["revenue"])),
         card("Orders", f"{cur['orders']:,}", ord_pill, ord_d[1], f"{pri['orders']:,}"),
         cvr_card,
-        opc_card,
         card("AOV", f"${cur['aov']:.0f}", aov_pill, aov_d[1], f"${pri['aov']:.0f}"),
         card("Take Rate", f"{cur['tr']:.1f}%", tr_pill, tr_d[1], f"{pri['tr']:.1f}%"),
         card("Completion", f"{cur['cr']:.1f}%", cr_pill, cr_d[1], f"{pri['cr']:.1f}%",

@@ -583,15 +583,12 @@ collector ORs them into its Search 1.
 Read CE Health's JSON sidecar **directly** (`<run_dir>/ce_health_report.json` —
 you do not need `meta.json` enriched for this) for the CE identity, vitals, and
 Shapley split; skim `ce_health_report.md` only if you need a number the sidecar
-doesn't carry. **CVR, Users, and Orders/Converter are now in the sidecar** — read CVR
+doesn't carry. **CVR and Users are now in the sidecar** — read CVR
 straight from `vitals.current.cvr` / `vitals.prior.cvr` (the funnel CVR, orders/users,
-a 0–100 percentage like the other rate vitals), Users (LP traffic) from
+a 0–100 percentage like the other rate vitals), and Users (LP traffic) from
 `vitals.current.users` / `vitals.prior.users` (the raw LP-viewer count — the level
-the Shapley `traffic` driver decomposes), and **Orders/Converter** from
-`vitals.current.orders_per_converter` / `vitals.prior.orders_per_converter` (orders ÷
-converting-users — the **same factor the Shapley `Orders / Converter` driver
-decomposes**, a ratio ~1.0+; format to 2 decimals with a % delta). Do not spelunk the
-`.md` funnel section for any of these. Present the diagnosis **in chat** (not a file) as a **scannable,
+the Shapley `traffic` driver decomposes). Both are the Omni (PMax-excluded) basis. Do
+not spelunk the `.md` funnel section for these. Present the diagnosis **in chat** (not a file) as a **scannable,
 table-driven** preview — this is a decision surface for a stakeholder, so it must
 be skimmable in seconds, **not** a wall of prose. The numbers do the talking;
 your job is to lay them out, not narrate them.
@@ -611,7 +608,6 @@ Window: <pre> vs <post>
 | Revenue     | $<pre>     | $<post>    | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | Orders      | <pre>      | <post>     | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | CVR         | <pre>%     | <post>%    | <+/−x pp> ↑/↓  | <+/−x pp> ↑/↓  |
-| Orders/Conv | <pre>      | <post>     | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | AOV         | $<pre>     | $<post>    | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | Completion  | <pre>%     | <post>%    | <+/−x pp> ↑/↓  | <+/−x pp> ↑/↓  |
 | Take Rate   | <pre>%     | <post>%    | <+/−x pp> ↑/↓  | <+/−x pp> ↑/↓  |
@@ -640,6 +636,10 @@ sequential growth.">
 | 1 | <driver>        | $<x>         | <x>%  | ↑/↓ |
 | 2 | <driver>        | $<x>         | <x>%  | ↑/↓ |
 | ... |
+
+*Shapley drivers are calculated **including PMax** (all channels) so contributions
+reconcile to total revenue; the Vitals above exclude PMax (Omni basis) and may read
+differently.*
 
 **Primary driver: <driver>.** <one sentence on the mechanism — the single most
 useful line of interpretation, e.g. "Paid CVR lifted ~2.9%→3.9% alongside rising
@@ -693,10 +693,9 @@ at Step 2.)
 
 **Formatting rules for the preview:**
 - Pick the right delta unit per metric: **% change** for users/revenue/orders/AOV
-  **and Orders/Converter** (level/ratio metrics), **percentage points (pp)** for rates
-  (CVR / completion / take rate). Never express a rate move as a % of a %. Format Users
-  as a plain integer count (thousands separators, e.g. `124,900`); format
-  Orders/Converter as a 2-decimal ratio (e.g. `1.18`). The **same unit rule applies
+  (level metrics), **percentage points (pp)** for rates (CVR / completion / take rate).
+  Never express a rate move as a % of a %. Format Users as a plain integer count
+  (thousands separators, e.g. `124,900`). The **same unit rule applies
   to both the Δ (vs Pre) and the YoY column** — Δ = Post vs Pre (the rolling window,
   not MoM), YoY = Post vs `ly_current` (same period last year); `—` when the LY value
   is absent.
@@ -1450,6 +1449,7 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 | --- | --- | --- |
+| m080 | 2026-06-16 | **Shapley drivers computed including PMax — contributions reconcile to total revenue + "Orders / Converter" vitals card removed (v2.45.0).** §7's identity `revenue = traffic × cvr × orders/converter × aov × completion × take_rate` had a **cross-source basis seam**: the numerator (orders/bookings/revenue from `combined_entity_stats`) is **all-channels incl PMax**, but the funnel factors (traffic = LP users, converters → CVR + orders/converter from `mixpanel_user_page_funnel_progression`) **excluded PMax**. Orders counted PMax, converters didn't → the asymmetry inflated **orders/converter** (CE 2567: ~18% of converters were PMax users dropped from the denominator while their orders stayed in the numerator). With PMax conversion tracking now fixed upstream, the **whole Shapley is computed all-channels** so traffic + CVR + orders/converter share revenue's basis and every driver's contribution / share / total is correct. Changes: **(1)** `fetch_ce_funnel` adds all-channels keys (`lp_viewers_all` / `cvr_all` / `order_completers_all`) via conditional aggregation — the existing Omni (PMax-excluded) keys stay **byte-identical** (funnel section + vitals unchanged). **(2)** `compute_shapley_for_ce` (Step-1 preview) + `render_ce_health._FUNNEL_SQL` (§7 waterfall) read the all-channels basis. **(3) "Orders / Converter" vitals card removed** from the Step-1 call-out (`SKILL.md`) + §2 (`render_ce_health.py`) — rarely a headline mover, and its Omni basis would contradict the all-channels Shapley driver; it survives only as a Shapley driver. **(4) Disclosure note** *"Shapley drivers calculated including PMax… vitals exclude PMax and may read differently"* on all three Shapley surfaces (Step-1 preview, §7 waterfall, Summary driver table). Verified: both files parse; §7 render + engine both reconcile (`unattributable = $0`) on CE 2567; converters move 1,055 (Omni) → 1,286 (all-channels); Omni keys unchanged (1,055 / 4.90%). Residual: old comparison windows still under-count PMax converters (shrinks over time); full PMax inclusion across vitals + funnel is a deliberate later step. Blast radius: `skills/ce-health/ce_health.py`, `scripts/render_ce_health.py`, `SKILL.md` (Step-1 + this row), `references/summary_guide.md`, `CHANGELOG.md`, `VERSION`. No `compose.py` / template / CVR-RCA / perf-audit / contract change; standalone `engine/sources/bq.py` untouched (no re-vendor). |
 | m079 | 2026-06-16 | **Summary: goal-aware framing — tilt the conclusion + next-steps to the user's goal, reconciled against the data (v2.44.0).** The goal captured at 0b (`## Goal`) was used only at the front (reveal framing, questionnaire depth, coming-soon highlight) and never reached the report. Now the **Summary** (and only the Summary — no other tab/skill) uses it to **tilt emphasis** of the headline callout (#3) + recommended next-steps (#6). Three rules in `references/summary_guide.md`: **(1) tilt, don't restate** — never print "you set out to…"; instead derive a **posture** by classifying whatever the user picked *or typed in the "Other" box* — **scale** (lead with what's working + levers to double down) / **fix** (lead with root cause + remediation) / **investigate** (lead with the answer to that specific question) / **neutral** (balanced, no tilt). **(2) data wins** — reconcile the posture against the headline direction (CE Health revenue Δ + top Shapley driver) *before* tilting: if the goal contradicts the data (goal "scale" but revenue down), tilt to the **data-aligned** posture, never the stated one; the tilt only reorders emphasis and can never spin what the data shows. **(3) everything else stays pure synthesis** — facts/drivers/verdicts are whatever the tabs found; the goal changes only what leads. Handles the free-text goal (LLM classification) and the goal↔data mismatch (data-aligned posture, optional one-clause note). `user_context.md` input note updated to surface `## Goal`; #3/#6 flow rows tagged. Blast radius: `references/summary_guide.md` + this row, `CHANGELOG.md`, `VERSION`. No other skill, renderer, `compose.py`, or contract change. |
 | m078 | 2026-06-16 | **Step-1 vitals preview: money is USD → always render `$`, never localize the symbol (v2.43.1).** A live run on a non-US CE showed AOV (and other money rows) with a **£/€ symbol** even though the value is USD — so it read as "AOV in local currency." Verified the value is correct USD (the engine reads `*_usd` columns; `combined_entity_stats` is USD-normalized — CE 243/EUR AOV `$264.53` matches `fct_orders.order_value_usd` exactly, and across all CEs the order-value ratio is ≈1, no FX factor) and the **code is clean** (`render_ce_health.money()` hardcodes `$`; no symbol-localization logic anywhere). Root cause was the **in-chat Step-1 preview**, which the orchestrator writes at runtime: seeing the CE's "London · UK" / "Paris · Europe" metadata pills, the model localized the symbol. Fix: an explicit §1 note — **all preview money (Revenue, AOV, Shapley `$` contributions) is USD; always use `$`; the market/country pills are the CE's *location*, not its currency; never swap in £/€/₹/¥** (a UK CE's AOV is `$264`, not `£264`). Note-only; no engine/render/contract change (the rendered HTML tab already hardcodes `$`). (The note text shipped bundled in the v2.43.0 commit; this row documents it.) **Separate, deeper finding (NOT fixed here):** perf-audit's *paid* metrics (spend / conversion value / CM1 / ROI / CPC) come from Google-Ads tables in **account currency** with **no `_usd` column** to switch to — for a non-US account those are genuinely non-USD and need upstream FX normalization or explicit currency labeling; flagged for separate/owner work. Blast radius: `SKILL.md` §1 + this row, `CHANGELOG.md`, `VERSION`. |
 | m077 | 2026-06-15 | **"Orders / Converter" added to the vitals + Shapley label fixed (v2.43.0).** §7's Shapley decomposes a 6-factor identity `revenue = traffic × cvr × orders/converter × aov × completion × take_rate`, where **orders_per_converter = orders ÷ converting-users** (`order_completers`) — a correct, well-formed factor (the identity telescopes to revenue exactly → `unattributable ≈ $0`). But it was **(a) absent from the vitals** (so readers saw the Shapley driver move with no vitals row showing what it is / how it moved) and **(b) mislabeled "Orders / User"** in the §7 chart + the engine insight — imprecise, since it's per *converter*, not per all users. Fixes: **(1)** engine merges `orders_per_converter` (orders ÷ `order_completers`) onto each window's sidecar `vitals` (one line by the existing `cvr`/`users` merge; None-safe). **(2)** `render_ce_health.py` §2 adds an **"Orders / Converter"** metric card (pre→post + % delta), slotted after CVR among the conversion metrics (grid widens). **(3)** `SKILL.md` Step-1 in-chat vitals table gains an **Orders/Conv** row + the sidecar-read note + the level-metric (% delta, 2-decimal ratio) format rule [committed in v2.42.2]. **(4)** label **"Orders / User" → "Orders / Converter"** in the §7 `_FLBL` + the engine insight. Now the vitals show all six Shapley factors (Users · CVR · Orders/Converter · AOV · Completion · Take Rate). Verified: both files parse; an injected sidecar renders the card (1.18 / 1.11); zero "Orders / User" left. Blast radius: `skills/ce-health/ce_health.py` (vitals merge + insight label), `scripts/render_ce_health.py` (§2 card + §7 label), `SKILL.md` (Step-1 [v2.42.2] + this row), `CHANGELOG.md`, `VERSION`. No `compose.py` / template / CVR-RCA / contract change. |

@@ -266,30 +266,40 @@ def fetch_ce_metadata(ce_id):
 
 def fetch_ce_funnel(ce_id, start, end):
     # type: (int, date, date) -> Dict[str, Any]
+    # Two bases in one scan: the Omni keys (PMax-EXCLUDED) feed the funnel section +
+    # vitals exactly as before; the `*_all` keys (PMax-INCLUDED) feed ONLY the Shapley
+    # decomposition, so its factors reconcile to the all-channels revenue numerator
+    # from combined_entity_stats. The Omni columns use conditional aggregation rather
+    # than a WHERE filter so they stay identical to the previous PMax-excluded query.
+    _not_pmax = "(advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')"
     query = """
     SELECT
-        COUNT(DISTINCT user_id) AS lp_viewers,
-        COUNT(DISTINCT IF(has_select_page_viewed, user_id, NULL)) AS select_viewers,
-        COUNT(DISTINCT IF(has_checkout_started, user_id, NULL)) AS checkout_starters,
-        COUNT(DISTINCT IF(has_order_completed, user_id, NULL)) AS order_completers
+        COUNT(DISTINCT IF({not_pmax}, user_id, NULL)) AS lp_viewers,
+        COUNT(DISTINCT IF({not_pmax} AND has_select_page_viewed, user_id, NULL)) AS select_viewers,
+        COUNT(DISTINCT IF({not_pmax} AND has_checkout_started, user_id, NULL)) AS checkout_starters,
+        COUNT(DISTINCT IF({not_pmax} AND has_order_completed, user_id, NULL)) AS order_completers,
+        COUNT(DISTINCT user_id) AS lp_viewers_all,
+        COUNT(DISTINCT IF(has_order_completed, user_id, NULL)) AS order_completers_all
     FROM `{project}.{dataset}.mixpanel_user_page_funnel_progression`
     WHERE combined_entity_id = '{ce_id}'
         AND event_date BETWEEN '{start}' AND '{end}'
-        AND (advertising_channel_type IS NULL OR advertising_channel_type != 'PERFORMANCE_MAX')
     """.format(
         project=PROJECT_ID, dataset=DATASET,
+        not_pmax=_not_pmax,
         ce_id=ce_id,
         start=start.strftime("%Y-%m-%d"),
         end=end.strftime("%Y-%m-%d"),
     )
     rows = run_bq_query(query)
-    if not rows or not rows[0].get("lp_viewers"):
+    if not rows or not (rows[0].get("lp_viewers") or rows[0].get("lp_viewers_all")):
         return {}
     r = rows[0]
     lp = int(r.get("lp_viewers") or 0)
     sel = int(r.get("select_viewers") or 0)
     chk = int(r.get("checkout_starters") or 0)
     ord_ = int(r.get("order_completers") or 0)
+    lp_all = int(r.get("lp_viewers_all") or 0)
+    ord_all = int(r.get("order_completers_all") or 0)
     return {
         "lp_viewers": lp,
         "select_viewers": sel,
@@ -299,9 +309,14 @@ def fetch_ce_funnel(ce_id, start, end):
         "s2c": chk / sel * 100 if sel else None,
         "c2o": ord_ / chk * 100 if chk else None,
         # Funnel CVR = converted users / LP users (orders/users). This is the
-        # canonical CE-level funnel CVR surfaced in vitals and used as the CVR
-        # factor in the Shapley decomposition (funnel basis).
+        # canonical CE-level funnel CVR surfaced in vitals (Omni / PMax-excluded basis).
         "cvr": ord_ / lp * 100 if lp else None,
+        # All-channels (PMax INCLUDED) — consumed ONLY by compute_shapley_for_ce so the
+        # decomposition's traffic / CVR / orders-per-converter factors share the same
+        # all-channels basis as the revenue numerator and the identity reconciles.
+        "lp_viewers_all": lp_all,
+        "order_completers_all": ord_all,
+        "cvr_all": ord_all / lp_all * 100 if lp_all else None,
     }
 
 
@@ -737,20 +752,27 @@ def compute_shapley_for_ce(cur_health, pri_health, cur_funnel, pri_funnel):
         revenue = traffic × cvr × orders_per_converter × aov × completion × take_rate
 
     where ``traffic`` is funnel (LP) users, ``cvr`` is the funnel CVR
-    (converted_users / users — the SAME metric as vitals.cvr), and the remaining
-    factors come from vitals. ``orders_per_converter`` is included only when the
-    funnel exposes converted-user counts, so the multiplicative identity stays
-    exact; otherwise the factor set degrades gracefully to the funnel-CVR basis.
+    (converted_users / users), and the remaining factors come from vitals.
+    ``orders_per_converter`` is included only when the funnel exposes
+    converted-user counts, so the multiplicative identity stays exact; otherwise
+    the factor set degrades gracefully to the funnel-CVR basis.
 
-    Invariant guaranteed: the CVR factor's sign equals sign(post_cvr − pre_cvr) —
-    if the funnel CVR rose, the Shapley CVR factor is positive (it diverged in
-    sign from vitals under the old clicks-based factors).
+    PMax basis: traffic / cvr / orders_per_converter are taken from the
+    **all-channels** funnel keys (``lp_viewers_all`` / ``cvr_all`` /
+    ``order_completers_all``, PMax INCLUDED) so the decomposition shares the
+    all-channels basis of the revenue numerator. This is deliberately a DIFFERENT
+    basis than the Omni (PMax-excluded) vitals cards (CVR / Users), which is why the
+    Shapley surfaces are annotated "calculated including PMax".
     """
-    cur_users = float((cur_funnel or {}).get("lp_viewers") or 0)
-    pri_users = float((pri_funnel or {}).get("lp_viewers") or 0)
-    # Funnel CVR (orders/users) — fraction form for the multiplicative identity.
-    cur_cvr_pct = (cur_funnel or {}).get("cvr")
-    pri_cvr_pct = (pri_funnel or {}).get("cvr")
+    # All-channels (PMax-INCLUDED) funnel counts — the Shapley decomposes the
+    # all-channels revenue numerator (combined_entity_stats), so traffic / CVR /
+    # orders-per-converter must share that basis for the identity to reconcile.
+    # The Omni (PMax-excluded) keys stay reserved for the funnel section + vitals.
+    cur_users = float((cur_funnel or {}).get("lp_viewers_all") or 0)
+    pri_users = float((pri_funnel or {}).get("lp_viewers_all") or 0)
+    # Funnel CVR (orders/users), all-channels — fraction form for the identity.
+    cur_cvr_pct = (cur_funnel or {}).get("cvr_all")
+    pri_cvr_pct = (pri_funnel or {}).get("cvr_all")
     cur_cvr = float(cur_cvr_pct) / 100.0 if cur_cvr_pct is not None else 0.0
     pri_cvr = float(pri_cvr_pct) / 100.0 if pri_cvr_pct is not None else 0.0
 
@@ -779,8 +801,8 @@ def compute_shapley_for_ce(cur_health, pri_health, cur_funnel, pri_funnel):
     # orders_per_converter = orders / converted_users. Include it when the funnel
     # gives converted-user counts (order_completers), to match §7's 6-factor
     # identity; the funnel CVR factor then stays converted_users/users.
-    cur_conv = float((cur_funnel or {}).get("order_completers") or 0)
-    pri_conv = float((pri_funnel or {}).get("order_completers") or 0)
+    cur_conv = float((cur_funnel or {}).get("order_completers_all") or 0)
+    pri_conv = float((pri_funnel or {}).get("order_completers_all") or 0)
     if cur_conv > 0 and pri_conv > 0:
         current["orders_per_converter"] = max(cur_orders / cur_conv, 0.00001)
         prior["orders_per_converter"] = max(pri_orders / pri_conv, 0.00001)

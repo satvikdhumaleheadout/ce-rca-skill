@@ -5,6 +5,23 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.45.0] — 2026-06-16 — Shapley drivers are computed including PMax (so contributions reconcile to total revenue)
+
+**Summary:** The §7 Shapley decomposition splits the revenue change into six factors (`revenue = traffic × CVR × orders/converter × AOV × completion × take rate`). Its **revenue numerator** (orders, bookings, revenue) comes from `combined_entity_stats` — **all channels, including PMax**. But its **funnel factors** (traffic = LP users, converters → CVR + orders/converter) came from the Mixpanel funnel with **PMax excluded**. That asymmetry — orders counted PMax, converters not — landed entirely in the **orders/converter** factor and inflated it (on CE 2567, ~18% of converters were PMax users dropped from the denominator while their orders stayed in the numerator). With PMax conversion tracking now fixed upstream, we **include PMax in the whole Shapley computation** so traffic + CVR + orders/converter share the all-channels basis of revenue and each driver's contribution / share / total is correct.
+
+What changed:
+- **Shapley computation → all channels (incl PMax).** The engine sidecar (`compute_shapley_for_ce`, which feeds the Step-1 driver preview) now reads new all-channels funnel keys (`lp_viewers_all` / `cvr_all` / `order_completers_all`), and the §7 waterfall query (`render_ce_health._FUNNEL_SQL`) drops its PMax exclusion. Reconciliation verified on CE 2567 (`unattributable = $0`), with converters moving from 1,055 (PMax-excluded) to 1,286 (all-channels).
+- **Everything else stays PMax-excluded (Omni basis), unchanged.** The funnel section, the per-TGID funnel, and the remaining vitals cards (Users / CVR / Revenue / AOV / …) keep the Omni basis exactly — `fetch_ce_funnel` adds the `*_all` keys via conditional aggregation, leaving every existing Omni key byte-identical.
+- **"Orders / Converter" vitals card removed** from the orchestrator Step-1 call-out (SKILL.md) and the CE Health §2 vitals report (`render_ce_health.py`). It is rarely a headline mover, and its Omni basis would contradict the all-channels Shapley driver; it now survives only as a Shapley driver.
+- **Disclosure note on every Shapley surface** — *"Shapley drivers are calculated including PMax (all channels) so contributions reconcile to total revenue; vitals exclude PMax and may read differently"* — in the Step-1 preview (SKILL.md), the §7 waterfall (render), and the Summary driver table (`summary_guide.md`).
+
+Note: PMax funnel data is only reliable since the upstream conversion-tracking fix, so very old comparison windows may still under-count PMax converters (a residual that shrinks over time). Including PMax across vitals + funnel everywhere is a deliberate later step.
+
+### Blast radius
+- `skills/ce-health/ce_health.py` (`fetch_ce_funnel` adds `*_all` keys; `compute_shapley_for_ce` reads them), `scripts/render_ce_health.py` (`_FUNNEL_SQL` all-channels, §7 annotation, Orders/Converter §2 card removed), `SKILL.md` (Step-1 row removed + annotation + format-rule cleanup), `references/summary_guide.md` (driver-table annotation) + changelog row m080; `CHANGELOG.md`; `VERSION` 2.44.0 → 2.45.0. No `compose.py` / template / CVR-RCA / perf-audit / contract change; standalone `engine/sources/bq.py` untouched (no re-vendor).
+
+---
+
 ## [v2.44.0] — 2026-06-16 — Summary tab is framed to the user's goal (reconciled against the data)
 
 **Summary:** The goal the analyst picks at the start (0b) shaped the *intake* but never reached the *report*. Now the **Summary** — and only the Summary — uses it to **tilt the framing** of its headline callout and recommended next-steps toward what the user came for. No other tab/skill is touched, and the goal is never printed verbatim.

@@ -1187,7 +1187,7 @@ def render_shapley(shapley, w):
     factor_labels = {
         "traffic": ("Traffic (Users)", "\u2191 More users" if shapley.get("traffic", 0) >= 0 else "\u2193 Fewer users"),
         "cvr": ("Site CVR", "\u2191 Better conversion" if shapley.get("cvr", 0) >= 0 else "\u2193 Lower conversion"),
-        "orders_per_converter": ("Orders / User", "\u2191 More orders per converter" if shapley.get("orders_per_converter", 0) >= 0 else "\u2193 Fewer orders per converter"),
+        "orders_per_converter": ("Orders / Converter", "\u2191 More orders per converter" if shapley.get("orders_per_converter", 0) >= 0 else "\u2193 Fewer orders per converter"),
         "aov": ("AOV", "\u2191 Higher ticket value" if shapley.get("aov", 0) >= 0 else "\u2193 Lower ticket value"),
         "tr": ("Take Rate", "\u2191 TR improved" if shapley.get("tr", 0) >= 0 else "\u2193 TR compression"),
         "cr": ("Completion Rate", "\u2191 CR improved" if shapley.get("cr", 0) >= 0 else "\u2193 CR declined"),
@@ -1628,6 +1628,12 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None,
             _fn = funnel.get(_wk) or {}
             vitals[_wk]["cvr"] = _fn.get("cvr")
             vitals[_wk]["users"] = _fn.get("lp_viewers")
+            # orders_per_converter = orders / order_completers (converting users) — the
+            # SAME factor §7's Shapley decomposes; exposing it on vitals lets the Step-1
+            # preview + §2 cards show it and how it moved. None-safe (old/missing data).
+            _oc = _fn.get("order_completers")
+            _ord = vitals[_wk].get("orders")
+            vitals[_wk]["orders_per_converter"] = (_ord / _oc) if (_oc and _ord is not None) else None
 
         sys.stderr.write("7. Computing Shapley decomposition...\n")
         sys.stderr.flush()

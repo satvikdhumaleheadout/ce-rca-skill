@@ -5,6 +5,21 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.43.0] — 2026-06-15 — "Orders / Converter" added to the vitals; Shapley label corrected
+
+**Summary:** The §7 Shapley waterfall decomposes a 6-factor identity — `revenue = traffic × CVR × orders-per-converter × AOV × completion × take-rate` — where **orders-per-converter = orders ÷ converting users** (users who completed an order). We verified it's a correct, well-formed factor: the identity telescopes to revenue exactly (`unattributable ≈ $0`). But two gaps: it was **not shown in the vitals** (so the Shapley "Orders / Converter" driver could move with no vitals row explaining it), and it was **mislabeled "Orders / User"** — imprecise, because it's per *converter*, not per all users (orders/traffic would be a different number).
+
+Now:
+- **Shown in the vitals** — the CE Health §2 cards gain an **"Orders / Converter"** card (pre→post + % change), slotted after CVR; the Step-1 in-chat vitals table gains an **Orders/Conv** row. So the vitals now display all six Shapley factors (Users · CVR · Orders/Converter · AOV · Completion · Take Rate).
+- **Label corrected** — "Orders / User" → **"Orders / Converter"** in the §7 waterfall and the engine insight line.
+
+The data already existed (`order_completers` is fetched per window for the Shapley), so the engine change is a single merge onto each window's sidecar `vitals`, mirroring how CVR and Users were added.
+
+### Blast radius
+- `skills/ce-health/ce_health.py` (vitals merge + insight label), `scripts/render_ce_health.py` (§2 card + §7 label), `SKILL.md` (Step-1 row landed in v2.42.2 + changelog row m077), `CHANGELOG.md`, `VERSION` → 2.43.0. None-safe for older sidecars; no `compose.py` / template / CVR-RCA / contract change. Verified: both files parse; an injected sidecar renders the card; no "Orders / User" remains.
+
+---
+
 ## [v2.42.2] — 2026-06-15 — 1c bucket questions lead with the bucket name
 
 **Summary:** A live run showed the four constraint pop-ups rendering only the MMP observation ("From MMP: … Anything to add?") with **no visible bucket label** — you couldn't tell which of Supply / Landing Page / PPC / Pricing you were answering. We'd been relying on the `AskUserQuestion` `header` chip to carry the bucket, but it's ~12-char-capped ("Supply / Availability" doesn't fit) and isn't prominent in every client. Now the **question text itself leads with the bold bucket name**, so the order is always **bucket name → the MMP observation → "anything to add or correct?"** (e.g. *"**Landing Page** — From MMP: SD→SF URL change… Anything to add or correct?"*). Structure/wording only — no behaviour change.

@@ -610,7 +610,7 @@ def query_raw(ce_id, windows):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _FAC = ["traffic", "cvr", "orders_per_converter", "aov", "completion_rate", "take_rate"]
-_FLBL = {"traffic": "Traffic", "cvr": "CVR", "orders_per_converter": "Orders / User",
+_FLBL = {"traffic": "Traffic", "cvr": "CVR", "orders_per_converter": "Orders / Converter",
          "aov": "AOV", "completion_rate": "Completion Rate", "take_rate": "Take Rate"}
 
 
@@ -1611,12 +1611,23 @@ def build_fragment(run_dir: Path) -> str:
         cvr_pill = vitals_pill(_signed_pp(cvr_cur, cvr_pri), rel_pct_of_pp(cvr_cur, cvr_pri), cvr_d[1])
         cvr_card = card("CVR", f"{cvr_cur:.2f}%", cvr_pill, cvr_d[1], f"{cvr_pri:.2f}%")
         n_cards = 7
-    # Card order: Revenue · Orders · CVR · AOV · Take Rate · Completion · ROI. CVR
-    # sits with the rate cards (right after Orders, leading the conversion metrics).
+    # Orders / Converter = orders ÷ converting-users — the SAME §7 Shapley factor
+    # (vitals[*].orders_per_converter, added by the engine). A level/ratio metric → %
+    # delta (signed absolute + rel %). None-safe (older sidecars omit it).
+    opc_cur, opc_pri = cur.get("orders_per_converter"), pri.get("orders_per_converter")
+    opc_card = ""
+    if opc_cur is not None and opc_pri is not None:
+        opc_d = pct_delta(opc_cur, opc_pri)
+        opc_pill = vitals_pill(f"{opc_cur - opc_pri:+.2f}", rel_pct(opc_cur, opc_pri), opc_d[1])
+        opc_card = card("Orders / Converter", f"{opc_cur:.2f}", opc_pill, opc_d[1], f"{opc_pri:.2f}")
+        n_cards += 1
+    # Card order: Revenue · Orders · CVR · Orders/Converter · AOV · Take Rate · Completion
+    # · ROI. CVR + Orders/Converter sit with the conversion metrics (right after Orders).
     cards = "".join([
         card("Revenue", money(cur["revenue"]), rev_pill, rev_d[1], money(pri["revenue"])),
         card("Orders", f"{cur['orders']:,}", ord_pill, ord_d[1], f"{pri['orders']:,}"),
         cvr_card,
+        opc_card,
         card("AOV", f"${cur['aov']:.0f}", aov_pill, aov_d[1], f"${pri['aov']:.0f}"),
         card("Take Rate", f"{cur['tr']:.1f}%", tr_pill, tr_d[1], f"{pri['tr']:.1f}%"),
         card("Completion", f"{cur['cr']:.1f}%", cr_pill, cr_d[1], f"{pri['cr']:.1f}%",

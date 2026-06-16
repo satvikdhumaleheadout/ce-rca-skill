@@ -266,7 +266,7 @@ headline callout and **directly above** the driver table below, output exactly:
 ```
 
 The composer replaces it with the **exact** §7 Revenue-Waterfall chart from CE Health (the
-corrected 6-factor decomposition), so the front page shows the visual *then* the table. **Do
+corrected 5-factor decomposition), so the front page shows the visual *then* the table. **Do
 NOT author a chart yourself** — no Plotly, no re-drawn waterfall (the §7 chart is a Query-1
 computation you don't have; re-authoring risks a different decomposition). Just emit the
 placeholder; it renders nothing if the chart is unavailable (graceful). The table follows it.
@@ -306,8 +306,9 @@ for consistency; use `.highlight-row` for the top driver. The full Shapley water
 detail stay in their tabs. **No charts** in the Summary (reference the tabs' charts via `↗`).
 
 **Annotation (required).** Directly under the driver table, add one small caption line:
-*"Shapley drivers are calculated including PMax (all channels) so contributions reconcile to total
-revenue; CE Health vitals exclude PMax (Omni basis) and may read differently."* — e.g. a
+*"Shapley drivers reconcile to total revenue, calculated including PMax (all channels). The Shapley
+CVR = orders ÷ users (it absorbs orders-per-converter — no separate driver), so it differs from the
+CE Health vitals CVR card (converters ÷ users, Omni / PMax-excluded)."* — e.g. a
 `<p style="font-size:12px;color:#777;">…</p>` after the closing `</div>`.
 
 ### 6. Per-tab conclusion digests — *the comprehensive core*

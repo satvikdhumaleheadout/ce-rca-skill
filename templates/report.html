@@ -83,12 +83,25 @@
       var btn  = document.querySelector('.tab-button[data-tab="' + tabId + '"]');
       if (pane) pane.classList.add('active');
       if (btn)  { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
-      // Charts inside a previously-hidden pane may have rendered at width 0;
-      // force a resize so they reflow to the now-visible container.
+      // Charts first drawn inside a hidden pane stick at Plotly's 700px width-0
+      // fallback (_fullLayout.width = 700). Plotly.Plots.resize does NOT correct
+      // this even once the pane is visible — verified no-op; an explicit
+      // relayout to the chart's real container width does. Run it after the
+      // now-visible pane has reflowed: a double rAF (lets layout settle) plus a
+      // timeout fallback (catches charts still finishing their initial newPlot).
+      // The clientWidth > 0 guard avoids relayout-ing to a zero width.
       if (pane && window.Plotly) {
-        pane.querySelectorAll('.js-plotly-plot').forEach(function (el) {
-          try { window.Plotly.Plots.resize(el); } catch (e) { /* ignore */ }
-        });
+        var reflowCharts = function () {
+          pane.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+            if (el.clientWidth > 0) {
+              try {
+                window.Plotly.relayout(el, { width: el.clientWidth, autosize: true });
+              } catch (e) { /* ignore */ }
+            }
+          });
+        };
+        requestAnimationFrame(function () { requestAnimationFrame(reflowCharts); });
+        setTimeout(reflowCharts, 150);
       }
     }
 

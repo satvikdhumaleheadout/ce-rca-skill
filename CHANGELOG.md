@@ -5,6 +5,34 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.48.0] — 2026-06-16 — Shapley drops "orders / converter" — CVR absorbs it — consistently across every surface
+
+**Summary:** The Shapley revenue decomposition used to carry a separate **orders-per-converter** factor (orders ÷ converting-users), which confused stakeholders and was prone to a measurement artifact (its funnel converter denominator is counted on a different basis than the order numerator, so it inflated at peak volume). We removed it: the Shapley **CVR is now defined as orders ÷ users**, which folds the old users→converters→orders steps into a single factor — no converter count, no leaky denominator, nowhere for the artifact to live. The identity stays exact and telescopes to actual net revenue: `traffic × (orders/users) × (gross_bookings/orders) × (completed/gross) × (net/completed) = net revenue`.
+
+Crucially, this is applied **identically across all three places a Shapley appears**, so they never disagree:
+- **The orchestrator's Step-1 write-up** (engine `compute_shapley_for_ce` → the in-chat driver preview).
+- **The §7 Shapley waterfall chart in the CE Health tab** (`render_ce_health.py` — recast from 6-factor to the same 5-factor identity; this is the chart stakeholders actually read).
+- **The Summary tab driver table** (inherits the §7 factors; its required caption updated to match).
+
+**Scope (unchanged elsewhere):** this CVR definition (orders/users) lives **only inside the Shapley**. The §2 vitals CVR card, the funnel section, and the `cvr`/`users` sidecar fields keep their existing definition (converters/users, Omni). Each Shapley surface now carries a one-line caption stating "CVR here = orders ÷ users (absorbs orders-per-converter); the vitals CVR card is converters ÷ users" so the deliberate difference is disclosed rather than surprising.
+
+**Verified:** both Python files parse; the §7 render path and the engine both reconcile (`unattributable = $0`) on CE 2567 with no `orders_per_converter` factor and CVR = orders/users; zero live "6-factor" / "Orders / Converter" references remain across the Shapley surfaces.
+
+### Blast radius
+- `skills/ce-health/ce_health.py` (`compute_shapley_for_ce` 5-factor + dead-factor cleanup), `scripts/render_ce_health.py` (`_FAC`/`_FLBL`/`_facs` recast, §7 caption, comments), `SKILL.md` (Step-1 caption + §7-description wording + row m083), `references/summary_guide.md` (driver-table caption) + `CHANGELOG.md` + `VERSION`. No `compose.py` / template / CVR-RCA / perf-audit / contract change; vitals + funnel definitions untouched; standalone `engine/sources/bq.py` untouched.
+
+---
+
+## [v2.47.0] — 2026-06-16 — Fix CVR-RCA trend chart rendering at the wrong width in the combined report
+
+**Summary:** In the combined report, the CVR RCA tab's daily-CVR-trend chart rendered at a fixed 700px instead of filling its column, leaving the top of that tab looking cramped and misaligned. The cause: the combined report opens on the Summary tab, so the CVR tab (and its chart) is hidden when the page first loads. The charting library can't measure a hidden element, so it falls back to a default 700px width and locks it in. The code that was supposed to fix this on tab-switch used a library call that turned out to be a no-op for this situation.
+
+**What changed:** The combined report's tab-switch logic now explicitly re-lays-out each chart to its real container width once the tab becomes visible, deferred until the layout has settled (with a short fallback to catch charts still finishing their first render). This was verified end-to-end in a browser: opening the report and clicking into the CVR RCA tab now shows the chart at full column width. The fix also covers charts in other non-default tabs (e.g. CE Health).
+
+**Note:** A related cosmetic issue in the standalone CVR-RCA report (a duplicate element id on the trend chart) was identified and flagged for a separate upstream fix; it does not affect chart sizing.
+
+---
+
 ## [v2.46.0] — 2026-06-16 — Orchestrator verifies perf-audit's full-data-dump Sheet was actually created
 
 **Summary:** A live run (CE 2174) produced a Paid Performance Audit tab whose text pointed readers to a "full data dump in Sheet Tab 6/7/8" — but no Sheet existed, and the report's Data Sources section was an empty heading. The cause was a plain execution skip, not a wrong or missing instruction: the perf-audit step that builds that 8-tab Sheet (Step 4b) runs *after* the written report already looks finished, so a sub-agent that considers the report "done" tends to skip it — leaving the report's Sheet pointers dangling. Because the Sheet step is forward-referenced by the narrative, this fails the same way on every run that skips it.

@@ -16,7 +16,7 @@ Fidelity contract (see references/composition_rules.md):
       §2 Vitals    → 6 metric cards + the full 4-window table below
       §5 L12M      → 2 Plotly charts replacing the monthly tables (same data)
       §6 TGIDs     → styled table with first 2 columns frozen on scroll
-      §7 Shapley   → the ONE agreed exception: a corrected canonical 6-factor
+      §7 Shapley   → the ONE agreed exception: a corrected canonical 5-factor
                      booking-revenue waterfall (CE Health's own Shapley is
                      mis-specified — 5 factors, double-counts CR×TR). Computed
                      from raw revenue-component rows pulled via Query 1 (bq CLI).
@@ -513,7 +513,7 @@ def _subhead(t):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Query 1 (via bq CLI) — raw revenue-component rows for the 6-factor Shapley
+# Query 1 (via bq CLI) — raw revenue-component rows for the 5-factor Shapley
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Funnel traffic + converters (CE-level ALL row), lifted from cvr-rca q1_base.sql.
@@ -532,7 +532,7 @@ WITH base AS (
     -- No page_type whitelist: all LP types.
     -- PMax INCLUDED here (no exclusion): the §7 Shapley decomposes the all-channels
     -- revenue numerator (combined_entity_stats), so its traffic + converter basis must
-    -- be all-channels too for the 6-factor identity to reconcile. NOTE: this diverges
+    -- be all-channels too for the 5-factor identity to reconcile. NOTE: this diverges
     -- from the Omni dashboard funnel + the §4 funnel cards, which stay PMax-excluded.
   GROUP BY 1, 3
 )
@@ -547,7 +547,7 @@ GROUP BY period
 
 # Booking / revenue components (combined_entity_stats), lifted from
 # ce_health.py:fetch_ce_health. `revenue` here is sum_revenue = booking revenue
-# (revenue_actual) — the figure the 6-factor identity reconstructs.
+# (revenue_actual) — the figure the 5-factor identity reconstructs.
 _STATS_SQL = """
 SELECT
   CASE WHEN report_date BETWEEN '{pre_start}' AND '{pre_end}' THEN 'pre' ELSE 'post' END AS period,
@@ -579,7 +579,7 @@ def _bq_json(sql):
 
 
 def query_raw(ce_id, windows):
-    """Build {'pre': {...}, 'post': {...}} of the six 6-factor inputs via Query 1.
+    """Build {'pre': {...}, 'post': {...}} of the raw Shapley inputs via Query 1.
 
     Returns the dict on success, or None on any failure (caller falls back)."""
     pre, post = windows["prior"], windows["current"]
@@ -607,21 +607,25 @@ def query_raw(ce_id, windows):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Canonical 6-factor Shapley revenue bridge
-#   revenue = traffic × cvr × orders/converter × aov × completion × take_rate
-# All 720 permutations; unattributable = actual_delta − sum(contributions) ≈ $0.
+# Canonical 5-factor Shapley revenue bridge
+#   revenue = traffic × cvr × aov × completion × take_rate
+# CVR here = orders / users (ORDER-based) — it folds the old users→converters→orders
+# steps into one factor, so there is NO orders-per-converter term (its leaky funnel
+# converter denominator is gone). Matches ce_health.compute_shapley_for_ce exactly.
+# All 120 permutations; unattributable = actual_delta − sum(contributions) ≈ $0.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_FAC = ["traffic", "cvr", "orders_per_converter", "aov", "completion_rate", "take_rate"]
-_FLBL = {"traffic": "Traffic", "cvr": "CVR", "orders_per_converter": "Orders / Converter",
+_FAC = ["traffic", "cvr", "aov", "completion_rate", "take_rate"]
+_FLBL = {"traffic": "Traffic", "cvr": "CVR",
          "aov": "AOV", "completion_rate": "Completion Rate", "take_rate": "Take Rate"}
 
 
 def _facs(r):
     return dict(
         traffic=r["overall_traffic"],
-        cvr=r["users_order_completed"] / r["overall_traffic"],
-        orders_per_converter=r["count_orders"] / r["users_order_completed"],
+        # CVR = orders / users (folds in orders-per-converter); telescopes without
+        # a converter count: traffic·(O/U)·(GB/O)·(GBC/GB)·(rev/GBC) = rev.
+        cvr=r["count_orders"] / r["overall_traffic"],
         aov=r["gross_bookings"] / r["count_orders"],
         completion_rate=r["gross_bookings_completed"] / r["gross_bookings"],
         take_rate=r["revenue"] / r["gross_bookings_completed"],
@@ -641,7 +645,7 @@ def _decompose(pre, post):
 
 
 def build_shapley_block(raw, windows, insight=None):
-    """The §7 corrected 6-factor booking-revenue waterfall (Plotly). When `insight`
+    """The §7 corrected 5-factor booking-revenue waterfall (Plotly). When `insight`
     is given (the LLM section callout), it becomes the section-top `summary` and the
     deterministic `verdict` is dropped (the drag/lift detail is already in the chart);
     otherwise the deterministic verdict renders as before."""
@@ -667,7 +671,7 @@ def build_shapley_block(raw, windows, insight=None):
     verdict = (
         f"Booking revenue {'fell' if delta < 0 else 'rose'} {_sm(delta)} ({net_pct:.1f}%) "
         f"Pre → Post. Biggest {'drags' if drags else 'movers'}: {', '.join(drags) or '—'}; "
-        f"offset by {', '.join(lifts) or '—'}. The 6-factor identity reconciles fully "
+        f"offset by {', '.join(lifts) or '—'}. The 5-factor identity reconciles fully "
         f"({_sm(unattr)} unattributable). <em>Note: this decomposes <strong>Actual Revenue</strong>; "
         f"the §1 headline card shows <strong>Predicted Revenue</strong>.</em>"
     )
@@ -689,7 +693,7 @@ def build_shapley_block(raw, windows, insight=None):
     yaxis:{{title:'Revenue (USD)',tickprefix:'$',gridcolor:'#eef',zerolinecolor:'#ccc'}},
     xaxis:{{tickangle:15}}}},
     {{responsive:true,displayModeBar:false}});</script>
-  <p style="font-size:12px;color:#777;margin-top:8px;">Shapley drivers are calculated <strong>including PMax</strong> (all channels), so contributions reconcile to total revenue. The §2 vitals cards and the funnel section exclude PMax (Omni basis) and may read differently.</p>'''
+  <p style="font-size:12px;color:#777;margin-top:8px;">Drivers reconcile to total revenue, calculated <strong>including PMax</strong> (all channels). <strong>CVR here = orders ÷ users</strong> (it absorbs orders-per-converter — no separate factor), so it differs from the §2 vitals CVR card (converters ÷ users, Omni / PMax-excluded); the funnel section also excludes PMax.</p>'''
     return block("3. Driver Diagnosis (Shapley)", "cehealth-shapley", inner,
                  verdict=(None if insight else verdict), summary=insight)
 
@@ -1136,12 +1140,11 @@ _SHAP_VITALS_MATCH = {
     "aov": ["aov"],
     "take_rate": ["take rate", "take_rate", "tr"],
     "completion_rate": ["completion", "cr"],
-    "orders_per_converter": ["orders", "order"],
 }
 
 
 def shapley_top_driver(contrib):
-    """Given the §7 6-factor `contrib` dict, return (factor_key, signed_contribution)
+    """Given the §7 5-factor `contrib` dict, return (factor_key, signed_contribution)
     for the factor with the largest |contribution|. None if empty."""
     if not contrib:
         return None
@@ -1647,7 +1650,7 @@ def build_fragment(run_dir: Path) -> str:
     # §1 Metadata → header pills (rendered by compose.build_header). No block here.
 
     # §7 Shapley decomposition is computed ONCE here (before §2) so the primary driver
-    # for the vitals annotation comes from the corrected 6-factor decomposition, not
+    # for the vitals annotation comes from the corrected 5-factor decomposition, not
     # the largest vitals Δ. The same `raw` is reused by build_shapley_block below —
     # we never double-query. On any Query-1 failure, `shap_raw` stays None and the
     # vitals render with NO primary-driver note (and §7 falls back to verbatim).
@@ -2109,7 +2112,7 @@ def build_fragment(run_dir: Path) -> str:
                       summary=section_insight("cehealth-vendors"))
                 if _vb else "")
 
-    # §7 Driver Diagnosis (Shapley) — corrected 6-factor waterfall, reusing the
+    # §7 Driver Diagnosis (Shapley) — corrected 5-factor waterfall, reusing the
     # `shap_raw` already pulled above (no double-query). On any Query-1 failure
     # (shap_raw is None), fall back to CE Health's §7 table, verbatim.
     _shap_ins = section_insight("cehealth-shapley")
@@ -2118,7 +2121,7 @@ def build_fragment(run_dir: Path) -> str:
         # deterministic verdict is dropped (drag/lift detail is already in the chart);
         # absent → the deterministic verdict renders as before.
         s7 = build_shapley_block(shap_raw, W, insight=_shap_ins)
-        print("§7 Shapley: corrected 6-factor waterfall (Query 1 OK)")
+        print("§7 Shapley: corrected 5-factor waterfall (Query 1 OK)")
     else:
         print("WARN: Query 1 unavailable; rendering CE Health's §7 table verbatim.", file=sys.stderr)
         sec7 = section(md, "Driver Diagnosis")
@@ -2404,7 +2407,7 @@ def _vitals_facts(d):
 
 def _shapley_facts(md):
     """Top drag + top lift + net Δ from CE Health's own §7 Driver Diagnosis table
-    (md, no bq — the renderer's corrected 6-factor waterfall needs Query 1 and is
+    (md, no bq — the renderer's corrected 5-factor waterfall needs Query 1 and is
     NOT recomputed here). Embeds the table's own factor list as `det_summary`."""
     tbls = tables_in(section(md, "Driver Diagnosis"))
     if not tbls:
@@ -2434,7 +2437,7 @@ def _shapley_facts(md):
                         + (f"{drags[0][0]} as the primary drag" if drags else "no drag")
                         + (f", offset by {lifts[0][0]}" if lifts else "")
                         + " (this is CE Health's own 5-factor table; the rendered tab "
-                          "uses a corrected 6-factor waterfall)."),
+                          "uses a corrected 5-factor waterfall)."),
     }
 
 

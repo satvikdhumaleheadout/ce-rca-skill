@@ -712,7 +712,7 @@ def calc_shapley_decomposition(current, prior):
     Revenue = Traffic x CVR x AOV (x CR x TR if available).
     Copied from market_weekly_review_v5.py:2419-2454.
     """
-    factor_names = [k for k in ['traffic', 'cvr', 'orders_per_converter', 'aov', 'cr', 'tr']
+    factor_names = [k for k in ['traffic', 'cvr', 'aov', 'cr', 'tr']
                     if k in current and k in prior]
     n = len(factor_names)
 
@@ -746,73 +746,84 @@ def calc_shapley_decomposition(current, prior):
 
 def compute_shapley_for_ce(cur_health, pri_health, cur_funnel, pri_funnel):
     # type: (Dict, Dict, Dict, Dict) -> Dict[str, float]
-    """Shapley revenue decomposition on the **funnel basis**, matching the §7
-    corrected 6-factor identity in render_ce_health._facs and the vitals CVR:
+    """Shapley revenue decomposition on a **5-factor, order-based** identity that
+    telescopes exactly to ACTUAL net revenue — deliberately with NO
+    orders-per-converter factor:
 
-        revenue = traffic × cvr × orders_per_converter × aov × completion × take_rate
+        net_revenue = traffic × cvr × aov × completion × take_rate
 
-    where ``traffic`` is funnel (LP) users, ``cvr`` is the funnel CVR
-    (converted_users / users), and the remaining factors come from vitals.
-    ``orders_per_converter`` is included only when the funnel exposes
-    converted-user counts, so the multiplicative identity stays exact; otherwise
-    the factor set degrades gracefully to the funnel-CVR basis.
+    where each factor's denominator cancels the previous numerator:
+        traffic    = LP users (U; all-channels / PMax-included)
+        cvr        = orders / users   (ORDER-based — folds the old
+                                       users→converters→orders steps into ONE factor,
+                                       so no converter count is needed)
+        aov        = gross_bookings / orders              (vitals ``aov``)
+        completion = completed_bookings / gross_bookings  (vitals ``cr``)
+        take_rate  = net_revenue / completed_bookings     (vitals ``tr``)
 
-    PMax basis: traffic / cvr / orders_per_converter are taken from the
-    **all-channels** funnel keys (``lp_viewers_all`` / ``cvr_all`` /
-    ``order_completers_all``, PMax INCLUDED) so the decomposition shares the
-    all-channels basis of the revenue numerator. This is deliberately a DIFFERENT
-    basis than the Omni (PMax-excluded) vitals cards (CVR / Users), which is why the
-    Shapley surfaces are annotated "calculated including PMax".
+    Product: U·(O/U)·(GB/O)·(GBC/GB)·(NET/GBC) = NET — every intermediate count
+    cancels, so the Shapley total ties to the ACTUAL net-revenue Δ (no residual).
+
+    Why no orders_per_converter: with a converter-based CVR (converters/users) the
+    identity would *require* an OPC = orders/converters bridge, and OPC's funnel
+    converter denominator is mis-counted at peak volume (a different identity than
+    the order numerator), which inflates its contribution. Defining CVR as
+    orders/users removes the converter count entirely — the leak has nowhere to live.
+
+    Scope note: the ``cvr`` used HERE (orders/users) is intentionally different from
+    the Omni vitals CVR card (converters/users) and is used ONLY inside this Shapley.
+    Nothing else changes — the vitals, funnel section, ``cvr``/``users`` sidecar
+    fields, and every other surface keep their existing definitions. Traffic is the
+    all-channels ``lp_viewers_all`` so it shares the orders numerator's basis; the
+    total reconciles to ACTUAL net revenue (sum_revenue), which differs from the
+    Omni predicted-revenue card.
     """
-    # All-channels (PMax-INCLUDED) funnel counts — the Shapley decomposes the
-    # all-channels revenue numerator (combined_entity_stats), so traffic / CVR /
-    # orders-per-converter must share that basis for the identity to reconcile.
-    # The Omni (PMax-excluded) keys stay reserved for the funnel section + vitals.
+    # Traffic = all-channels (PMax-INCLUDED) LP users, so it shares the
+    # all-channels basis of the orders numerator (combined_entity_stats). The Omni
+    # (PMax-excluded) funnel keys stay reserved for the funnel section + vitals and
+    # are NOT touched by this change.
     cur_users = float((cur_funnel or {}).get("lp_viewers_all") or 0)
     pri_users = float((pri_funnel or {}).get("lp_viewers_all") or 0)
-    # Funnel CVR (orders/users), all-channels — fraction form for the identity.
-    cur_cvr_pct = (cur_funnel or {}).get("cvr_all")
-    pri_cvr_pct = (pri_funnel or {}).get("cvr_all")
-    cur_cvr = float(cur_cvr_pct) / 100.0 if cur_cvr_pct is not None else 0.0
-    pri_cvr = float(pri_cvr_pct) / 100.0 if pri_cvr_pct is not None else 0.0
 
     cur_orders = int(cur_health.get("orders") or 0)
     pri_orders = int(pri_health.get("orders") or 0)
-    # revenue here is PREDICTED (sum_revenue_predicted, from vitals) — deliberately the same
-    # basis as the §2 vitals Revenue card, so the Shapley total Δ ties to the headline revenue Δ.
-    cur_rev = float(cur_health.get("revenue") or 0)
-    pri_rev = float(pri_health.get("revenue") or 0)
 
     if cur_users == 0 and pri_users == 0:
-        return {"traffic": 0, "cvr": 0, "orders_per_converter": 0,
-                "aov": 0, "tr": 0, "cr": 0, "total": 0}
+        return {"traffic": 0, "cvr": 0, "aov": 0, "cr": 0, "tr": 0, "total": 0}
 
-    cur_aov = cur_rev / cur_orders if cur_orders > 0 else 0
-    pri_aov = pri_rev / pri_orders if pri_orders > 0 else 0
+    # CVR = orders / users (ORDER-based). This folds the users→converters→orders
+    # steps into a single factor, so the chain telescopes without an
+    # orders-per-converter term and there is no leaky converter denominator.
+    cur_cvr = (cur_orders / cur_users) if cur_users > 0 else 0.0
+    pri_cvr = (pri_orders / pri_users) if pri_users > 0 else 0.0
+
+    # AOV = gross bookings / orders (vitals ``aov`` = sum_order_value/count_orders),
+    # NOT predicted-revenue/orders. Combined with completion + take_rate below, the
+    # identity telescopes to ACTUAL net revenue (sum_revenue), not predicted revenue.
+    cur_aov = float(cur_health.get("aov") or 0)
+    pri_aov = float(pri_health.get("aov") or 0)
 
     cur_tr = float(cur_health.get("tr") or 100) / 100.0
     pri_tr = float(pri_health.get("tr") or 100) / 100.0
     cur_cr = float(cur_health.get("cr") or 100) / 100.0
     pri_cr = float(pri_health.get("cr") or 100) / 100.0
 
-    current = {"traffic": max(cur_users, 0.001), "cvr": max(cur_cvr, 0.00001), "aov": max(cur_aov, 0.01)}
-    prior = {"traffic": max(pri_users, 0.001), "cvr": max(pri_cvr, 0.00001), "aov": max(pri_aov, 0.01)}
-
-    # orders_per_converter = orders / converted_users. Include it when the funnel
-    # gives converted-user counts (order_completers), to match §7's 6-factor
-    # identity; the funnel CVR factor then stays converted_users/users.
-    cur_conv = float((cur_funnel or {}).get("order_completers_all") or 0)
-    pri_conv = float((pri_funnel or {}).get("order_completers_all") or 0)
-    if cur_conv > 0 and pri_conv > 0:
-        current["orders_per_converter"] = max(cur_orders / cur_conv, 0.00001)
-        prior["orders_per_converter"] = max(pri_orders / pri_conv, 0.00001)
-
-    if abs(cur_tr - pri_tr) > 0.001:
-        current["tr"] = cur_tr
-        prior["tr"] = pri_tr
-    if abs(cur_cr - pri_cr) > 0.001:
-        current["cr"] = cur_cr
-        prior["cr"] = pri_cr
+    # All five factors are ALWAYS present so the product equals actual net revenue
+    # exactly; a factor that barely moved simply contributes ~0 to the Shapley split.
+    current = {
+        "traffic": max(cur_users, 0.001),
+        "cvr": max(cur_cvr, 0.00001),
+        "aov": max(cur_aov, 0.01),
+        "cr": max(cur_cr, 0.00001),
+        "tr": max(cur_tr, 0.00001),
+    }
+    prior = {
+        "traffic": max(pri_users, 0.001),
+        "cvr": max(pri_cvr, 0.00001),
+        "aov": max(pri_aov, 0.01),
+        "cr": max(pri_cr, 0.00001),
+        "tr": max(pri_tr, 0.00001),
+    }
 
     return calc_shapley_decomposition(current, prior)
 
@@ -1209,7 +1220,6 @@ def render_shapley(shapley, w):
     factor_labels = {
         "traffic": ("Traffic (Users)", "\u2191 More users" if shapley.get("traffic", 0) >= 0 else "\u2193 Fewer users"),
         "cvr": ("Site CVR", "\u2191 Better conversion" if shapley.get("cvr", 0) >= 0 else "\u2193 Lower conversion"),
-        "orders_per_converter": ("Orders / Converter", "\u2191 More orders per converter" if shapley.get("orders_per_converter", 0) >= 0 else "\u2193 Fewer orders per converter"),
         "aov": ("AOV", "\u2191 Higher ticket value" if shapley.get("aov", 0) >= 0 else "\u2193 Lower ticket value"),
         "tr": ("Take Rate", "\u2191 TR improved" if shapley.get("tr", 0) >= 0 else "\u2193 TR compression"),
         "cr": ("Completion Rate", "\u2191 CR improved" if shapley.get("cr", 0) >= 0 else "\u2193 CR declined"),

@@ -5,6 +5,23 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.51.0] — 2026-06-16 — CE Context "Timeline of changes": a readable chronological table below the bubbles
+
+**Summary:** The CE Context "Timeline of changes" was a bubble swimlane that's hard to interact with when bubbles overlap — you had to click each one to read its events, and close-together bubbles are fiddly to hit. We keep the bubble chart (it's a good at-a-glance density view) and add a **chronological table below it** that lists every dated signal at once, so nothing requires clicking.
+
+**What changed (CE Context renderer, `scripts/render_ce_context.py`):**
+- A new table under the bubble chart lists **all** timeline events across every source — MMP doc, Known events, Slack, prior RCAs — merged into one stream, **sorted latest-first**. Columns: **Date · What we found · Source** (a lane-coloured dot + label + a working ↗ link when the event has one).
+- To keep the section compact it shows the **latest 12** rows and collapses the rest behind a **"Show N older"** toggle.
+- Undated events sort to the end with a "—" date so nothing is dropped.
+- The bubble chart + its click-to-read panel are unchanged — the table is purely additive.
+
+**Verified:** parses; unit-tested the ordering / collapse / source-marker logic; rendered end-to-end on a real run (CE 3593, 14 events) — bubble chart preserved, table shows all 14 rows latest-first with the 4 source lanes colour-marked and a "Show older" toggle for the overflow.
+
+### Blast radius
+- `scripts/render_ce_context.py` (`_timeline_table` + wired into `build_timeline_block`) + changelog row m086; `CHANGELOG.md`; `VERSION`. No engine / data / `compose.py` / other-skill / contract change — the timeline JSON it reads is unchanged.
+
+---
+
 ## [v2.50.0] — 2026-06-16 — CE Health "revenue over channel/Landing Pages" matrix: 13 months instead of 12
 
 **Summary:** The CE Health "Last 12-month revenue over channel/Landing Pages" matrix (the Channel/Landing-Page revenue breakdown with the monthly trend sparkline) now shows **13 complete months** instead of 12, giving one more month of history for trend reading.

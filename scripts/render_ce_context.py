@@ -239,6 +239,56 @@ def _trunc(s: str, n: int = 46) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _timeline_table(events, latest_n: int = 12) -> str:
+    """A chronological (latest-first) list of EVERY dated context signal across all
+    lanes — so the reader can scan all messages at once without clicking individual
+    bubbles (the complaint the swimlane couldn't solve when bubbles overlap). One row
+    per event: Date · What we found · Source (lane-coloured dot + label + ↗ link).
+    Shows the latest `latest_n`; older rows collapse behind a 'Show older' toggle so
+    the section stays compact. Undated events sort to the end with a '—' date."""
+    lane_meta = {k: (label, color) for k, label, color in _LANES}
+    rows = [(_event_date(e), e) for e in events if isinstance(e, dict)]
+    dated = sorted((r for r in rows if r[0]), key=lambda r: r[0], reverse=True)
+    undated = [r for r in rows if not r[0]]
+    ordered = dated + undated
+    if not ordered:
+        return ""
+
+    def _row_html(d, e, hidden):
+        label, color = lane_meta.get(e.get("lane"), (str(e.get("lane") or "—"), "#888"))
+        src = ('<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+               'background:{c};margin-right:6px;vertical-align:middle;"></span>{l}').format(
+                   c=color, l=_html.escape(label))
+        link = e.get("link")
+        if link:
+            src += ' <a class="ref-link" href="{h}" target="_blank">↗</a>'.format(
+                h=_html.escape(str(link)))
+        cls = ' class="cecontext-tl-more" style="display:none;"' if hidden else ''
+        return ('<tr{cls}><td style="white-space:nowrap;color:#5a6478;vertical-align:top;">{d}</td>'
+                '<td style="vertical-align:top;">{t}</td>'
+                '<td style="white-space:nowrap;vertical-align:top;">{s}</td></tr>').format(
+                    cls=cls, d=_html.escape(str(d or "—")),
+                    t=_html.escape(str(e.get("label", ""))), s=src)
+
+    visible, hidden = ordered[:latest_n], ordered[latest_n:]
+    body = "".join(_row_html(d, e, False) for d, e in visible)
+    body += "".join(_row_html(d, e, True) for d, e in hidden)
+    more_btn = ""
+    if hidden:
+        more_btn = (
+            '<button onclick="var t=document.querySelectorAll(\'.cecontext-tl-more\');'
+            'for(var i=0;i<t.length;i++){t[i].style.display=\'\';}this.style.display=\'none\';" '
+            'style="margin-top:8px;padding:5px 12px;font-size:12px;border:1px solid #cbd2e0;'
+            'border-radius:6px;background:#f7f8fb;color:#3a4a6a;cursor:pointer;">'
+            'Show ' + str(len(hidden)) + ' older ▾</button>')
+    return (
+        '<div style="margin-top:16px;">'
+        '<div style="font-size:13px;font-weight:600;color:#1a1a2e;margin-bottom:6px;">'
+        'All changes — chronological (latest first)</div>'
+        '<table><thead><tr><th>Date</th><th>What we found</th><th>Source</th></tr></thead>'
+        '<tbody>' + body + '</tbody></table>' + more_btn + '</div>')
+
+
 def build_timeline_block(run_dir: Path, window: dict) -> str:
     """Weekly **bubble-density** swimlane of dated context events: one row per source
     bucket, bubble size = how many signals fell in that week (so dense clusters — e.g.
@@ -328,6 +378,7 @@ def build_timeline_block(run_dir: Path, window: dict) -> str:
         'background:#f7f8fb;border:1px solid #e6e9f0;border-radius:8px;font-size:13px;'
         'color:#5a6478;min-height:42px;">👆 Click any bubble to read that week\'s events here '
         '(with links).</div>'
+        + _timeline_table(events) +
         '<script>(function(){var el=document.getElementById("chart-cecontext-timeline");'
         f'var DETAIL={json.dumps(detail)};'
         f'Plotly.newPlot(el,{json.dumps(traces)},{json.dumps(layout)},'

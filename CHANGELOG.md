@@ -5,6 +5,21 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.50.0] — 2026-06-16 — CE Health "revenue over channel/Landing Pages" matrix: 13 months instead of 12
+
+**Summary:** The CE Health "Last 12-month revenue over channel/Landing Pages" matrix (the Channel/Landing-Page revenue breakdown with the monthly trend sparkline) now shows **13 complete months** instead of 12, giving one more month of history for trend reading.
+
+**What changed:**
+- `_shape_monthly_matrix` default raised from `months=12` to `months=13`. The underlying query already pulled 13 complete months (`INTERVAL 13 MONTH`), so no SQL change was needed — the matrix was simply trimming the oldest month. Both the Channel and Landing-Page panels widen together (they share this shaper).
+- Panel title updated "Last 12-month …" → "Last 13-month …".
+
+**Note:** young CEs still show only the months they actually have data for (the matrix only renders months with at least one order) — the change raises the cap from 12→13, so CEs with ≥13 months of history now show 13. Verified on CE 2567: the matrix returns 13 months (2025-05 → 2026-05).
+
+### Blast radius
+- `skills/ce-health/engine/sources/bq.py` (`_shape_monthly_matrix` default + docstrings), `scripts/render_ce_health.py` (panel title) + changelog row m085; `CHANGELOG.md`; `VERSION`. No other fetch/render/contract change; `vendor.sh` disabled (skills/ canonical) — no re-vendor.
+
+---
+
 ## [v2.49.0] — 2026-06-16 — CE Health funnel-by-dimension: YoY deltas for Channel & Language (like Landing Pages)
 
 **Summary:** In the CE Health §4 "Funnel by dimension" dropdown, the **Landing Pages** panel showed a year-over-year comparison but the **Channel** and **Language** panels showed current-period numbers only — no deltas — because the engine deliberately pulled just the current window for those two cuts. Stakeholders couldn't see how LP Users or Site CVR moved per channel/language. Now all three panels carry YoY deltas.

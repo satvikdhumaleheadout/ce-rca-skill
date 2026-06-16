@@ -547,11 +547,11 @@ def fetch_monthly_cvr(ce_id, months=36):
     return [{"month": r["month"], "cvr": r.get("cvr")} for r in results]
 
 
-def _shape_monthly_matrix(rows, months=12):
+def _shape_monthly_matrix(rows, months=13):
     # type: (List[Dict[str, Any]], int) -> Dict[str, Any]
     """Reshape (month, dim, revenue) rows into a top-N × month matrix.
 
-    Drops the partial trailing month so exactly `months` complete months remain
+    Drops the partial trailing month so up to `months` complete months remain
     (mirrors render_ce_health's partial-trailing-month guard), keeps the top-10
     dimensions by total revenue across the kept window, and returns:
         {"months": ["2025-07", ..., "2026-06"],
@@ -591,7 +591,7 @@ def _shape_monthly_matrix(rows, months=12):
 
 def fetch_monthly_revenue_by_channel(ce_id):
     # type: (int) -> Dict[str, Any]
-    """Last 12 complete months of fct_orders revenue, grouped by month × channel.
+    """Last 13 complete months of fct_orders revenue, grouped by month × channel.
 
     Reuses the channel-classification CASE from _fetch_channel_window_v2 verbatim
     and the same revenue source (fct_orders.amount_revenue_usd). Returns a
@@ -670,7 +670,7 @@ def fetch_monthly_revenue_by_channel(ce_id):
 
 def fetch_monthly_revenue_by_landing_page(ce_id):
     # type: (int) -> Dict[str, Any]
-    """Last 12 complete months of fct_orders revenue, grouped by month × landing_page.
+    """Last 13 complete months of fct_orders revenue, grouped by month × landing_page.
 
     Same revenue source (fct_orders.amount_revenue_usd) and filters used by the
     landing-page snapshot. Returns a top-10-by-total matrix via _shape_monthly_matrix.

@@ -2180,7 +2180,7 @@ def build_fragment(run_dir: Path) -> str:
         s_bookings_src = ""
     else:
         s_bookings_src = block(
-            "Last 12-month revenue over channel/Landing Pages",
+            "Last 13-month revenue over channel/Landing Pages",
             "cehealth-bookings-source",
             build_fdim_dropdown(bs_panels, label="Break revenue down by:"))
 

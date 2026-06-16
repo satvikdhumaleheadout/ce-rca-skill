@@ -5,6 +5,19 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.46.0] — 2026-06-16 — Orchestrator verifies perf-audit's full-data-dump Sheet was actually created
+
+**Summary:** A live run (CE 2174) produced a Paid Performance Audit tab whose text pointed readers to a "full data dump in Sheet Tab 6/7/8" — but no Sheet existed, and the report's Data Sources section was an empty heading. The cause was a plain execution skip, not a wrong or missing instruction: the perf-audit step that builds that 8-tab Sheet (Step 4b) runs *after* the written report already looks finished, so a sub-agent that considers the report "done" tends to skip it — leaving the report's Sheet pointers dangling. Because the Sheet step is forward-referenced by the narrative, this fails the same way on every run that skips it.
+
+**What changed:**
+- **The orchestrator now treats the data dump as mandatory and verifies it.** The dispatch instruction to perf-audit explicitly states the run is not complete until the Data Sources section carries either the Sheet link or the local-CSV fallback paths — so the agent can't stop at the written report.
+- **A post-dispatch check confirms it landed.** After perf-audit finishes, the orchestrator scans the report's Data Sources section for the dump link/paths; if missing, it re-prompts the same perf-audit agent (whose context is intact) to run only that step, then re-checks and proceeds.
+- **Kept out of the upstream-owned perf-audit skill.** The fix lives entirely in the CE-RCA orchestrator, which already post-processes perf-audit's output — perf-audit stays the owner of how the Sheet is built; the orchestrator only verifies the artifact appeared. Graceful: if it still can't be produced after one re-prompt (e.g. no Drive access and CSV export fails), the run continues rather than blocking.
+
+**Why it matters:** Stakeholders following the "full dump in Tab N" pointers now reliably land on a real Sheet (or local CSVs), instead of a promise the report didn't keep.
+
+---
+
 ## [v2.45.0] — 2026-06-16 — Shapley drivers are computed including PMax (so contributions reconcile to total revenue)
 
 **Summary:** The §7 Shapley decomposition splits the revenue change into six factors (`revenue = traffic × CVR × orders/converter × AOV × completion × take rate`). Its **revenue numerator** (orders, bookings, revenue) comes from `combined_entity_stats` — **all channels, including PMax**. But its **funnel factors** (traffic = LP users, converters → CVR + orders/converter) came from the Mixpanel funnel with **PMax excluded**. That asymmetry — orders counted PMax, converters not — landed entirely in the **orders/converter** factor and inflated it (on CE 2567, ~18% of converters were PMax users dropped from the denominator while their orders stayed in the numerator). With PMax conversion tracking now fixed upstream, we **include PMax in the whole Shapley computation** so traffic + CVR + orders/converter share the all-channels basis of revenue and each driver's contribution / share / total is correct.

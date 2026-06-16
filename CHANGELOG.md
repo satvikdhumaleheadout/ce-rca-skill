@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.42.2] — 2026-06-15 — 1c bucket questions lead with the bucket name
+
+**Summary:** A live run showed the four constraint pop-ups rendering only the MMP observation ("From MMP: … Anything to add?") with **no visible bucket label** — you couldn't tell which of Supply / Landing Page / PPC / Pricing you were answering. We'd been relying on the `AskUserQuestion` `header` chip to carry the bucket, but it's ~12-char-capped ("Supply / Availability" doesn't fit) and isn't prominent in every client. Now the **question text itself leads with the bold bucket name**, so the order is always **bucket name → the MMP observation → "anything to add or correct?"** (e.g. *"**Landing Page** — From MMP: SD→SF URL change… Anything to add or correct?"*). Structure/wording only — no behaviour change.
+
+### Blast radius
+- `SKILL.md` §1c (question table + pre-fill shape) + changelog row m076; `CHANGELOG.md`; `VERSION` 2.42.1 → 2.42.2.
+
+---
+
 ## [v2.42.1] — 2026-06-15 — "Your read" question: plainer wording
 
 **Summary:** A live run surfaced the 1e question as *"What's the scalable lever you want sized, and where should I dig first?"* — too jargon-y. The §1e template now mandates **plain language, no jargon** (ask it the way you'd ask a colleague), with the default phrasing simplified to *"what do you think is driving this, and where should I dig first?"* and plainer examples. Wording only — no behaviour change.

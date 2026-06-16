@@ -452,17 +452,21 @@ never removes them** (each pre-filled question shows what the source said + asks
 *"anything to add / correct?"*). (The light path's single question is the *only* time
 fewer than four are asked, and only because the goal is a general health check.)
 
-**Keep each question SHORT and structured — never a run-on paragraph.** The bucket
-name is the **`header` chip** (short); the `question` body is one tight line. Put the
-domain hints (single-vendor / redesign / budget cut / price rise…) in your own head,
-not in the rendered question — they bloat it.
+**Keep each question SHORT and structured — never a run-on paragraph, and ALWAYS lead
+with the bucket name.** Start the `question` text with the **bucket name in bold**, then
+" — ", then the ask. (Also set the `header` chip to the bucket, but **do not rely on it
+alone** — it's capped at ~12 chars, so "Supply / Availability" won't fit, and it isn't
+prominent in every client; the bucket name must be the **first words of the question
+itself**, so the reader always sees which area they're answering.) Keep the domain hints
+(single-vendor / redesign / budget cut / price rise…) in your head, not the rendered
+question — they bloat it.
 
-| # | `header` (chip) | `question` body — when there's NO 1b pre-fill (general CE context, recently or in general; not window-pinned) |
+| # | Bucket | `question` text — **lead with the bold bucket name** (general-context phrasing; used when there's NO 1b pre-fill; recently or in general, not window-pinned) |
 |---|--------|---|
-| 1 | **Supply** | "Any supply or availability constraints or known issues — recently or in general?" |
-| 2 | **Landing Page** | "Anything on the landing page — constraints, changes, or known issues?" |
-| 3 | **PPC** | "Anything on paid — PPC restrictions, changes, or known issues?" |
-| 4 | **Pricing** | "Any pricing constraints, changes, or known issues?" |
+| 1 | Supply / Availability | "**Supply / Availability** — any constraints or known issues, recently or in general?" |
+| 2 | Landing Page | "**Landing Page** — any constraints, changes, or known issues?" |
+| 3 | PPC / Paid | "**PPC / Paid** — any restrictions, changes, or known issues?" |
+| 4 | Pricing | "**Pricing** — any constraints, changes, or known issues?" |
 
 **The free-text box is the primary answer.** Each question leads with *"type what you
 know about `<bucket>` below"* — the box (the tool's auto-added free-text) is where the
@@ -479,17 +483,17 @@ add-context path, and a button that just routes to the box invites pointless cli
 "Nothing to add" already covers the no-answer case. (This collapses the former
 `Looks right` / `Skip` / `Let Claude infer` trio into a clean 2-button + box shape.)
 
-**When the bucket IS pre-filled (1b found something), DON'T stack the generic stem +
-the finding + a confirm tail — that's the run-on we're avoiding.** Instead the
-`question` body **leads with the finding** and ends with a short tail. Shape:
+**When the bucket IS pre-filled (1b found something):** keep the **bucket-name lead**,
+then the observation, then a short tail — the order is always **bucket name →
+observation → "anything to add or correct?"**. Don't also stack the generic stem
+(that's the run-on we're avoiding). Shape:
 
 > **header:** Landing Page
-> **question:** From MMP: SD→SF URL change (track CTR/CVR); Express Pass LP experiment considered.
-> Anything to add or correct?
+> **question:** **Landing Page** — From MMP: SD→SF URL change (track CTR/CVR); Express Pass LP experiment considered. Anything to add or correct?
 
-(The upload is a snapshot and may be stale, so you still ask — but the finding *is*
-the prompt; the generic "constraints/changes/issues" stem is dropped once a pre-fill
-gives the question its subject. Keep the tail to one short clause.)
+(The upload is a snapshot and may be stale, so you still ask — but once a pre-fill
+gives the question its subject, the generic "constraints/changes/issues" stem is
+dropped; the bucket name + finding carry it. Keep the tail to one short clause.)
 
 **Then — a 5th "anything else?" pop-up (catch-all).** After the 4-bucket pop-up, a
 **second `AskUserQuestion` pop-up** (the 4-question/call cap means the 5th can't share
@@ -579,12 +583,15 @@ collector ORs them into its Search 1.
 Read CE Health's JSON sidecar **directly** (`<run_dir>/ce_health_report.json` —
 you do not need `meta.json` enriched for this) for the CE identity, vitals, and
 Shapley split; skim `ce_health_report.md` only if you need a number the sidecar
-doesn't carry. **CVR and Users are now in the sidecar** — read CVR straight from
-`vitals.current.cvr` / `vitals.prior.cvr` (the funnel CVR, orders/users, a 0–100
-percentage like the other rate vitals) and Users (LP traffic) from
+doesn't carry. **CVR, Users, and Orders/Converter are now in the sidecar** — read CVR
+straight from `vitals.current.cvr` / `vitals.prior.cvr` (the funnel CVR, orders/users,
+a 0–100 percentage like the other rate vitals), Users (LP traffic) from
 `vitals.current.users` / `vitals.prior.users` (the raw LP-viewer count — the level
-the Shapley `traffic` driver decomposes); do not spelunk the `.md` funnel section
-for either. Present the diagnosis **in chat** (not a file) as a **scannable,
+the Shapley `traffic` driver decomposes), and **Orders/Converter** from
+`vitals.current.orders_per_converter` / `vitals.prior.orders_per_converter` (orders ÷
+converting-users — the **same factor the Shapley `Orders / Converter` driver
+decomposes**, a ratio ~1.0+; format to 2 decimals with a % delta). Do not spelunk the
+`.md` funnel section for any of these. Present the diagnosis **in chat** (not a file) as a **scannable,
 table-driven** preview — this is a decision surface for a stakeholder, so it must
 be skimmable in seconds, **not** a wall of prose. The numbers do the talking;
 your job is to lay them out, not narrate them.
@@ -604,6 +611,7 @@ Window: <pre> vs <post>
 | Revenue     | $<pre>     | $<post>    | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | Orders      | <pre>      | <post>     | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | CVR         | <pre>%     | <post>%    | <+/−x pp> ↑/↓  | <+/−x pp> ↑/↓  |
+| Orders/Conv | <pre>      | <post>     | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | AOV         | $<pre>     | $<post>    | <+/−x%> ↑/↓    | <+/−x%> ↑/↓    |
 | Completion  | <pre>%     | <post>%    | <+/−x pp> ↑/↓  | <+/−x pp> ↑/↓  |
 | Take Rate   | <pre>%     | <post>%    | <+/−x pp> ↑/↓  | <+/−x pp> ↑/↓  |
@@ -677,9 +685,10 @@ at Step 2.)
 
 **Formatting rules for the preview:**
 - Pick the right delta unit per metric: **% change** for users/revenue/orders/AOV
-  (level/count metrics), **percentage points (pp)** for rates (CVR / completion /
-  take rate). Never express a rate move as a % of a %. Format Users as a plain
-  integer count (thousands separators, e.g. `124,900`). The **same unit rule applies
+  **and Orders/Converter** (level/ratio metrics), **percentage points (pp)** for rates
+  (CVR / completion / take rate). Never express a rate move as a % of a %. Format Users
+  as a plain integer count (thousands separators, e.g. `124,900`); format
+  Orders/Converter as a 2-decimal ratio (e.g. `1.18`). The **same unit rule applies
   to both the Δ (vs Pre) and the YoY column** — Δ = Post vs Pre (the rolling window,
   not MoM), YoY = Post vs `ly_current` (same period last year); `—` when the LY value
   is absent.
@@ -1433,6 +1442,7 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 | --- | --- | --- |
+| m076 | 2026-06-15 | **1c bucket questions now lead with the bucket name (v2.42.2).** A live run showed the four bucket pop-ups rendering only the MMP observation ("From MMP: NRT + Tripshepherd both at 30% TR… Anything to add?") with **no visible bucket name** — the reader couldn't tell Supply from LP from PPC from Pricing. Root cause: we relied on the `AskUserQuestion` **`header` chip** to carry the bucket, but it's ~12-char-capped (so "Supply / Availability" won't fit) and isn't prominent in every client. Fix: the `question` **text** now **leads with the bold bucket name** — order is always **bucket name → MMP observation → "anything to add or correct?"** (e.g. *"**Landing Page** — From MMP: SD→SF URL change… Anything to add or correct?"*; with no pre-fill, *"**Pricing** — any constraints, changes, or known issues?"*). The `header` chip is still set, but the name no longer depends on it. §1c table + pre-fill shape updated. Wording/structure only — no contract / renderer / dispatch change. Blast radius: `SKILL.md` §1c + this row, `CHANGELOG.md`, `VERSION`. |
 | m075 | 2026-06-15 | **1e "Your read" question — plain-language wording (v2.42.1).** A live run rendered the question as *"What's the scalable lever you want sized, and where should I dig first?"* — jargon. The §1e template now says **plain language, no jargon** ("don't dress it up — say it the way you'd ask a colleague"), with the default phrasing simplified to *"what do you think is driving this, and where should I dig first?"* and plainer examples. Wording only. Blast radius: `SKILL.md` §1e + this row, `CHANGELOG.md`, `VERSION`. |
 | m074 | 2026-06-15 | **1e grounded driver-hypothesis ask → `AskUserQuestion` pop-up (consistent with 0b/0c/1c/1d) (v2.42.0).** The post-reveal "💡 Your read on the driver" prompt was the last free-text ask in the onboarding — every other step (goal, window, buckets, aliases) is now a structured pop-up, so this one is converted to match. **header** "Your read"; **question** one tight line + a short example ("the SIS pullback is the story — dig into which campaigns captured it" / "CVR lift — was it the B1G1 promo or the LP change?"); the **free-text box is the primary answer** (their read/steer) with **two quick-buttons** — **"Run the default"** and **"Let Claude infer the lead"** — both meaning "proceed, no steer" (same 2-button + text-box shape as 1c, the tool's minimum). Semantics unchanged: a typed read → `## Hypothesis priors`/`## Focus / direction` before dispatch (CVR-RCA opens it at L0); either button or a no-direction reply → dispatch the default; **asked once**, never re-prompt; **general health check skips it**. The downstream "wait for the reply → dispatch" block was realigned to read the pop-up answer. Added an explicit note that **answering triggers the default dispatch** (CE Context + CVR-RCA + perf-audit) and that **per-skill check/uncheck is a planned future add** (the "what I'll run" panel already previews the set). Presentation/flow only — no `user_context.md` contract / renderer / `compose.py` / sub-skill change. Blast radius: `SKILL.md` §1e + the post-reveal dispatch-parse block + this row, `CHANGELOG.md`, `VERSION`. |
 | m073 | 2026-06-15 | **Slack made portable — dynamic tool discovery replaces a hard-coded MCP namespace; Slack now runs on every install (v2.41.0).** Live-validation finding: the Slack sub-agent silently no-op'd for most third-party users. Root cause was a hard-coded server namespace baked into the skill — both `slack_context_guide.md` files loaded Slack via `ToolSearch("select:mcp__plugin_weekly-growth-review_slack__…")` (an **exact-id** match that returns nothing unless the user's Slack MCP happens to sit under that exact plugin name), and `ce-health` + `perf-audit` frontmatter pinned the same id in `allowed-tools` (whitelist-blocking the real tool even once found). Fix: **(1)** both guides + `ce-health` Step 4 now **discover Slack tools by name** — `ToolSearch("+slack search read channel thread")` — and call them by the exact names returned, so **any** connected Slack MCP works regardless of its server-id prefix; added an explicit **"no Slack tools returned → write 'Slack context unavailable' and skip, never fail"** branch. **(2)** Dropped the environment-specific `allowed-tools` pin from `ce-health` + `perf-audit` (they now inherit session permissions, matching `ce-context`, which owns the primary Slack search and never had a pin) — MCP server ids can't be known at authoring time, so any pinned id or unsupported wildcard risks silently blocking the tool. **(3)** `ce-context/INSTALL.md` reworded: "any connected Slack server," no specific plugin required. Verified: zero `plugin_weekly-growth-review_slack` / `select:mcp__` refs remain in runtime files; dynamic discovery present at all four Slack sites. Blast radius: `skills/{ce-context,cvr-rca}/references/slack_context_guide.md`, `skills/{ce-health,perf-audit}/SKILL.md` (frontmatter), `skills/ce-health/SKILL.md` (Step 4), `skills/ce-context/INSTALL.md`, `CHANGELOG.md`, `VERSION`. No engine / renderer / `compose.py` change. |

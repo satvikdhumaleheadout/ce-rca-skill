@@ -973,11 +973,22 @@ def render_channels(data, w):
 
 def render_funnel_by_dimension(data, w):
     # type: (Dict[str, List], Dict) -> str
-    """Funnel cut by channel + language (current window). Two sections the
-    renderer folds into §4's dimension dropdown alongside Landing Pages."""
+    """Funnel cut by channel + language (current window, with YoY deltas when the
+    engine supplied them). Two sections the renderer folds into §4's dimension
+    dropdown alongside Landing Pages. Each metric carries an inline YoY delta —
+    count as % change (`dp`), rates as pp (`dpp`) — which the renderer's
+    `split_deltas` turns into a value + coloured delta badge (same as the §4 funnel
+    and the Landing-Pages cut). Falls back to value-only when no YoY data is present."""
     def _tbl(title, rows):
         if not rows:
             return "## {}\n\n*No data.*".format(title)
+        has_ly = any("ly_cvr" in r for r in rows)
+        def _c(cur_v, ly_v, fmt, dfn):
+            base = fmt(cur_v)
+            if not has_ly:
+                return base
+            d = dfn(cur_v, ly_v)
+            return base if d == "—" else "{} {}".format(base, d)
         lines = [
             "## {}".format(title),
             "",
@@ -986,9 +997,13 @@ def render_funnel_by_dimension(data, w):
         ]
         for r in rows:
             lines.append("| {} | {} | {} | {} | {} | {} | {} |".format(
-                r.get("dim_value") or "(unknown)", fi(_g(r, "lp_users")),
-                fp1(_g(r, "lp2s")), fp1(_g(r, "s2c")), fp1(_g(r, "c2o")),
-                fp1(_g(r, "s2o")), fp(_g(r, "cvr"))))
+                r.get("dim_value") or "(unknown)",
+                _c(_g(r, "lp_users"), _g(r, "ly_lp_users"), fi, dp),
+                _c(_g(r, "lp2s"), _g(r, "ly_lp2s"), fp1, dpp),
+                _c(_g(r, "s2c"), _g(r, "ly_s2c"), fp1, dpp),
+                _c(_g(r, "c2o"), _g(r, "ly_c2o"), fp1, dpp),
+                _c(_g(r, "s2o"), _g(r, "ly_s2o"), fp1, dpp),
+                _c(_g(r, "cvr"), _g(r, "ly_cvr"), fp, dpp)))
         return "\n".join(lines)
     return _tbl("Funnel by Channel", data.get("channel") or []) + "\n\n" + \
         _tbl("Funnel by Language", data.get("language") or [])
@@ -1634,7 +1649,7 @@ def run_ce_health(ce_id, range_str=None, start=None, end=None, output_path=None,
         f_tgid_funnel = executor.submit(fetch_tgid_funnel, ce_id, cur, pri, ly_cur)
         f_tgid_lt = executor.submit(fetch_tgid_lead_time, ce_id, cur, ly_cur)
         f_vendors = executor.submit(fetch_vendor_breakdown, ce_id, cur, pri, ly_cur)
-        f_funnel_dims = executor.submit(fetch_funnel_by_dimension, ce_id, cur)
+        f_funnel_dims = executor.submit(fetch_funnel_by_dimension, ce_id, cur, ly_cur)
         f_lead_time = executor.submit(fetch_lead_time_cohorts, ce_id, cur, ly_cur)
         f_lp_funnel = executor.submit(fetch_lp_funnel, ce_id, cur[0], cur[1], ly_cur[0], ly_cur[1])
         f_customers_cur = executor.submit(fetch_customer_country_distribution, ce_id, cur[0], cur[1])

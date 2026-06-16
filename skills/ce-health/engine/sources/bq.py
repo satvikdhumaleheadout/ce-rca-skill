@@ -1053,14 +1053,27 @@ def _fetch_funnel_by_dim(ce_id, dim_col, start, end, top_n=12):
     return run_bq_query(query) or []
 
 
-def fetch_funnel_by_dimension(ce_id, cur):
-    # type: (int, tuple) -> Dict[str, List[Dict[str, Any]]]
-    """Current-window funnel cut by channel + language (landing-page cut already
-    comes from fetch_lp_funnel). Lean: current window only — the §4 CE funnel
-    carries the YoY detail; these answer 'where does the funnel break, by X?'."""
+def fetch_funnel_by_dimension(ce_id, cur, ly=None):
+    # type: (int, tuple, tuple) -> Dict[str, List[Dict[str, Any]]]
+    """Funnel cut by channel + language for the current window, with optional YoY
+    (last-year same-period) deltas folded in when `ly` is supplied. When `ly` is
+    given, each current-window row gains `ly_<metric>` keys (lp_users, lp2s, s2c,
+    c2o, s2o, cvr) matched by dim_value, so the renderer can show per-metric YoY
+    deltas — the same comparison basis the Landing-Pages cut already uses. Backward
+    compatible: `ly=None` returns current-window-only rows (no `ly_` keys)."""
+    def _cut(dim_col):
+        cur_rows = _fetch_funnel_by_dim(ce_id, dim_col, cur[0], cur[1])
+        if ly:
+            ly_map = {r.get("dim_value"): r
+                      for r in _fetch_funnel_by_dim(ce_id, dim_col, ly[0], ly[1])}
+            for r in cur_rows:
+                lyr = ly_map.get(r.get("dim_value")) or {}
+                for k in ("lp_users", "lp2s", "s2c", "c2o", "s2o", "cvr"):
+                    r["ly_" + k] = lyr.get(k)
+        return cur_rows
     return {
-        "channel": _fetch_funnel_by_dim(ce_id, "channel_name", cur[0], cur[1]),
-        "language": _fetch_funnel_by_dim(ce_id, "language", cur[0], cur[1]),
+        "channel": _cut("channel_name"),
+        "language": _cut("language"),
     }
 
 

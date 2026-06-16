@@ -5,6 +5,22 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.49.0] — 2026-06-16 — CE Health funnel-by-dimension: YoY deltas for Channel & Language (like Landing Pages)
+
+**Summary:** In the CE Health §4 "Funnel by dimension" dropdown, the **Landing Pages** panel showed a year-over-year comparison but the **Channel** and **Language** panels showed current-period numbers only — no deltas — because the engine deliberately pulled just the current window for those two cuts. Stakeholders couldn't see how LP Users or Site CVR moved per channel/language. Now all three panels carry YoY deltas.
+
+**What changed:**
+- **`fetch_funnel_by_dimension` now pulls the last-year same-period window too** (optional `ly` arg), matching the Landing-Pages cut's YoY basis. Each current-window row gains `ly_<metric>` keys (LP Users, LP2S, S2C, C2O, S2O, Site CVR) matched by dimension value. Backward compatible — with no `ly` it returns current-only rows exactly as before.
+- **`render_funnel_by_dimension` emits an inline YoY delta on every metric** — counts as % change, rates as percentage points — which the renderer's existing `split_deltas` turns into a value + coloured delta badge (identical treatment to the §4 CE funnel and the Landing-Pages cut). New channels/languages with no prior-year row render value-only (graceful, no fabricated delta).
+- **No renderer change needed** — the Channel/Language panels already passed `split_deltas=True`; they just had nothing to split.
+
+**Verified:** both files parse; on CE 2567 the Channel and Language panels now render per-row YoY deltas (e.g. Google Ads LP Users +223%, Site CVR +0.7pp), and the renderer parses each `value +delta` cell into a value + coloured badge; rows new this year (e.g. Polish, Russian) correctly show value-only.
+
+### Blast radius
+- `skills/ce-health/engine/sources/bq.py` (`fetch_funnel_by_dimension` + YoY merge), `skills/ce-health/ce_health.py` (`render_funnel_by_dimension` inline deltas + call site passes `ly_cur`) + changelog row m084; `CHANGELOG.md`; `VERSION`. No `scripts/render_ce_health.py` / `compose.py` / template / CVR-RCA / perf-audit / contract change. `vendor.sh` is disabled (skills/ is canonical) — no re-vendor.
+
+---
+
 ## [v2.48.0] — 2026-06-16 — Shapley drops "orders / converter" — CVR absorbs it — consistently across every surface
 
 **Summary:** The Shapley revenue decomposition used to carry a separate **orders-per-converter** factor (orders ÷ converting-users), which confused stakeholders and was prone to a measurement artifact (its funnel converter denominator is counted on a different basis than the order numerator, so it inflated at peak volume). We removed it: the Shapley **CVR is now defined as orders ÷ users**, which folds the old users→converters→orders steps into a single factor — no converter count, no leaky denominator, nowhere for the artifact to live. The identity stays exact and telescopes to actual net revenue: `traffic × (orders/users) × (gross_bookings/orders) × (completed/gross) × (net/completed) = net revenue`.

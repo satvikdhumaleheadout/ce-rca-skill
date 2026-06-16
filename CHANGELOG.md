@@ -5,6 +5,19 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.43.1] — 2026-06-16 — Step-1 vitals: money is USD — always show the `$` symbol (never localize)
+
+**Summary:** On a non-US CE, the Step-1 vitals preview showed AOV (and other money rows) with a **£/€ symbol** — so it looked like "AOV in local currency." It wasn't: the **value is correct USD** (the engine reads `*_usd` columns; `combined_entity_stats` is USD-normalized — verified CE 243/EUR AOV `$264.53` matches `fct_orders.order_value_usd` exactly, with no FX-factor divergence on any CE), and the **code is clean** (`render_ce_health.money()` hardcodes `$`). The culprit was the **in-chat Step-1 preview**, which the orchestrator writes at runtime — seeing the CE's "London · UK" / "Paris · Europe" metadata pills, the model localized the currency symbol.
+
+Fix: an explicit instruction in §1 — **all preview money (Revenue, AOV, Shapley `$` contributions) is USD; always render `$`; the market/country pills are the CE's *location*, not its currency; never swap in £/€/₹/¥.** A UK CE's AOV is `$264`, not `£264`. Note-only — the rendered CE Health HTML tab already hardcodes `$`; no engine/render/contract change.
+
+**Also surfaced (separate, deeper — not fixed here):** perf-audit's *paid-side* metrics (spend, conversion value, CM1, ROI, CPC) come from Google-Ads tables in the **account's native currency**, with **no `_usd` column** to switch to. For a non-US Google Ads account those are genuinely non-USD; fixing it properly needs upstream USD-normalization (FX-by-date) or explicit currency labeling — flagged for separate/owner work. CE Health and CVR-RCA money are all USD.
+
+### Blast radius
+- `SKILL.md` §1 (the USD/`$` note) + changelog row m078; `CHANGELOG.md`; `VERSION` 2.43.0 → 2.43.1. No engine / renderer / `compose.py` / contract change.
+
+---
+
 ## [v2.43.0] — 2026-06-15 — "Orders / Converter" added to the vitals; Shapley label corrected
 
 **Summary:** The §7 Shapley waterfall decomposes a 6-factor identity — `revenue = traffic × CVR × orders-per-converter × AOV × completion × take-rate` — where **orders-per-converter = orders ÷ converting users** (users who completed an order). We verified it's a correct, well-formed factor: the identity telescopes to revenue exactly (`unattributable ≈ $0`). But two gaps: it was **not shown in the vitals** (so the Shapley "Orders / Converter" driver could move with no vitals row explaining it), and it was **mislabeled "Orders / User"** — imprecise, because it's per *converter*, not per all users (orders/traffic would be a different number).

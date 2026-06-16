@@ -5,6 +5,20 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.44.0] — 2026-06-16 — Summary tab is framed to the user's goal (reconciled against the data)
+
+**Summary:** The goal the analyst picks at the start (0b) shaped the *intake* but never reached the *report*. Now the **Summary** — and only the Summary — uses it to **tilt the framing** of its headline callout and recommended next-steps toward what the user came for. No other tab/skill is touched, and the goal is never printed verbatim.
+
+How it works (in `references/summary_guide.md`):
+- **Tilt, don't restate.** The Summary derives a **posture** from the goal — *scale* (lead with what's working + levers to double down), *fix* (lead with root cause + remediation), *investigate* (lead with the answer to the specific question), or *neutral* (balanced). It classifies whatever the user picked **or typed in the free-text "Other" box**, so a custom goal still maps to the right posture.
+- **The data wins.** Before tilting, it reconciles the posture against the headline direction (revenue Δ + top Shapley driver). If the stated goal contradicts the data — e.g. "scale" but revenue is down — it tilts to the **data-aligned** posture, never the stated one. The tilt only changes *emphasis and ordering*; it can never spin what the data shows (a decline stays a decline). On a conflict it may note the mismatch in one short clause, but the framing follows the data.
+- **Everything else stays pure synthesis** — facts, drivers, and verdicts are whatever the tabs found; the goal only decides what leads and which actions surface first.
+
+### Blast radius
+- `references/summary_guide.md` (new "Goal-aware framing" section + `## Goal` input note + flow-row tags) + changelog row m079; `CHANGELOG.md`; `VERSION` 2.43.1 → 2.44.0. Summary-only — no other skill, renderer, `compose.py`, or contract change.
+
+---
+
 ## [v2.43.1] — 2026-06-16 — Step-1 vitals: money is USD — always show the `$` symbol (never localize)
 
 **Summary:** On a non-US CE, the Step-1 vitals preview showed AOV (and other money rows) with a **£/€ symbol** — so it looked like "AOV in local currency." It wasn't: the **value is correct USD** (the engine reads `*_usd` columns; `combined_entity_stats` is USD-normalized — verified CE 243/EUR AOV `$264.53` matches `fct_orders.order_value_usd` exactly, with no FX-factor divergence on any CE), and the **code is clean** (`render_ce_health.money()` hardcodes `$`). The culprit was the **in-chat Step-1 preview**, which the orchestrator writes at runtime — seeing the CE's "London · UK" / "Paris · Europe" metadata pills, the model localized the currency symbol.

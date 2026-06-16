@@ -63,7 +63,7 @@ conclusion or an implication, never a description of process.
 | `findings.md` (CVR-RCA) | CVR-RCA's structured root cause, mechanism, evidence inventory, hypotheses. |
 | `cvr_rca_report.html` (CVR-RCA) | The full CVR-RCA report — its executive-summary callout, actions, and section anchors. Use it (or `findings.md`) for the CVR-RCA conclusions. |
 | `perf_audit_report.md` + `perf_audit_summary.md` | Paid verdict, traffic-quality assessment, red flags, campaign status, recommended actions. |
-| `user_context.md` (if present) | The analyst's **intent** — focus, hypothesis priors, known events. Tells you what the user cared about; check whether the tabs answered it. |
+| `user_context.md` (if present) | The analyst's **intent** — `## Goal` (their chosen aim — used for **goal-aware framing** below), plus focus, hypothesis priors, known events. Tells you what the user cared about; check whether the tabs answered it. |
 | `user_data_<slug>.md` (if present) | A user-provided ad-hoc data pull used as corroboration. |
 | `slack_context.md` (if present) | Operational Slack signals (CVR-RCA's collector) — bug/supply/campaign/CE mentions, incl. any user-requested channel. |
 
@@ -112,13 +112,39 @@ views and next steps. It is **not a rigid template** (see "Freedom to adapt").
 |---|---|---|---|
 | 1 | Vitals cards | current state at a glance (pre→post) | CE Health vitals (verbatim) |
 | 2 | Short-term vs long-term context | pre→post Δ + YoY Δ | CE Health vitals + L12M |
-| 3 | Headline callout | TL;DR — the story + the single top action | synthesized |
+| 3 | Headline callout | TL;DR — the story + the single top action *(led by the goal posture — see "Goal-aware framing")* | synthesized |
 | 3b | **Driver waterfall** (placeholder) | the §7 Revenue-Waterfall, reused verbatim — emit `<!--SUMMARY_SHAPLEY_WATERFALL-->`, the composer fills it | CE Health §7 (cloned) |
 | 4 | **Driver table** | the revenue decomposition + per-driver verdict — straight after the waterfall | CE Health Shapley + CVR/perf |
 | 5 | **Per-tab conclusion digests** | each tab's conclusions/callouts **in full** | CE Health · CVR-RCA · perf-audit |
-| 6 | Recommended next steps | consolidated actions across the tabs | CVR-RCA + perf-audit |
+| 6 | Recommended next steps | consolidated actions across the tabs *(ordered to the goal posture)* | CVR-RCA + perf-audit |
 | 7 | What we set out to check *(if user context)* | the analyst's intent + whether the RCA answered it — last table before the cross-reference | `user_context.md` |
 | 8 | Cross-reference table (**last**) | provenance — how the tabs corroborate | all tabs |
+
+### Goal-aware framing — tilt the conclusion + next-steps to the goal (data-reconciled)
+
+The analyst picked a **goal** at the run's start (read it from `## Goal` in
+`user_context.md`). Use it to **tilt the emphasis** of the **headline callout (#3)** and the
+**recommended next-steps (#6)** — and nothing else. This is **Summary-only**; no other tab
+changes. Two hard rules:
+
+1. **Tilt, don't restate.** Do **not** print the goal ("you set out to…") — just let the
+   conclusion + next-steps *lead* with the goal-aligned angle. Derive a **posture** by
+   classifying whatever they picked *or typed in the "Other" box*:
+   - **scale** (growth / "what's working") → lead with *what's driving the gain* + the levers to double down.
+   - **fix** (a decline / root cause) → lead with *the root cause + severity* + the remediation.
+   - **investigate** (a specific metric/question) → lead with *the answer to that exact question*; next-steps follow up on it.
+   - **neutral** (general health check / unclear free-text) → a balanced read (strengths + risks evenly), no tilt.
+   A free-text goal maps to the closest posture; a pointed question → **investigate** that thing.
+
+2. **The data wins — reconcile before tilting.** Check the headline direction (CE Health revenue Δ
+   + the top Shapley driver) *before* applying the posture. If the goal contradicts the data — goal =
+   **scale** but revenue is **down**, or **fix** but revenue is **up** — tilt to the **data-aligned
+   posture**, not the stated one. The tilt only reorders *emphasis*; it can **never** spin what the
+   data shows (a decline is still reported as a decline). When goal and data conflict you may note it
+   in **one** short clause in the callout, but the framing follows the data.
+
+Everything else stays **pure synthesis** — facts, drivers, and verdicts are whatever the tabs found;
+the goal changes only what you *lead with* and which actions you surface first.
 
 Author with **visual-kit component classes only** (the composite injects the shared `<style>`;
 do not write your own CSS). Every number you show must already appear in a source tab.

@@ -88,6 +88,28 @@ noted, never fatal (mirrors the suite's graceful-skip rule).
 
 ---
 
+## Step 0 — Context intake (standalone only)
+
+CE Context *is* the user-context layer, so on a standalone run it must **gather** the
+analyst's context itself — there is no umbrella to write `user_context.md` first. Run
+the **full onboarding questionnaire** per
+**`$SKILL_DIR/../../references/context_intake_guide.md`** (emphasis: **full** — all four
+buckets + the "anything else?" catch-all + aliases; **no 1e** — orientation, not
+diagnosis), and write the answers into `<run_dir>/user_context.md` (the 8-slot contract).
+
+**Standalone gate (run this step only when standalone):** skip Step 0 entirely if
+`CE_CONTEXT_RUN_DIR` is set OR `<run_dir>/orchestration.json` exists OR
+`<run_dir>/user_context.md` already exists — under the umbrella the orchestrator captured
+context once at its Step 1 and you must not re-ask. Standalone (`/ce-context` directly),
+run it.
+
+Then **derive the Slack inputs for Step A from the answers**: `ce_aliases` from `##
+Aliases`, and `slack_probes` from `## Constraints` + `## Known failure modes` (the same
+mapping the umbrella does into `orchestration.json`). If `AskUserQuestion` or the guide is
+unavailable, ask the same questions inline and record them the same way — never block.
+
+---
+
 ## Step A — fire the Slack collector FIRST (fire-and-forget)
 
 Spawn the Slack collector sub-agent **before** anything else, so `slack_context.md`
@@ -99,8 +121,9 @@ Pass:
 ce_id, ce_name, market, country, pre_start, post_start, post_end
 run_dir       → <run_dir>
 output_path   → <run_dir>/slack_context.md
-user_channels → orchestration.json `user_slack_channels` (if present; else omit)
-slack_probes  → orchestration.json `slack_probes` (if present; else omit)
+user_channels → orchestration.json `user_slack_channels` (orchestrated); else any channel named in the Step-0 intake (standalone); else omit
+slack_probes  → orchestration.json `slack_probes` (orchestrated); else derived in Step 0 from `## Constraints` + `## Known failure modes` (standalone); else omit
+ce_aliases    → orchestration.json `ce_aliases` (orchestrated); else `## Aliases` from Step 0 (standalone); else omit
 ```
 
 **Graceful skip:** the collector self-guards on the Slack MCP (honesty rule in the
@@ -124,12 +147,11 @@ runs, write `{"ce_id": <id>, "rcas": []}` and move on (most first runs).
 
 ## Step C — read user context
 
-Read the analyst's context: `<run_dir>/user_context.md` (the path named under
-`orchestration.json → user_context`; the umbrella wrote it at its Step 1). On a
-standalone run, capture whatever the user provided into the same 8-slot
-`user_context.md` shape (About this CE / Focus / Hypothesis priors / Known events /
-Constraints / Known failure modes / Important links / Sources). If there is no user
-context (a bare run), skip it — the tab just omits that block.
+Read the analyst's context from `<run_dir>/user_context.md`. **Orchestrated:** the path
+named under `orchestration.json → user_context` (the umbrella wrote it at its Step 1).
+**Standalone:** the file **Step 0 just wrote** from the intake questionnaire — read it the
+same way. If a "Let Claude infer" / "Nothing to add" run left it empty (or absent), skip —
+the tab just omits that block.
 
 ---
 

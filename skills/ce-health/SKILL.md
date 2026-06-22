@@ -44,6 +44,24 @@ pre = March). Only valid alongside `--start/--end`; both must be given together.
 
 ## Execution Steps
 
+### Step 0 — Context intake (standalone only)
+
+Standalone, gather the analyst's context **up front** — it is what the per-section
+one-liners are enriched from (the CE-Health-insights sub-agent reads it at Step 6) and
+what the report's `user_context` subsection embeds. Run the onboarding questionnaire per
+**`$SKILL_DIR/../../references/context_intake_guide.md`**, emphasis **ce-health** (LIGHT —
+About-this-CE + known events + constraints; a briefing is orientation, so **no 1e
+driver-hypothesis**), and write the answers to `<run_dir>/user_context.md` (the 8-slot
+contract). Establish the `<run_dir>` now (the canonical-name dir Step 2 / Step 3b use) so
+the file and the rendered artifacts share one directory.
+
+**Standalone gate (run Step 0 only when standalone):** skip entirely if
+`CE_CONTEXT_RUN_DIR` is set OR `<run_dir>/orchestration.json` exists OR
+`<run_dir>/user_context.md` already exists — under `/ce-rca` the orchestrator captured
+context once at its Step 1 (and runs the insights loop itself at its Step 3a/3b), so this
+skill must neither re-ask nor re-run the loop. A "nothing to add" run leaves the slots
+empty and the packet renders exactly as a bare run does.
+
 ### Step 1 — Resolve CE
 
 If user gave a name (not a numeric ID), resolve it:
@@ -108,6 +126,11 @@ purely in `~/analytics` without the bundle), skip this — the markdown from Ste
 remains the deliverable. (Under the `/ce-rca` orchestrator this is unnecessary — the
 master renders the fragment without `--standalone` and `compose.py` builds the tab.)
 
+**Standalone, the FINAL render runs at Step 6** — after the CE-Health-insights loop writes
+`ce_health_insights.json`, so the report embeds the context-enriched per-section one-liners.
+This Step-3b invocation is just an optional early preview (deterministic callouts only); if
+you ran Step 0 (so a `user_context.md` exists), prefer producing `report.html` at Step 6.
+
 ### Step 4 — Search Slack for CE context
 
 First **discover the Slack MCP tool dynamically** — never hard-code a server
@@ -155,13 +178,46 @@ Look for: MMP plan details (what was planned vs executed), assortment decisions,
 
 If `gws` is unavailable or the doc can't be read, note the link in Section 8 for manual review.
 
-### Step 5 — Prompt user for additional context
+### Step 5 — Confirm context + proceed
 
-Present the briefing packet and ask:
+The analyst's context was captured up front at **Step 0** (standalone) or by the umbrella
+(orchestrated), so this is just a light confirm, not the main intake. Present the briefing
+packet and ask:
 
-> **Add your context:** Any thoughts, links, Slack threads, or hypotheses before we go deeper?
+> **Anything to add before we go deeper?** Links, Slack threads, or a correction — or "looks good, proceed to perf audit."
 
-Wait for user input. They may add links, paste data, or say "looks good, proceed to perf audit."
+If they add anything material, fold it into `<run_dir>/user_context.md` (the same slots)
+so Step 6's enrichment picks it up. Then proceed.
+
+### Step 6 — CE Health insights (per-section one-liners) + final render (standalone only)
+
+This is the **"Python computes, Claude phrases"** loop that gives each section a grounded,
+context-enriched one-liner — ported from the umbrella so it runs standalone too. **Standalone
+gate:** run this only when standalone (the same gate as Step 0); under `/ce-rca` the master
+runs it at its Step 3a/3b and renders the tab, so **skip** here.
+
+1. **Facts pack (deterministic).** Compute the numbers backbone the insights agent phrases:
+   ```bash
+   python3 "$SKILL_DIR/../../scripts/render_ce_health.py" --emit-facts --run-dir "<run_dir>"
+   ```
+   This writes `<run_dir>/ce_health_facts.json` (per-section numbers + flags; no bq).
+2. **CE-Health-insights sub-agent.** Spawn one sub-agent: read
+   `$SKILL_DIR/../../references/ce_health_insights_guide.md` and follow it exactly. Run dir:
+   `<run_dir>`. Inputs: `ce_health_facts.json` + whatever context artifacts are present —
+   standalone that is **`user_context.md`** (from Step 0) and `slack_context.md` if Step 4
+   wrote one; `ce_context_*` files are umbrella-only and simply absent here (the guide reads
+   "what's present"). It writes `<run_dir>/ce_health_insights.json` — a per-section
+   `{insight, sentiment}` map; every data claim traces to the facts pack, enriched with the
+   analyst's constraints/events via a `↗` tie-in.
+3. **Final render embeds the insights.** Run the `--standalone` render from Step 3b **now**
+   (after the insights file exists) so `_load_insights` embeds each one-liner as the
+   section-top callout:
+   ```bash
+   python3 "$SKILL_DIR/../../scripts/render_ce_health.py" --run-dir "<run_dir>" --standalone
+   ```
+   **Graceful:** a failed/absent sub-agent → `ce_health_insights.json` missing → the render
+   falls back to the deterministic §3/§9/§7 callouts (never blanks or breaks the tab), i.e.
+   exactly today's standalone behaviour.
 
 ---
 

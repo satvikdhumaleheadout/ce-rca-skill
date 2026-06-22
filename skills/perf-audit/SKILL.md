@@ -103,6 +103,28 @@ files** for §6b / §8, degrading gracefully if `none` (§6b → no competitor t
 keyword-IS only). Identifying CY-vs-LY is unchanged (read line 2's date range).
 Standalone behavior is unchanged — send the prompt as above.
 
+### Step 0b — Context intake (standalone only)
+
+Standalone, also gather the analyst's context — it is what makes Step 5b reconciliation and
+the "constraints filter the recommended actions" rule (Step 3) actually fire. Today, with no
+umbrella, no `user_context.md` exists so Step 5b is a clean no-op. Run the onboarding
+questionnaire per **`$SKILL_DIR/../../references/context_intake_guide.md`**, emphasis
+**perf-audit** (lead the **PPC / Paid · budget · campaign** buckets — the off-the-table
+levers and changes the paid audit consumes; still ask all four), and write the answers to
+`<run_dir>/user_context.md` (the 8-slot contract).
+
+- **Standalone gate (run Step 0b only when standalone):** skip entirely if
+  `<run_dir>/orchestration.json` exists OR `CE_CONTEXT_RUN_DIR` is set OR
+  `<run_dir>/user_context.md` already exists — under `/ce-rca` the orchestrator captured
+  context once and you must not re-ask.
+- **Two halves, and the no-steer guardrail:** ask the **factual buckets (1a–1d) up front**
+  (recall, before the numbers) while the engine renders in Step 2; **defer the grounded
+  hypothesis (1e) until after Step 2's tables are rendered** (the reveal), appending it to
+  `## Hypothesis priors`. As always in perf-audit, user context **never steers the Section
+  2–7 data narrative** — constraints only *filter the actions* (Step 3 / Section 10) and
+  priors are *reconciled* at Step 5b. A "nothing to add" run leaves the slots empty and the
+  report is identical to today's bare run.
+
 ### BQ Quick Reference
 
 When writing ad-hoc BQ queries for this audit, use these column names (NOT guessed names):

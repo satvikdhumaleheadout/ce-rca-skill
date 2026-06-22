@@ -5,6 +5,23 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.55.0] — 2026-06-22 — Standalone onboarding questionnaire for each sub-skill
+
+**Summary:** Each sub-skill now gathers the analyst's context itself when run **standalone**, so the user-context consumption that already powers the umbrella run also fires on a direct `/ce-context`, `/cvr-rca`, `/perf-audit`, or `/ce-health`. Previously the onboarding questionnaire lived only in the `/ce-rca` umbrella (its Step 1a–1e → `user_context.md`); standalone, no one wrote that file, so the consumers sat idle.
+
+**What changed:**
+- **New shared guide `references/context_intake_guide.md`** — the umbrella's Step 1a–1e questionnaire (goal-adaptive buckets: Supply/Availability · Landing Page · PPC/Paid · Pricing + catch-all, aliases, post-reveal grounded hypothesis) and the 8-slot `user_context.md` contract, factored into one reusable module each sub-skill references via `$SKILL_DIR/../../references/`.
+- **`Step 0 — Context intake (standalone only)`** added to all four sub-skills, **gated** so it runs only standalone (skipped when `orchestration.json` / `CE_CONTEXT_RUN_DIR` / an existing `user_context.md` signal the umbrella already captured context — never double-asks). Each leads the buckets it consumes: ce-context (full), cvr-rca (LP/pricing/mix → its L0 hypothesis-planning + Step-2b "close every prior"), perf-audit (PPC/budget/campaign → Step-5b reconciliation + action constraints), ce-health (light: about/events/constraints).
+- **cvr-rca:** the grounded hypothesis (1e) is captured at L0 *after* the signals are revealed, appended to `## Hypothesis priors` before branches open.
+- **ce-health:** in addition to Step 0, the **"Python computes, Claude phrases" insights loop** (facts pack → CE-Health-insights sub-agent → render embeds the per-section one-liners) was **umbrella-only**; it is now ported into the standalone skill (new Step 6, gated), so standalone reports get context-enriched one-liners instead of deterministic fallbacks.
+
+**Net:** run any sub-skill on its own and it asks the same onboarding questions the umbrella does, then consumes the answers to write its narration/hypotheses — no double-ask under `/ce-rca`, and a "nothing to add" run is identical to today's bare run.
+
+### Blast radius
+- **New** `references/context_intake_guide.md`; `skills/{ce-context,cvr-rca,perf-audit,ce-health}/SKILL.md` (Step 0 + skill-specific wiring; ce-health adds the standalone insights loop), `CHANGELOG.md`, `VERSION`. No engine / renderer / `compose.py` / consumption-contract change — the `user_context.md` 8-slot contract and all existing consumers are unchanged.
+
+---
+
 ## [v2.54.1] — 2026-06-16 — Restore the per-run-folder hash suffix (Drive doesn't dedupe identical names)
 
 **Fix:** the v2.53 Step-4g rewrite named the Drive subfolder just `<run-dir basename>`, dropping the `-<6-hex>` suffix the old `drive_sync.py` had. Google Drive **allows duplicate folder names in the same parent and does not auto-rename**, so two people running the same CE+window would create two indistinguishable folders. Step 4g now names the subfolder `<run-dir basename>-<6 random hex chars>` (e.g. `ce-2567-2026-05-01-to-2026-05-31-a3f9c1`), with an inline note on why the suffix is required. SKILL.md Step 4g only.

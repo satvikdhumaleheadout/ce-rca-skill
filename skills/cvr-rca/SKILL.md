@@ -133,6 +133,29 @@ Dates are optional. When omitted, the script defaults to **last 30 days vs the
 
 ---
 
+## Step 0 — Context intake (standalone only)
+
+On a standalone `/cvr-rca` run there is no umbrella to capture the analyst's context, so
+gather it here — it is what powers Signal 0 (priors → prioritised branches) at L0 and the
+"close every prior" reconciliation at Step 2b. Run the onboarding questionnaire per
+**`$SKILL_DIR/../../references/context_intake_guide.md`**, emphasis **cvr-rca** (lead the
+**Landing Page · Pricing · Mix/device/geo · funnel** buckets it consumes), and write the
+answers to `<run_dir>/user_context.md` (the 8-slot contract; `<run_dir>` is the folder
+Step 1 creates — ask the factual buckets while the baseline pipeline runs, then persist).
+
+- **Standalone gate (run Step 0 only when standalone):** skip entirely if
+  `<run_dir>/orchestration.json` exists, OR `CVR_RCA_RUN_DIR` is set by a parent, OR
+  `<run_dir>/user_context.md` already exists — the umbrella already captured context at
+  its Step 1 and you must not re-ask.
+- **Two halves:** ask the **factual buckets (1a–1d) now** (recall, before the numbers —
+  strong corroboration); **defer the grounded driver-hypothesis (1e) to L0**, after the
+  signals are revealed (see Signal 0 below). The light/“nothing to add” path writes empty
+  slots and the run behaves exactly like today's bare run.
+- Standalone, the `## Aliases` and any user-named Slack channel from the intake feed the
+  Slack spawn's `user_channels`.
+
+---
+
 ## Step 1 — Run the baseline queries
 
 ```bash
@@ -396,8 +419,18 @@ See `context.md` → "Q3 Trend Interpretation" for full interpretation guide.
 
 Check for `<run_dir>/user_context.md` — the manifest at
 `<run_dir>/orchestration.json` names it under `user_context` when the CE-RCA
-umbrella captured it; on a standalone run, detect it by file presence. If it
-isn't there, skip this signal entirely (most runs).
+umbrella captured it; on a standalone run, Step 0 wrote it. If it isn't there, skip
+this signal entirely.
+
+**Standalone — capture the grounded hypothesis here (the deferred 1e).** Now that the L0
+signals (mix_dominance · shapley · trend) are on the table, ask the analyst's read per the
+intake guide's **1e** step — one tight `AskUserQuestion` ("what do you think is driving
+this, and where should I dig first?", with *Run the default* / *Let Claude infer the lead*
+quick-buttons) — and append the answer to `<run_dir>/user_context.md` under `## Hypothesis
+priors` / `## Focus / direction` before opening branches. **Skip this ask** when
+orchestrated (the umbrella already captured the post-reveal hypothesis) or when Step 0 was
+skipped. A "run the default" / no-steer reply writes nothing and the default branch set
+runs unchanged.
 
 When it *is* there, it carries the analyst's **Focus**, **Hypothesis priors**,
 and **Known events**. Treat it differently from every other external input:

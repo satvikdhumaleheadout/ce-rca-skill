@@ -66,23 +66,19 @@ fi
 
   Do not claim the skill is ready to run if this failed.
 
-**Optional — Google Sheets context ingestion + Drive archive.** Both the `read_sheet.py`
-helper (Step 1 ad-hoc Sheet ingestion) and `drive_sync.py` (the optional Step 4g run-archive
-command) use your gcloud ADC. Enable them once with the dependency + a login that grants the
-**Sheets read** and **Drive file** scopes together:
+**Optional — Google Sheets context ingestion.** The `read_sheet.py` helper (Step 1 ad-hoc Sheet
+ingestion) uses your gcloud ADC. Enable it once with the dependency + a login that grants the
+**Sheets read** scope:
 
 ```bash
 pip3 install google-api-python-client google-auth
 gcloud auth application-default login \
   --scopes=https://www.googleapis.com/auth/cloud-platform,\
-https://www.googleapis.com/auth/spreadsheets.readonly,\
-https://www.googleapis.com/auth/drive.file
+https://www.googleapis.com/auth/spreadsheets.readonly
 ```
 
-The `drive.file` scope is minimal by design — it only grants access to files the
-script **creates** (its per-run subfolders + uploads), never your wider Drive. If
-skipped, sheet ingestion falls back to the Drive MCP (less reliable) and the optional
-Drive archive command just errors when run; docs and Slack channels are unaffected.
+If skipped, sheet ingestion falls back to the Drive MCP (less reliable); docs and Slack channels
+are unaffected. (Drive archive of runs uses the Drive **connector**, not ADC — see below.)
 
 **Optional — Slack signals (operational context).** The **CE Context** sub-skill pulls
 operational Slack signals (bug alerts, supply/inventory, campaign changes, known-issue
@@ -107,15 +103,18 @@ CENTRAL_DRIVE_FOLDER_ID = 1nernSzAN2mZ531wEdh95eeNL2RV5oq30
 # https://drive.google.com/drive/folders/1nernSzAN2mZ531wEdh95eeNL2RV5oq30
 ```
 
-- **Each user, one-time:** the **first** run asks to approve the Drive write tool — choose
-  **"Allow always"** and it never prompts again (persists in both local and cloud co-work).
+- **Permission — granted at install (no per-run clicks).** During setup, detect the connected
+  Google Drive (GWS) **write** tool (its id in the available MCP tools) and add an allow-rule for
+  it to the user's global `~/.claude/settings.json` under `permissions.allow` — **merge-safe**
+  (create the file if absent; append to the array, never replace). Then the Drive write runs
+  silently from the very first run. **Fallback:** if the tool id can't be resolved (or the
+  connector isn't present at install time), **skip this** — the user simply picks **"Allow always"**
+  the first time the write prompts, which writes the same rule for them.
 - **Owner, one-time:** **share this central folder (edit access) with the team** (or a group)
   so everyone's uploads land in it. Each run gets its own per-run subfolder.
 - **Graceful:** if the connector isn't available or isn't approved, the run still completes —
   the report is delivered locally and the Drive sync is simply skipped (logged, never blocks).
 - **To re-point** at a different folder, change `CENTRAL_DRIVE_FOLDER_ID` in SKILL.md Step 4g.
-- **Local-CLI fallback:** the first-party `scripts/drive_sync.py` (gcloud ADC; scope setup
-  above) still works as a terminal command for local users who prefer it.
 
 ---
 

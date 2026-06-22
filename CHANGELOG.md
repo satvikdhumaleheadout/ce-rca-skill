@@ -5,6 +5,22 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.54.0] — 2026-06-16 — Drive permission granted at install (zero per-run clicks) + drop the terminal-command path
+
+**Summary:** Makes the v2.53 Drive sync genuinely "install → it just works" for the all-local desktop setup, and removes the now-redundant user-run terminal command.
+
+**What changed:**
+- **Install pre-grants the Drive write permission.** INSTALL.md now instructs setup to detect the connected Google Drive (GWS) **write** tool and add an allow-rule for it to the user's global `~/.claude/settings.json` (`permissions.allow`, merge-safe). Because the GMs run locally, that global file is read by every run — so the Drive write proceeds **silently from the first run, no clicks**. (The skill-bundle's own `.claude/settings.json` was never the right place — the harness reads the user's *own* global/project settings — which is exactly why the grant goes into `~/.claude/settings.json`.)
+- **Fallback kept simple:** if the tool id can't be resolved at install (or the connector isn't present then), setup skips it and the user just picks **"Allow always"** the first time the write prompts — which writes the identical rule. So either path lands the same allow-rule; nobody is blocked.
+- **Removed the user-run terminal command entirely.** With the connector write + install pre-grant (or "Allow always"), the old `python3 scripts/drive_sync.py …` archive command is unnecessary. Deleted `scripts/drive_sync.py` and all live references (Step 4g fallback line + INSTALL.md). The ADC setup in INSTALL.md is trimmed to what `read_sheet.py` (Sheet ingestion) actually needs — the `drive.file` scope is gone.
+
+**Net:** one-time per-owner folder share + an install that pre-grants the write (or one "Allow always" click if it can't) → every `/ce-rca` run writes report + feedback + follow-ups (on the existing rules) to the team Drive, with no terminal step and no per-run prompts. Still graceful: no connector / not granted → logged + skipped, never blocks.
+
+### Blast radius
+- `SKILL.md` (Step 4g permission note + this row), `INSTALL.md` (ADC trim + Drive section auto-grant + dropped local-CLI bullet), **deleted** `scripts/drive_sync.py`, `CHANGELOG.md`, `VERSION`. No engine / renderer / `compose.py` / other-skill / contract change.
+
+---
+
 ## [v2.53.0] — 2026-06-16 — Auto-archive every run to the team Drive + structured feedback / follow-up capture
 
 **Summary:** Runs, the feedback growth managers give, and the follow-ups they ask now flow into one shared Drive folder for skill-improvement review — with effectively zero per-run effort. This replaces the old Step-4g flow, which printed a terminal command the user had to run themselves (and which was broken: it contained `$SKILL_DIR`, empty in a fresh shell, so it never ran).

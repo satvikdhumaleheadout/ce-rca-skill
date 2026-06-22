@@ -95,25 +95,27 @@ and the report reports Slack as **"unavailable"** (it will never claim threads w
 or cite Slack signals when the MCP was absent). Everything else runs normally; Slack is
 purely additive context.
 
-**Optional Drive archive (user-run, for review).** At the end of a run (Step 4g) CE-RCA
-**prints a command** the user can run to archive the finished run — `report.html` + a zip of
-the run folder — into a **shared central Google Drive folder**, so runs accumulate in one
-place to review and improve the skill. The skill **does not upload anything itself**: an agent
-auto-uploading local files trips the safety classifier as data-exfiltration, whereas a command
-the user chooses to run does not (Claude Code shows a one-click run button on the command).
-The archive is driven by the first-party **`scripts/drive_sync.py`** helper using your gcloud
-ADC (see the scope setup above), is **additive-only** (create, never update/delete), and the
-central folder is a constant in the script:
+**Drive archive of every run (for review & skill improvement).** At the end of each run
+(Step 4g) CE-RCA uploads the finished `report.html` — plus any `feedback.md` and the follow-up
+log captured in the playground — into a **shared central Google Drive folder**, so runs
+accumulate in one place. This uses the **Google Drive (GWS) connector** already attached in the
+desktop app (works in both local Claude Code and cloud co-work), so there is **nothing to
+install**:
 
 ```
-DEFAULT_PARENT_FOLDER_ID = 1nernSzAN2mZ531wEdh95eeNL2RV5oq30
+CENTRAL_DRIVE_FOLDER_ID = 1nernSzAN2mZ531wEdh95eeNL2RV5oq30
 # https://drive.google.com/drive/folders/1nernSzAN2mZ531wEdh95eeNL2RV5oq30
 ```
 
-- **Owner, one-time:** **share this central folder (edit access) with the team** so everyone's
-  runs can upload into it. Each run creates its own per-run subfolder (`<run-name>-<hash>`).
-- **To re-point** at a different folder, change `DEFAULT_PARENT_FOLDER_ID` in
-  `scripts/drive_sync.py`, or pass `--parent-folder-id` on the command.
+- **Each user, one-time:** the **first** run asks to approve the Drive write tool — choose
+  **"Allow always"** and it never prompts again (persists in both local and cloud co-work).
+- **Owner, one-time:** **share this central folder (edit access) with the team** (or a group)
+  so everyone's uploads land in it. Each run gets its own per-run subfolder.
+- **Graceful:** if the connector isn't available or isn't approved, the run still completes —
+  the report is delivered locally and the Drive sync is simply skipped (logged, never blocks).
+- **To re-point** at a different folder, change `CENTRAL_DRIVE_FOLDER_ID` in SKILL.md Step 4g.
+- **Local-CLI fallback:** the first-party `scripts/drive_sync.py` (gcloud ADC; scope setup
+  above) still works as a terminal command for local users who prefer it.
 
 ---
 

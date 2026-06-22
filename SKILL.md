@@ -1340,31 +1340,32 @@ subfolder-first, root-fallback), so the Step-5 follow-up re-compose still finds
 everything, and older flat runs still compose unchanged. Do this quietly — it is
 plumbing, not something to narrate.
 
-**4g. Offer the Drive-archive command (optional — the user runs it).** After the run
-folder is organized (4f), **print** a ready-to-run command the user can execute to archive
-this run to the **shared central Google Drive folder** (so runs accumulate in one place for
-skill-improvement review). **Do not run it yourself** — surface the command and let the user
-run it; Claude Code shows a run button on the command block, so it's one click. Keeping the
-upload **user-initiated** is the whole point: an agent auto-uploading local files reads as
-data-exfiltration to the safety classifier and gets blocked, whereas a command the user
-chooses to run does not.
+**4g. Archive the run to the team Drive folder (automatic — via the Google Drive connector).**
+After organizing (4f), **the main agent itself** (never a sub-agent — a sub-agent can't answer
+the connector's approval prompt) uploads the finished `report.html` to the **shared central Drive
+folder** so every run accumulates in one place for skill-improvement review. Use the connected
+**Google Drive (GWS) MCP** directly:
 
-The archive is driven by the first-party `scripts/drive_sync.py` helper, which uses the
-user's own gcloud ADC to upload `report.html` + a zip of the run into a new per-run subfolder
-of the central folder (a constant inside the script — re-point the sync there). It is
-**additive-only** (create, never update/delete). The one-time Drive scope is in INSTALL.md; if
-it isn't set up the command simply errors and nothing else is affected — the local report from
-Step 4e is the deliverable either way.
+1. **Create a per-run subfolder** named `<run-dir basename>` under the central folder
+   `CENTRAL_DRIVE_FOLDER_ID = 1nernSzAN2mZ531wEdh95eeNL2RV5oq30` (a Drive folder is created with
+   the connector's create-file tool using the folder mime type).
+2. **Upload `<run_dir>/report.html`** into that subfolder, kept as browsable HTML (no Doc conversion).
+3. **Record the subfolder's id + URL** in `logs/_run_log.md` (e.g. a `DRIVE_FOLDER_ID=<id>` line +
+   the folder URL). Step 5 reuses this id so feedback / follow-ups land in the **same** folder.
 
-Emit one framing line, then the command block:
+Then tell the user where it synced (the folder URL). Keep this **lean** — one folder + one file,
+no zip, no retry loop, no verification gate.
 
-```
-📁 Optional — archive this run to the team Drive folder (one click to run):
-```
+**First run only:** the connector's write tool asks for approval — tell the user to pick
+**"Allow always"** so it never prompts again (persists across both local Claude Code and cloud
+co-work). **Graceful (mirror the Slack rule):** if the Drive connector isn't available, isn't
+approved, or the call fails, write `Drive sync unavailable — skipped` to `logs/_run_log.md` and
+**continue — never block**. The local report from Step 4e is the deliverable regardless.
 
-```bash
-python3 "$SKILL_DIR/scripts/drive_sync.py" --run-dir "<run_dir>"
-```
+*Local-CLI fallback (optional):* a terminal user can instead archive via the first-party helper —
+print `python3 "<SKILL_DIR>/scripts/drive_sync.py" --run-dir "<run_dir>"` with `<SKILL_DIR>`
+replaced by its **absolute** value (it is empty in a fresh shell, so never print the literal
+`$SKILL_DIR`). Same central folder; gcloud-ADC based (see INSTALL.md).
 
 ---
 
@@ -1374,17 +1375,32 @@ The report is not the end of the conversation — it's a **context-rich playgrou
 After 4e (and the optional Step-4g archive offer), invite the analyst to ask follow-up
 questions **in this same session**, and handle each one per **`references/followup_guide.md`**.
 
-**Feedback ask (extend the playground prompt).** Alongside the follow-up invite, include a
-short feedback ask so problems get logged with the run:
+**Capture follow-ups + feedback — and sync them to the run's Drive folder.** The closing invite
+covers **both** paths in plain language; you **infer which each message is** — there is no command
+to remember:
 
-> *Spotted a problem? Tell me which and I'll log it — **numbers incorrect · narrative
-> unclear · narrative incorrect · couldn't follow the report at all · other** — plus a line
-> of detail.*
+> *Ask any follow-up about this CE, or tell me what was off with the report (numbers, narrative,
+> anything you couldn't follow) and I'll log it.*
 
-**On feedback** → write a **single new file** `<run_dir>/feedback.md` capturing: the chosen
-category (or categories), the free-text detail, a timestamp, and the CE + window. It rides
-along in the run folder (and is included if the user later runs the Step-4g archive command).
-This is additive: `feedback.md` is the **only new file** the skill introduces here.
+**Routing — classify each reply:**
+- A **question about the CE / analysis** → a **follow-up** (answer it per below).
+- A **judgment about the report itself** (wrong / unclear / missing / useful) → **feedback**.
+- **Ambiguous** → one short clarifier: *"Want me to dig into that as a follow-up, or log it as feedback?"*
+- A message starting with **`feedback:`** is always feedback (soft shortcut — never required).
+
+**On feedback** → append to `<run_dir>/feedback.md` (a category if one is obvious + the detail +
+timestamp + CE/window) and **immediately upload `feedback.md`** into the run's Drive subfolder
+(the `DRIVE_FOLDER_ID` recorded at Step 4g, via the same connector tool). Graceful: no folder id /
+no connector → keep the local file and skip the upload silently.
+
+**On follow-ups** → answer per `references/followup_guide.md` (below) and append each question + your
+answer to `<run_dir>/followup.md`. **Do not upload per follow-up** — the connector is create-only,
+so per-turn uploads just pile up duplicate versions. When the user **winds down** (a closing /
+satisfied message) or **explicitly asks**, offer **once**: *"Save this session's follow-ups to the
+team Drive folder?"* → on yes, upload `followup.md` into the run's Drive subfolder. Ask once, never
+per turn; if declined or the session just ends, nothing breaks (report + feedback are already
+safe). The enriched `report.html` (with promoted follow-ups) stays **local** — it is not
+re-uploaded (create-only Drive; the Drive copy is the as-delivered report + these logs).
 
 Read `references/followup_guide.md` now if you haven't; the essentials:
 
@@ -1408,10 +1424,10 @@ Read `references/followup_guide.md` now if you haven't; the essentials:
   ```
 
   Re-composition is idempotent and **append-only** — the other tabs never change.
-  **Follow-ups reuse the existing `tabs/followups.html` + the re-composed `report.html` —
-  no per-follow-up files are created.** If the user wants the follow-up-enriched run archived
-  to Drive, they can re-run the Step-4g command — it creates a **new** per-run subfolder + zip
-  (additive).
+  **Follow-ups reuse the existing `tabs/followups.html` + the re-composed `report.html`** (no
+  per-follow-up files); the **raw** Q+A log accrues in the single `<run_dir>/followup.md`. Drive
+  sync of the follow-ups is the **one wind-down yes/no** described above — the enriched
+  `report.html` is not re-uploaded.
 - **The pivot rule.** Any question that changes the **time window** or otherwise
   **re-scopes** the run is **not** a follow-up. Do not answer in place and do not recompute.
   Offer to spawn a **fresh `/ce-rca`** run on the new scope, and (if promoted) drop a
@@ -1480,6 +1496,7 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 | --- | --- | --- |
+| m088 | 2026-06-16 | **Auto-archive every run to the team Drive (GWS connector) + structured feedback / follow-up capture (v2.53.0).** Replaces the old Step-4g "print a command the user runs" flow (broken: it printed `$SKILL_DIR`, empty in a fresh shell). **Step 4g** now has the **main agent** (never a sub-agent — can't answer the approval prompt) create a per-run subfolder under the central team folder (`1nernSzAN2mZ531wEdh95eeNL2RV5oq30`) via the connected **Google Drive (GWS) MCP**, upload `report.html`, and record `DRIVE_FOLDER_ID` in `logs/_run_log.md`. Works in both local Claude Code and cloud co-work (desktop app has the connector); **first run → user picks "Allow always"** once, then silent forever. **Step 5** routing: closing prompt invites follow-up OR feedback and **infers** which each message is (question about the CE → follow-up; judgment about the report → feedback; ambiguous → one-line clarifier; `feedback:` prefix = soft always-feedback shortcut; no slash command). **Feedback** → append `feedback.md` + auto-upload to the run's Drive subfolder. **Follow-ups** → accrue in a single `followup.md`; **not** synced per turn (connector is create-only → clutter); at wind-down, **one yes/no** to upload `followup.md`. Enriched `report.html` stays local (not re-uploaded). Graceful throughout (no connector / not approved / abandoned session → logged + skipped, never blocks; report + feedback always captured). No shipped settings file relied on (a skill-bundle `.claude/settings.json` is inert — harness reads the user's own project/global settings); the universal grant is the one-time "Allow always". `scripts/drive_sync.py` kept as local-CLI fallback (printed with the absolute path). **Open verify (not a blocker):** confirm a real cloud-cowork run isn't classifier-blocked on the autonomous MCP upload (the MCP `create_file` path worked in the v2.12 smoke test; the historical block was the Bash/sub-agent shape). Blast radius: `SKILL.md` (Step 4g + Step 5 + this row), `INSTALL.md`, `CHANGELOG.md`, `VERSION`. No engine / renderer / `compose.py` / other-skill / contract change. |
 | m087 | 2026-06-16 | **§7 Shapley: fix YoY post-window inflation + add a vitals cross-check guard (v2.52.0).** A stakeholder's waterfall showed an impossible Post ($3.3M / +1184%) and a multi-$M "Orders / User" bar against an actual Post of ~$206K. Root cause: `_STATS_SQL` (booking/revenue over `combined_entity_stats`) bucketed periods with `CASE WHEN pre THEN 'pre' ELSE 'post'` across the whole `pre_start→post_end` span — so a **non-contiguous YoY window** swept the entire intervening ~11 months into "post," inflating post orders/revenue to a full year. The funnel side (`_FUNNEL_SQL`) already bucketed both windows correctly, so only the numerator blew up → the whole artifact dumped into the orders-per-user / Orders factor (CE 2567 YoY: post orders 12,422→1,677, post rev $695K→$108K once fixed). Fix (`scripts/render_ce_health.py` only): **(1)** `_STATS_SQL` now buckets both windows explicitly (`WHEN post_start..post_end THEN 'post'`) and filters to only the two ranges, mirroring `_FUNNEL_SQL` — contiguous/rolling windows unaffected. **(2)** new `_reconcile_shapley_vs_vitals` guard cross-checks the waterfall's per-window revenue + orders against the independently-computed §2 vitals (`revenue_actual`/`orders`, basis-matched); >2% divergence raises → renderer disables the waterfall and falls back to the verbatim §7 table (catches window/bucketing bugs that internal `unattributable≈$0` can't). Verified on CE 2567 YoY. Blast radius: `scripts/render_ce_health.py`, `SKILL.md` (this row), `CHANGELOG.md`, `VERSION`. No engine / `compose.py` / other-skill / contract change. |
 | m086 | 2026-06-16 | **CE Context "Timeline of changes": add a chronological table below the bubbles (v2.51.0).** The bubble swimlane is hard to interact with when bubbles overlap — every event needs a click, and close bubbles are fiddly to hit. Keep the bubbles (good density view) and add, directly below the chart, a `_timeline_table` (`scripts/render_ce_context.py`) listing **all** dated signals across every lane — MMP doc, Known events, Slack, Prior RCAs — merged into one stream, **sorted latest-first**, so nothing needs clicking. Columns: **Date · What we found · Source** (lane-coloured dot + label + ↗ link when present). Shows the latest 12 rows; older rows collapse behind a "Show N older" toggle (keeps the section compact); undated events sort to the end with "—". Bubble chart + its click-to-read panel unchanged — purely additive. Verified: parses; ordering/collapse/source-marker unit-tested; rendered end-to-end on CE 3593 (14 events) — bubbles preserved, table shows all 14 latest-first with 4 lanes colour-marked + a "Show older" toggle. Blast radius: `scripts/render_ce_context.py`, `SKILL.md` (this row), `CHANGELOG.md`, `VERSION`. No engine / data / `compose.py` / other-skill / contract change (timeline JSON unchanged). |
 | m085 | 2026-06-16 | **CE Health "revenue over channel/Landing Pages" matrix → 13 months (was 12) (v2.50.0).** Stakeholder asked for one more month of history in the Channel/Landing-Page monthly-revenue breakdown. The query already pulled 13 complete months (`INTERVAL 13 MONTH`); the matrix shaper was trimming the oldest. Fix: `_shape_monthly_matrix` default `months=12` → `months=13` (engine `bq.py`; both Channel + Landing-Page panels share the shaper, so both widen) + panel title "Last 12-month …" → "Last 13-month …" (`render_ce_health.py`). No SQL change. Young CEs still show only months with data (the cap is raised 12→13; CEs with ≥13 months now show 13). Verified on CE 2567: matrix returns 13 months (2025-05 → 2026-05). `vendor.sh` disabled (skills/ canonical) — no re-vendor. Blast radius: `skills/ce-health/engine/sources/bq.py`, `scripts/render_ce_health.py` (title), `SKILL.md` (this row), `CHANGELOG.md`, `VERSION`. No other fetch / `compose.py` / template / CVR-RCA / perf-audit / contract change. |

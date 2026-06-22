@@ -5,6 +5,25 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.53.0] — 2026-06-16 — Auto-archive every run to the team Drive + structured feedback / follow-up capture
+
+**Summary:** Runs, the feedback growth managers give, and the follow-ups they ask now flow into one shared Drive folder for skill-improvement review — with effectively zero per-run effort. This replaces the old Step-4g flow, which printed a terminal command the user had to run themselves (and which was broken: it contained `$SKILL_DIR`, empty in a fresh shell, so it never ran).
+
+**What changed:**
+- **Step 4g — automatic, via the Google Drive (GWS) connector.** The **main agent** (not a sub-agent — a sub-agent can't answer the connector's approval prompt) creates a per-run subfolder under the central team folder and uploads `report.html` into it, then records the folder id in `logs/_run_log.md`. Works in both local Claude Code and cloud co-work, since the desktop app already has the connector. **First run only:** the user picks **"Allow always"** once, and it never prompts again. Graceful: no connector / not approved / call fails → logged and skipped, never blocks the report.
+- **Step 5 — feedback vs follow-up, inferred (no command to remember).** The closing prompt invites both; each reply is classified — a question about the CE → follow-up; a judgment about the report → feedback; ambiguous → a one-line clarifier; a message starting with `feedback:` is a soft always-feedback shortcut. **Feedback** appends to `feedback.md` and auto-uploads to the run's Drive subfolder. **Follow-ups** accrue in a single `followup.md` (raw Q+A log); they are **not** synced per turn (the connector is create-only → duplicate clutter). At a natural wind-down (or on request) the skill offers **one yes/no** to save `followup.md` to Drive.
+- **Sync contract:** `report.html` (auto, at creation) · `feedback.md` (auto, when given) · `followup.md` (one yes/no, at wind-down). The enriched `report.html` (follow-ups promoted) stays **local** — not re-uploaded (create-only Drive).
+- **`drive_sync.py` kept as the local-CLI fallback** (printed with the absolute skill path, never the literal `$SKILL_DIR`). INSTALL.md Drive section rewritten connector-first (one-time per-user "Allow always" + one-time owner folder-share).
+
+**Why it's lean & safe:** no shipped settings file is relied upon (a skill-bundle `.claude/settings.json` is inert — the harness reads settings from the user's own project/global, not from `~/.ce-rca`); the universal grant is the one-time "Allow always". Everything degrades gracefully — abandoned session, no connector, or no folder access never breaks a run, and `report.html` + `feedback.md` are always captured independently.
+
+**One open verification (not a blocker):** confirm in a real cloud-cowork run that the autonomous main-agent MCP upload isn't safety-classifier-blocked (the historical block was on the Bash/sub-agent shape; the MCP `create_file` path worked in the v2.12 smoke test). Fallback if it ever balks: stamp `CLAUDE_CODE_REMOTE_SESSION_ID` into the run + use the `drive_sync.py` command.
+
+### Blast radius
+- `SKILL.md` (Step 4g rewrite + Step 5 feedback/follow-up routing + this row), `INSTALL.md` (Drive section), `CHANGELOG.md`, `VERSION`. `scripts/drive_sync.py` unchanged (still the fallback). No engine / renderer / `compose.py` / other-skill / contract change.
+
+---
+
 ## [v2.52.0] — 2026-06-16 — §7 Shapley: fix YoY post-window inflation + add a vitals cross-check guard
 
 **Summary:** On a **non-contiguous window** (year-over-year, or any custom pre/post with a gap), the §7 Revenue-Waterfall reconstructed a wildly wrong revenue (e.g. a Post of $3.3M / +1184% against an actual Post of ~$206K, with an impossible multi-$M "Orders / User" bar). Root cause: the booking/revenue query (`_STATS_SQL`, over `combined_entity_stats`) bucketed periods with `CASE WHEN pre THEN 'pre' ELSE 'post'` across the entire `pre_start→post_end` span — so for a YoY window the whole **intervening ~11 months** got swept into "post," inflating post orders/revenue to a full year. The funnel side (`_FUNNEL_SQL`, traffic + converters) already bucketed both windows explicitly, so only the numerator blew up — which dumped the entire artifact into the orders-per-user / Orders factor. (Confirmed on CE 2567 YoY: post `count_orders` 12,422 → 1,677, post revenue $695K → $108K once bucketed correctly.)

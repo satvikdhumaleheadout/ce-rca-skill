@@ -5,6 +5,12 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.54.1] — 2026-06-16 — Restore the per-run-folder hash suffix (Drive doesn't dedupe identical names)
+
+**Fix:** the v2.53 Step-4g rewrite named the Drive subfolder just `<run-dir basename>`, dropping the `-<6-hex>` suffix the old `drive_sync.py` had. Google Drive **allows duplicate folder names in the same parent and does not auto-rename**, so two people running the same CE+window would create two indistinguishable folders. Step 4g now names the subfolder `<run-dir basename>-<6 random hex chars>` (e.g. `ce-2567-2026-05-01-to-2026-05-31-a3f9c1`), with an inline note on why the suffix is required. SKILL.md Step 4g only.
+
+---
+
 ## [v2.54.0] — 2026-06-16 — Drive permission granted at install (zero per-run clicks) + drop the terminal-command path
 
 **Summary:** Makes the v2.53 Drive sync genuinely "install → it just works" for the all-local desktop setup, and removes the now-redundant user-run terminal command.

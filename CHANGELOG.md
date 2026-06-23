@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.56.2] — 2026-06-23 — Lean installer: front-load "check & solve prerequisites"
+
+**Summary:** `INSTALL.md` deferred the only real setup instruction to the end (the Step-6 brief), buried prerequisite checks in a 135-line Step 1, and repeated the onboarding paste-prompt **three times**. Restructured so prerequisites are **resolved up front**: the installer now **runs `onboarding.sh` directly** as Step 2 (right after the bundle download + completeness check), so the SDK install + BigQuery/Drive sign-in happen as part of the install — no paste-prompt anywhere (onboarding is conditional, so it's an instant no-op on updates). Optional/reference content (BigQuery troubleshooting, Sheets, Slack-MCP, Drive scope/recover) is collapsed into a short **"Optional & troubleshooting" appendix**. New step order: detect → download & verify → set up prerequisites (onboarding) → register → runs folder → confirm. Graceful: if onboarding can't finish, the install still completes and the skill's Step-0 preflight re-prompts at first run.
+
+### Blast radius
+- `INSTALL.md` (full restructure), `VERSION`, `CHANGELOG.md`, `SKILL.md` (changelog row). No script / engine / renderer / `compose.py` / sub-skill / contract change — `onboarding.sh`, `drive_sync.py`, and the Step-0 preflight are untouched.
+
+---
+
 ## [v2.56.1] — 2026-06-23 — Step-0 setup preflight (clear "run onboarding" instead of a cryptic failure)
 
 **Summary:** A GM who runs `/ce-rca` before completing the one-time `onboarding.sh` would previously hit an opaque mid-run BigQuery error. Step 0 now opens with a **preflight**: a 1-row `bq` check before anything else. If BigQuery isn't reachable, the run **stops immediately** and hands the user the exact copy-paste setup prompt (run `onboarding.sh`), then ends — no cryptic failure, no half-run. If BigQuery is fine, it continues (and optionally notes that Drive archival will skip until onboarding runs, since Drive is non-blocking). The skill never tries to run onboarding itself — that needs the user's interactive browser sign-in; it just points them to the prompt (which is a no-op if they're already set up).

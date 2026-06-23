@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.56.1] — 2026-06-23 — Step-0 setup preflight (clear "run onboarding" instead of a cryptic failure)
+
+**Summary:** A GM who runs `/ce-rca` before completing the one-time `onboarding.sh` would previously hit an opaque mid-run BigQuery error. Step 0 now opens with a **preflight**: a 1-row `bq` check before anything else. If BigQuery isn't reachable, the run **stops immediately** and hands the user the exact copy-paste setup prompt (run `onboarding.sh`), then ends — no cryptic failure, no half-run. If BigQuery is fine, it continues (and optionally notes that Drive archival will skip until onboarding runs, since Drive is non-blocking). The skill never tries to run onboarding itself — that needs the user's interactive browser sign-in; it just points them to the prompt (which is a no-op if they're already set up).
+
+### Blast radius
+- `SKILL.md` (Step 0 preflight + changelog row), `CHANGELOG.md`, `VERSION`. No script / engine / renderer / `compose.py` / sub-skill / contract change.
+
+---
+
 ## [v2.56.0] — 2026-06-23 — Drive archival via ADC + Drive API to a Shared Drive (large files now sync)
 
 **Summary:** Step-4g Drive archival moves off the **Google Drive MCP connector** and back onto a first-party uploader, `scripts/drive_sync.py`, that writes via the user's gcloud **ADC** + the **Drive API**. The connector embeds file bytes in the tool call, which the harness caps — so it could never carry `report.html` (a few hundred KB) or a full run zip; only small text files synced. The script moves bytes straight from disk to Drive with **no model context involved and no size limit**. Destination is the company **Shared Drive** (`0AONjDQrW9gVvUk9PVA`), which already has **all-company contributor** access — so there is **no per-user sharing/IAM** step. A new `scripts/onboarding.sh` sets up the one-time auth (gcloud ADC granting BigQuery + Sheets + Drive scopes) so there are no per-run clicks afterward.

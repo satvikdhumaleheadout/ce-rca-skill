@@ -140,6 +140,36 @@ diagnosis is ready the moment we need it (Step 2-reveal). A user with genuinely 
 context can still skip straight through — **the autonomous path is the fallback,
 never the default.**
 
+**0-pre. Setup preflight — run this FIRST, before anything else.** CE-RCA needs the
+user's gcloud auth set up (BigQuery is a hard dependency — CE Health, CVR-RCA, and
+perf-audit all query it; Drive archival is soft). A GM who hasn't onboarded would
+otherwise hit a cryptic mid-run BigQuery failure. So before resolving the CE or asking
+anything, run **one quick check**:
+
+```bash
+bq query --use_legacy_sql=false --project_id=headout-analytics --format=none 'SELECT 1' </dev/null >/dev/null 2>&1 && echo "BQ_OK" || echo "BQ_MISSING"
+```
+
+- **`BQ_OK`** → continue to 0a. (Optionally also probe Drive with
+  `python3 "$SKILL_DIR/scripts/drive_sync.py" --recover --run-name __preflight__`; if it
+  exits non-zero, just note "Drive archival will be skipped until you run onboarding" and
+  continue — Drive is non-blocking.)
+- **`BQ_MISSING`** → **stop and do not proceed** (CE Health would fail). Tell the user their
+  one-time setup hasn't run, and give them the exact paste-prompt to fix it, then end the turn:
+
+  > ⚠️ **CE-RCA isn't set up on this machine yet** (BigQuery isn't reachable). One-time fix —
+  > paste this and send, then re-run `/ce-rca`:
+  > ```
+  > Set up CE-RCA on my machine. Run `bash ~/.ce-rca/scripts/onboarding.sh` with a long
+  > timeout (it can install the Google Cloud SDK and opens a browser for Google sign-in —
+  > approve any permission prompt and complete the login(s)). When done, confirm BigQuery
+  > and Drive both verified.
+  > ```
+
+  (`onboarding.sh` is a no-op if they're already set up, so this is always safe.) Do **not**
+  attempt to run onboarding yourself mid-skill — it needs the user's interactive browser sign-in;
+  hand them the prompt and stop.
+
 **0a. Resolve the CE and confirm it — high confidence.**
 - **ID given (the common case):** use it directly — **do not run any name lookup.** CE Health
   (Step 0e) resolves the canonical name + metadata into its sidecar; the Step-1 reveal reads the
@@ -1508,6 +1538,7 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 | --- | --- | --- |
+| m092 | 2026-06-23 | **Step-0 setup preflight — clear "run onboarding" instead of a cryptic mid-run failure (v2.56.1).** A GM who runs `/ce-rca` before completing the one-time `onboarding.sh` used to hit an opaque BigQuery error partway through. Step 0 now opens with **0-pre**: a 1-row `bq` check (`SELECT 1`) before resolving the CE or asking anything. `BQ_OK` → continue (optionally probe Drive via `drive_sync.py --recover` and note it'll skip if unset — Drive is non-blocking). `BQ_MISSING` → **stop immediately** and hand the user the exact copy-paste setup prompt (run `bash ~/.ce-rca/scripts/onboarding.sh`), then end the turn — no half-run. The skill does **not** run onboarding itself (it needs the user's interactive browser sign-in); it points them to the prompt, which is a no-op if already set up. Blast radius: `SKILL.md` (Step 0 + this row), `CHANGELOG.md`, `VERSION`. No script / engine / renderer / `compose.py` / sub-skill / contract change. |
 | m091 | 2026-06-23 | **Drive archival via the gcloud account token + Drive API to a Shared Drive — large files now sync (v2.56.0).** The connector-based Step-4g (m088/m089) embedded file bytes in the MCP tool call, which the harness caps — so `report.html` (~289 KB) and the run zip never synced; only small text files did (proven this session). Reverted to a **first-party uploader** `scripts/drive_sync.py` (recovered from git `26d35b9^`, the version m089 deleted) that uploads via the **gcloud account token + Drive API** — bytes go straight from disk to Drive, **no model context, no size limit**, and the named-CLI shape is **not** the data-exfil pattern a classifier blocks (no base64 in any context window). **Why the account token, not ADC:** an ADC Drive call requires a quota project + `serviceusage.services.use` on it, which data-only BigQuery users lack (hit live: two 403s); the **account token** (Drive enabled via `gcloud auth login --enable-gdrive-access`, the same credential family `bq` uses) attributes quota to gcloud's own OAuth client and "just works" — no quota project, no serviceusage, no per-user IAM. ADC retained as a fallback. Destination is the company **Shared Drive** `0AONjDQrW9gVvUk9PVA` (**all-company contributor** access already granted → no per-user IAM). Script: **`supportsAllDrives=True` on every call** (Shared Drives require it); creates the `<basename>-<6-hex>` subfolder, uploads `report.html` (browsable) + a full-run zip (8 MB guard drops `data/stage*.json`; `.bq/` always excluded); single-file mode for `feedback.md`/`followup.md`; `--recover [--run-name]` to list/share past runs; central id via `CE_RCA_DRIVE_PARENT` env / `--parent-folder-id`. **Scope tradeoff:** `--enable-gdrive-access` grants gcloud's *full* Drive scope (broader than `drive.file`), but the script only ever creates/writes its own run folders — the cost of zero per-user IAM. New **`scripts/onboarding.sh`** (idempotent) is the **one-time turnkey machine setup** (so GMs / fleet rollout need no per-user CLI hand-holding, and the skill needs no BigQuery-MCP rewrite — `/ce-cowork` already covers no-CLI environments): **installs the Google Cloud SDK (gcloud + bq) if missing** (Homebrew, else the official no-admin installer), installs the Python deps, then **up to two browser sign-ins** — `gcloud auth login --enable-gdrive-access` (bq CLI + Drive) + an ADC login (Python BQ client + Sheets) — sets the project + quota project, and verifies **both BigQuery and Drive**. **Conditional + idempotent**: it detects state and only does the *missing* pieces — an already-set-up machine is an **instant no-op** (no browser), so the single install paste-prompt is safe for everyone to run. **Step 4g** is now one `drive_sync.py --run-dir` call (records `DRIVE_RUN_ID` + folder URL; graceful "run scripts/onboarding.sh" skip — local report still the deliverable). **Step 5** feedback/follow-up uploads use the single-file mode. **INSTALL.md** points at `onboarding.sh` as the single setup (supersedes the standalone Sheets login). Blast radius: **new** `scripts/drive_sync.py` + `scripts/onboarding.sh`, `SKILL.md` (Step 4g + Step 5 + this row), `INSTALL.md`, `CHANGELOG.md`, `VERSION`. No engine / renderer / `compose.py` / sub-skill / contract change. **Verified end-to-end:** live upload of the Eiffel run (CE 243) to the Shared Drive succeeded — `report.html` (288,833 B) + zip (375,989 B) + single-file mode all landed. |
 | m090 | 2026-06-16 | **Restore the per-run Drive-folder hash suffix (v2.54.1).** The v2.53 Step-4g rewrite named the subfolder just `<run-dir basename>`, dropping the `-<6-hex>` suffix the old `drive_sync.py` had. Google Drive **allows duplicate folder names in one parent and does not auto-rename**, so two people running the same CE+window would create two indistinguishable folders. Step 4g now names it `<run-dir basename>-<6 random hex>` (e.g. `…-a3f9c1`) + an inline note on why the suffix is required. SKILL.md Step 4g only. |
 | m089 | 2026-06-16 | **Drive permission pre-granted at install (zero per-run clicks) + drop the terminal-command path (v2.54.0).** Makes v2.53's Drive sync "install → just works" for the all-local desktop setup. **INSTALL.md** now has setup detect the connected Google Drive (GWS) **write** tool and add an allow-rule to the user's **global `~/.claude/settings.json`** (`permissions.allow`, merge-safe) — since GMs run locally, that file is read every run, so the write is **silent from the first run, no clicks**. **Fallback:** if the tool id can't be resolved at install / the connector isn't present then, skip it → the user picks **"Allow always"** once (writes the same rule). **Removed the user-run terminal command** (`scripts/drive_sync.py`) entirely — redundant once the connector write is pre-granted; **deleted the script** + the Step-4g local-CLI fallback line + INSTALL.md refs; trimmed the ADC setup to what `read_sheet.py` needs (dropped the `drive.file` scope). Net: owner shares the folder once + install pre-grants (or one "Allow always") → every run writes report/feedback/follow-ups to Drive, no terminal step, no per-run prompts; still graceful (no connector / not granted → logged + skipped, never blocks). Blast radius: `SKILL.md` (Step 4g note + this row), `INSTALL.md`, deleted `scripts/drive_sync.py`, `CHANGELOG.md`, `VERSION`. No engine / renderer / `compose.py` / other-skill / contract change. |

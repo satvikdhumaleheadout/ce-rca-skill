@@ -73,6 +73,14 @@ BigQuery project), report exactly what it printed and **continue the install** �
 own Step-0 preflight will re-hand the setup instruction at the first `/ce-rca` run. Never
 leave the install half-done over this.
 
+**Optional — connect a Slack MCP** (the one dependency `onboarding.sh` can't set up, because
+it's a Claude Code connector, not a CLI tool). It adds operational Slack context (supply/PPC
+changes, known-issue threads) to the CE Context tab. Tell the user: *"Optional — for Slack
+signals, connect any Slack MCP in Claude Code (Settings → Connectors). The skill auto-detects
+it by tool name; no specific server is required. Without it, Slack context is gracefully
+skipped and everything else runs normally."* This is the **only** external piece beyond
+BigQuery + Drive (both handled above) — there are no other MCPs or connectors to set up.
+
 ---
 
 ## Step 3 — Register the commands (`/ce-rca` + the four sub-skills)
@@ -169,15 +177,15 @@ Tell the user the installed version, then give them this **structured "how to us
 > health (revenue, traffic, CVR, AOV, completion, take-rate), *why* the number moved
 > (funnel + paid deep-dives), and what to do — as **one tabbed report**.
 >
-> **How to run it**
-> ```
-> /ce-rca <CE ID or name>
-> ```
-> e.g. `/ce-rca 252` or `/ce-rca "Louvre Museum"`. Default window is last 30 days vs the prior 30.
+> **The commands** — `<CE>` is a CE ID or name (e.g. `252` or `"Louvre Museum"`):
+> - **`/ce-rca <CE>`** — the full picture: CE health + funnel + paid, composed into one tabbed report. *Start here.* — e.g. `/ce-rca 252`
+> - **`/ce-context <CE>`** — orientation brief: what the CE is, known constraints, prior RCAs, Slack signals. — e.g. `/ce-context 252`
+> - **`/cvr-rca <CE>`** — funnel / conversion-rate root-cause (where the funnel leaks). — e.g. `/cvr-rca 252`
+> - **`/perf-audit <CE>`** — paid-performance audit (spend, clicks, CPC, take rate, ROI). — e.g. `/perf-audit 252`
+> - **`/ce-health <CE>`** — vitals briefing (revenue, traffic, CVR, AOV, completion, take-rate, Shapley). — e.g. `/ce-health 252`
 >
-> **Or run just one piece** — each sub-skill works standalone and gives its own openable
-> `report.html`: `/ce-context <CE>` (orientation) · `/cvr-rca <CE>` (funnel / CVR) ·
-> `/perf-audit <CE>` (paid performance) · `/ce-health <CE>` (vitals briefing).
+> `/ce-rca` is the umbrella (runs the other four and composes them); the rest are standalone and each
+> writes its own openable `report.html`. Default window is the last 30 days vs the prior 30.
 >
 > **What it'll ask you (3 quick checkpoints)**
 > 1. **Window** — confirm the default 30-vs-30, or give your own dates.
@@ -204,9 +212,8 @@ Tell the user the installed version, then give them this **structured "how to us
   everything's already fine, and only fixes what's missing.
 - **No BigQuery access:** if onboarding reports you lack access to the `headout-analytics`
   project, request it, then re-run onboarding. (BigQuery is required; without it CE-RCA can't run.)
-- **Slack (optional):** operational Slack context needs the **Slack MCP** connected in your
-  environment — this is a separate connector, **not** set up by onboarding. If absent, Slack
-  collection is gracefully skipped; everything else runs normally.
+- **Slack (optional):** see Step 2 — connect any Slack MCP in Claude Code for operational Slack
+  context; gracefully skipped if absent.
 - **Drive archive:** every run uploads `report.html` + a full-run zip to the team **Shared
   Drive** (set up by onboarding). Recover or share a past run later:
   `python3 ~/.ce-rca/scripts/drive_sync.py --recover --run-name "<ce-or-date>"`.

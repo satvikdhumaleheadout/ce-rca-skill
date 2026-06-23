@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.56.3] — 2026-06-23 — Installer: per-command call-outs + explicit Slack-MCP step; dependency audit
+
+**Summary:** Made the installer fully self-contained on *what the skill needs* and *how to use it*. The "how to use" brief now lists **all five commands with a one-liner + a concrete example each** (`/ce-rca`, `/ce-context`, `/cvr-rca`, `/perf-audit`, `/ce-health` — `/ce-rca` flagged as the umbrella, the rest standalone). Added an explicit **optional Slack-MCP step** in Step 2: it's the one dependency `onboarding.sh` can't set up (a Claude Code connector, not a CLI tool), so the install now calls it out + how to connect it (any Slack MCP; auto-detected by tool name; gracefully skipped if absent). Confirmed via audit that **BigQuery + Drive (both via onboarding) + optional Sheets + optional Slack MCP are the skill's *only* external dependencies** — no others. Also confirmed the obsolete `~/.claude/settings.json` Drive-MCP-connector allow-rule is **gone** (no longer needed since Drive moved to the gcloud account token in v2.56.0). Minor: a stale "the connector is create-only" in SKILL.md Step 5 → "the uploader is create-only".
+
+### Blast radius
+- `INSTALL.md` (Step 2 Slack note + Step 5 command list + appendix de-dup), `SKILL.md` (1-word fix + changelog row), `VERSION`, `CHANGELOG.md`. No script / engine / sub-skill / contract change.
+
+---
+
 ## [v2.56.2] — 2026-06-23 — Lean installer: front-load "check & solve prerequisites"
 
 **Summary:** `INSTALL.md` deferred the only real setup instruction to the end (the Step-6 brief), buried prerequisite checks in a 135-line Step 1, and repeated the onboarding paste-prompt **three times**. Restructured so prerequisites are **resolved up front**: the installer now **runs `onboarding.sh` directly** as Step 2 (right after the bundle download + completeness check), so the SDK install + BigQuery/Drive sign-in happen as part of the install — no paste-prompt anywhere (onboarding is conditional, so it's an instant no-op on updates). Optional/reference content (BigQuery troubleshooting, Sheets, Slack-MCP, Drive scope/recover) is collapsed into a short **"Optional & troubleshooting" appendix**. New step order: detect → download & verify → set up prerequisites (onboarding) → register → runs folder → confirm. Graceful: if onboarding can't finish, the install still completes and the skill's Step-0 preflight re-prompts at first run.

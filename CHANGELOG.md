@@ -5,6 +5,30 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.58.0] — 2026-06-23 — Enforced Drive archival + self-healing onboarding (Python/gcloud)
+
+**Summary:** Two reliability fixes GMs were hitting.
+
+**(1) Drive archival is now guaranteed, not a step the orchestrator can skip.** `scripts/compose.py` mirrors every composed `report.html` to the team Shared Drive automatically as a side-effect of writing the report (new importable `drive_sync.auto_archive()`). It's **idempotent**: a per-run sidecar `logs/_drive_run_id.json` records the Drive folder, so a re-compose (e.g. after a promoted follow-up) reuses the same folder and just refreshes `report.html` — no duplicate folders. **Graceful:** if Drive isn't set up it's a silent no-op and the local report is unaffected (opt out with `CE_RCA_NO_DRIVE`). `SKILL.md` Step 4g changes from a run-this command to a verify-the-sidecar note; Step 5 feedback/follow-up uploads read the folder id from the sidecar.
+
+**(2) Onboarding self-heals the Python environment instead of dead-ending.** Recent gcloud needs Python ≥3.11 but macOS defaults to 3.9, so `bq`/`gcloud` failed and `onboarding.sh` told the user to set `CLOUDSDK_PYTHON` and re-run — useless when Claude Code drives the install. It now **detects a compatible interpreter** (or `brew install python@3.12`, or gcloud's bundled Python), points `CLOUDSDK_PYTHON` at it, and **persists** that + the SDK PATH to `~/.zshrc`/`~/.bashrc` — automatically, no "do it yourself". It also installs the previously-**missing `google-cloud-bigquery`** (the CE Health engine imports it) PEP 668-safe, and emits machine-readable status lines (`PYTHON_FIXED`, `BQ_OK`, `DEPS_OK`, `NEEDS_ACCESS`).
+
+### Blast radius
+- `scripts/drive_sync.py` (new `auto_archive()` + sidecar + `_archive_full`/`_refresh_report_in` refactor), `scripts/compose.py` (auto-archive call after write), `SKILL.md` (Step 4g → verify note; Step 5 sidecar reads), `scripts/onboarding.sh` (Python self-heal helpers + `google-cloud-bigquery` dep + status lines), `VERSION`, `CHANGELOG.md`, `SKILL.md` changelog row. No renderer / report-contract change. Plugin copy untouched (batched later).
+
+---
+
+## [v2.57.0] — 2026-06-23 — Sub-skills self-update the whole bundle + a dedicated lean update flow
+
+**Summary:** Two things. **(1) Every entry point now keeps the whole bundle current.** Until now only the `/ce-rca` umbrella ran the "stay on latest" check; a standalone `/ce-context`, `/cvr-rca`, `/perf-audit` or `/ce-health` could run a stale bundle. A new shared guard **`scripts/update_guard.sh`** is now the first step of the umbrella *and* all four sub-skills — and it always updates the **entire `~/.ce-rca` bundle** from the `ce-rca-skill` repo (never an individual sub-skill), so running any one piece refreshes everything. It self-guards: only the canonical `~/.ce-rca` install is ever rewritten (dev checkouts are a no-op), and it skips when a sub-skill is dispatched by the umbrella (the umbrella already checked). **CVR-RCA is now fully self-contained inside the bundle** — its `SKILL_DIR` no longer hardcodes `~/.cvr-rca`, and its old version-check against the separate `cvr-rca-skill` repo is replaced by the shared whole-bundle guard. No sub-skill points at its own former repo for updates or skill files anymore. **(2) One command for install AND update.** `INSTALL.md` now **auto-detects** at Step 0: an **existing** install takes a lean **update** path (bump the version via the guard, then a sanity check that re-runs onboarding/command-registration **only if a check fails**) and stops; a **fresh** machine runs the full install (download → prerequisites → sign-in → register → verify). Users keep pasting the **same `INSTALL.md` command** for both — there is no separate update command to share.
+
+Also folded in: **CE Health Top-TGID RPC now multiplies by completion rate** — `RPC = S2O × CR × AOV × TR` (was `S2O × AOV × TR`). S2O counts gross orders and AOV is gross, so CR (completion = completed/gross GBV) nets out cancellations before TR, matching CE Health's canonical net-revenue identity (`traffic × cvr × aov × completion × take_rate`).
+
+### Blast radius
+- **New:** `scripts/update_guard.sh`. **Edited:** `INSTALL.md` (Step-0 auto-detect → lean update path vs full install), `skills/cvr-rca/SKILL.md` (SKILL_DIR + version-check → guard), `skills/{ce-context,perf-audit,ce-health}/SKILL.md` (first-step guard), `skills/ce-health/ce_health.py` (RPC × CR), `README.md`, `VERSION`, `CHANGELOG.md`, `SKILL.md` (changelog row). The `/ce-rca` umbrella's existing inline update block is unchanged (same logic as the guard). No `compose.py` / renderer / report-contract change.
+
+---
+
 ## [v2.56.3] — 2026-06-23 — Installer: per-command call-outs + explicit Slack-MCP step; dependency audit
 
 **Summary:** Made the installer fully self-contained on *what the skill needs* and *how to use it*. The "how to use" brief now lists **all five commands with a one-liner + a concrete example each** (`/ce-rca`, `/ce-context`, `/cvr-rca`, `/perf-audit`, `/ce-health` — `/ce-rca` flagged as the umbrella, the rest standalone). Added an explicit **optional Slack-MCP step** in Step 2: it's the one dependency `onboarding.sh` can't set up (a Claude Code connector, not a CLI tool), so the install now calls it out + how to connect it (any Slack MCP; auto-detected by tool name; gracefully skipped if absent). Confirmed via audit that **BigQuery + Drive (both via onboarding) + optional Sheets + optional Slack MCP are the skill's *only* external dependencies** — no others. Also confirmed the obsolete `~/.claude/settings.json` Drive-MCP-connector allow-rule is **gone** (no longer needed since Drive moved to the gcloud account token in v2.56.0). Minor: a stale "the connector is create-only" in SKILL.md Step 5 → "the uploader is create-only".

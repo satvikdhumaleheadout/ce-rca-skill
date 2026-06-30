@@ -1370,44 +1370,28 @@ subfolder-first, root-fallback), so the Step-5 follow-up re-compose still finds
 everything, and older flat runs still compose unchanged. Do this quietly — it is
 plumbing, not something to narrate.
 
-**4g. Archive the run to the team Shared Drive (automatic — `scripts/drive_sync.py`).**
-After organizing (4f), archive the finished run to the central **Google Shared Drive** so every
-run accumulates in one place for skill-improvement review and easy sharing. This uses the
-first-party uploader `scripts/drive_sync.py` — the user's own gcloud **ADC** + the Drive API
-(`drive.file` scope), **not** the Drive MCP connector. The connector embeds file bytes in the
-tool call, which the harness caps, so it cannot carry `report.html` (a few hundred KB); the script
-moves bytes straight from disk to Drive with **no model context involved** and **no size limit**.
-Run it once (from the **main agent** — one deterministic call):
+**4g. The run is archived to the team Shared Drive automatically — verify, don't run it.**
+Archival is no longer a step you run — `compose.py` (Step 4d) mirrors every composed `report.html`
+to the central **Google Shared Drive** itself, as a guaranteed side-effect of writing the report, so
+it can **never be skipped**. It creates a per-run subfolder under the Shared Drive
+(`CE_RCA_DRIVE_PARENT` env / default `0AONjDQrW9gVvUk9PVA`), uploads `report.html` (browsable) **and**
+a zip of the whole run (8 MB guard drops `data/stage*.json`), and records the folder in
+**`<run_dir>/logs/_drive_run_id.json`**. It is **idempotent** — a re-compose (e.g. after a promoted
+follow-up) reuses that same folder and refreshes `report.html`, never a duplicate. The uploader is
+the first-party `scripts/drive_sync.py` (gcloud account token + Drive API; no bytes through any model
+context), set up once by `scripts/onboarding.sh`.
 
-```bash
-python3 "$SKILL_DIR/scripts/drive_sync.py" --run-dir "<run_dir>"
-```
-
-It creates a per-run subfolder `<run-dir basename>-<6-hex>` (random suffix → two people running the
-same CE+window stay distinguishable) under the central Shared Drive
-(`CE_RCA_DRIVE_PARENT` env / `--parent-folder-id`, default `0AONjDQrW9gVvUk9PVA`), uploads
-`report.html` (browsable, no Doc conversion) **and** a zip of the whole run (8 MB guard drops
-`data/stage*.json` if oversized), then prints `DRIVE_RUN_ID=<id>` + `folder_url=<url>` + `zip_bytes`.
-
-**Record `DRIVE_RUN_ID` + the folder URL in `logs/_run_log.md`** (Step 5 reuses the id so feedback /
-follow-ups land in the **same** folder), then tell the user where it synced. To recover or share a
-past run later: `python3 "$SKILL_DIR/scripts/drive_sync.py" --recover --run-name "<ce-or-date>"`.
-
-**Setup + graceful skip.** The upload needs the one-time `scripts/onboarding.sh` (grants gcloud ADC
-a Drive scope + installs the Python deps — see INSTALL.md). The script is a named CLI doing a normal
-authenticated upload with the user's own creds, so it is **not** the data-exfiltration shape a safety
-classifier blocks, and **no base64 ever enters a context window**. **Graceful (mirror the Slack
-rule):** if `drive_sync.py` exits non-zero (no ADC / missing Drive scope / deps absent / API error),
-write `Drive sync unavailable — run scripts/onboarding.sh` to `logs/_run_log.md` and **continue —
-never block**. The local report from Step 4e is the deliverable regardless. It is **create-only** —
-never updates or deletes a Drive file.
+**Your only job at 4g:** read `<run_dir>/logs/_drive_run_id.json` and give the user its `folder_url`.
+If that file is **absent** (compose printed "Drive archival skipped"), Drive isn't set up — tell the
+user the report is saved locally and archival turns on once they run `scripts/onboarding.sh`; never
+block. To list/share past runs: `python3 "$SKILL_DIR/scripts/drive_sync.py" --recover --run-name "<ce-or-date>"`.
 
 ---
 
 ## Step 5 — Follow-ups (the playground)
 
 The report is not the end of the conversation — it's a **context-rich playground**.
-After 4e (and the optional Step-4g archive offer), invite the analyst to ask follow-up
+After 4e (the run already auto-archived at 4g), invite the analyst to ask follow-up
 questions **in this same session**, and handle each one per **`references/followup_guide.md`**.
 
 **Capture follow-ups + feedback — and sync them to the run's Drive folder.** The closing invite
@@ -1424,25 +1408,31 @@ to remember:
 - A message starting with **`feedback:`** is always feedback (soft shortcut — never required).
 
 **On feedback** → append to `<run_dir>/feedback.md` (a category if one is obvious + the detail +
-timestamp + CE/window) and **immediately upload `feedback.md`** into the run's Drive subfolder via
-the same uploader's single-file mode:
+timestamp + CE/window) and **immediately upload `feedback.md`** into the run's Drive subfolder. Read
+the folder id from the sidecar `compose.py` wrote at 4g, then upload via single-file mode:
 
 ```bash
-python3 "$SKILL_DIR/scripts/drive_sync.py" --file "<run_dir>/feedback.md" --into-folder-id "<DRIVE_RUN_ID>"
+DRIVE_RUN_ID=$(python3 -c "import json,sys;print(json.load(open('<run_dir>/logs/_drive_run_id.json'))['DRIVE_RUN_ID'])" 2>/dev/null)
+[ -n "$DRIVE_RUN_ID" ] && python3 "$SKILL_DIR/scripts/drive_sync.py" --file "<run_dir>/feedback.md" --into-folder-id "$DRIVE_RUN_ID"
 ```
 
-Graceful: no `DRIVE_RUN_ID` (Drive sync was skipped at 4g) / non-zero exit → keep the local file and
-skip the upload silently.
+Graceful: no sidecar (Drive wasn't configured at 4g) / non-zero exit → keep the local file and skip
+the upload silently.
 
 **On follow-ups** → answer per `references/followup_guide.md` (below) and append each question + your
-answer to `<run_dir>/followup.md`. **Do not upload per follow-up** — the uploader is create-only,
-so per-turn uploads just pile up duplicate versions. When the user **winds down** (a closing /
-satisfied message) or **explicitly asks**, offer **once**: *"Save this session's follow-ups to the
-team Drive folder?"* → on yes, upload `followup.md` into the run's Drive subfolder with the same
-single-file call (`drive_sync.py --file "<run_dir>/followup.md" --into-folder-id "<DRIVE_RUN_ID>"`).
-Ask once, never per turn; if declined or the session just ends, nothing breaks (report + feedback
-are already safe). The enriched `report.html` (with promoted follow-ups) stays **local** — it is not
-re-uploaded (the uploader is create-only; the Drive copy is the as-delivered report + these logs).
+answer to `<run_dir>/followup.md`. **Do not upload per follow-up.** When the user **winds down** (a
+closing / satisfied message) or **explicitly asks**, offer **once**: *"Save this session's follow-ups
+to the team Drive folder?"* → on yes, upload `followup.md` into the run's Drive subfolder (read the
+folder id from the sidecar, same as feedback):
+
+```bash
+DRIVE_RUN_ID=$(python3 -c "import json;print(json.load(open('<run_dir>/logs/_drive_run_id.json'))['DRIVE_RUN_ID'])" 2>/dev/null)
+[ -n "$DRIVE_RUN_ID" ] && python3 "$SKILL_DIR/scripts/drive_sync.py" --file "<run_dir>/followup.md" --into-folder-id "$DRIVE_RUN_ID"
+```
+
+Ask once, never per turn; if declined or the session just ends, nothing breaks. **Promoting** a
+follow-up into the report re-runs `compose.py`, which **automatically refreshes `report.html` in the
+same Drive folder** (idempotent — no new folder), so the enriched report stays in sync with no extra step.
 
 Read `references/followup_guide.md` now if you haven't; the essentials:
 
@@ -1538,6 +1528,8 @@ Summary (Step 3, downstream)  ◄── reads ALL finished tabs → cross-refere
 
 | # | Date | Changes |
 | --- | --- | --- |
+| m096 | 2026-06-23 | **Enforced Drive archival + self-healing onboarding Python/gcloud (v2.58.0).** Two GM-reliability fixes. **(1) Archival can no longer be skipped:** `compose.py` now mirrors every composed `report.html` to the team Shared Drive automatically (new importable `drive_sync.auto_archive()`) — it was a model-remembered "Step 4g" the orchestrator sometimes jumped past (screenshot evidence). **Idempotent** via a per-run sidecar `logs/_drive_run_id.json` (re-compose reuses the same folder + refreshes report.html, no duplicates; `drive_sync.py` previously made a fresh random-suffix folder every call). **Graceful** (silent no-op if Drive unset; `CE_RCA_NO_DRIVE` opt-out). Step 4g → verify-the-sidecar note; Step 5 feedback/follow-up uploads read the folder id from the sidecar; promoting a follow-up re-composes → Drive report auto-refreshes. **(2) Onboarding self-heals Python:** recent gcloud needs Python ≥3.11 but macOS defaults to 3.9 → `onboarding.sh` dead-ended telling the user to set `CLOUDSDK_PYTHON` + re-run (useless under Claude Code). Now it detects a ≥3.11 interpreter (or `brew install python@3.12`, or gcloud's bundled Python), sets+persists `CLOUDSDK_PYTHON` & the SDK PATH to the shell rc, installs the previously-**missing** `google-cloud-bigquery` (CE Health engine import) PEP 668-safe, and emits status lines (`PYTHON_FIXED`/`BQ_OK`/`DEPS_OK`/`NEEDS_ACCESS`). Blast radius: `scripts/drive_sync.py`, `scripts/compose.py`, `scripts/onboarding.sh`, `SKILL.md` (Step 4g/5 + this row), `VERSION`, `CHANGELOG.md`. No renderer / report-contract change; plugin copy untouched. |
+| m095 | 2026-06-23 | **Sub-skills self-update the whole bundle + a dedicated lean update flow (v2.57.0).** Until now only the `/ce-rca` umbrella ran the "stay on latest" check — a standalone `/ce-context`, `/cvr-rca`, `/perf-audit` or `/ce-health` could run a **stale** bundle. New shared guard **`scripts/update_guard.sh`** is now the **first step of all four sub-skills** (the umbrella keeps its existing inline block — identical logic). It always updates the **entire `~/.ce-rca` bundle** from the `ce-rca-skill` repo, never an individual sub-skill, so running any one piece refreshes everything; self-guards on the canonical install (dev checkouts → `SKIPPED dev`) and skips when dispatched by the umbrella (`orchestration.json` present → `SKIPPED dispatched`). **CVR-RCA made fully self-contained:** `SKILL_DIR` no longer hardcodes `~/.cvr-rca`, and its old `cvr-rca-skill`-repo version-check (with `MIN_VERSION` soft-warn) is replaced by the shared whole-bundle guard — no sub-skill points at its own former repo anymore. **One command for install AND update:** `INSTALL.md` now **auto-detects** at Step 0 — an existing install runs a lean **update** path (version-bump via the guard + a sanity check that re-runs onboarding/command-registration **only if it fails**) then stops; a fresh machine runs the full install. Users keep pasting the **same** `INSTALL.md` command for both; no separate update command (the earlier standalone `UPDATE.md` was folded in and removed). Also folded in: **CE Health Top-TGID RPC × completion rate** — `RPC = S2O × CR × AOV × TR` (was `S2O × AOV × TR`); CR nets out cancellations before TR, matching the canonical `traffic × cvr × aov × completion × take_rate` identity. Blast radius: **new** `scripts/update_guard.sh`; `INSTALL.md` (Step-0 branch), `skills/cvr-rca/SKILL.md`, `skills/{ce-context,perf-audit,ce-health}/SKILL.md`, `skills/ce-health/ce_health.py`, `README.md`, `VERSION`, `CHANGELOG.md`, `SKILL.md` (this row). No `compose.py` / renderer / report-contract change. |
 | m094 | 2026-06-23 | **Installer — per-command call-outs + explicit Slack-MCP step; dependency audit (v2.56.3).** The "how to use" brief now lists **all five commands with a one-liner + concrete example each** (`/ce-rca` umbrella; `/ce-context`, `/cvr-rca`, `/perf-audit`, `/ce-health` standalone). Added an explicit **optional Slack-MCP step** in INSTALL Step 2 — the one dependency `onboarding.sh` can't set up (a Claude Code connector, not a CLI tool); any Slack MCP works (auto-detected by tool name), gracefully skipped if absent. Audit confirmed the skill's **only** external deps are BigQuery + Drive (onboarding) + optional Sheets (ADC) + optional Slack MCP — nothing else — and that the obsolete `~/.claude/settings.json` Drive-MCP allow-rule is gone (Drive moved to the account token in v2.56.0, so no grant is needed). Minor: stale "connector is create-only" → "uploader is create-only" in Step 5. Blast radius: `INSTALL.md`, `SKILL.md` (this row + 1-word fix), `VERSION`, `CHANGELOG.md`. No script / engine / sub-skill / contract change. |
 | m093 | 2026-06-23 | **Lean installer — front-load "check & solve prerequisites" (v2.56.2).** `INSTALL.md` deferred the only real setup instruction to the Step-6 brief, buried prereq checks in a 135-line Step 1, and duplicated the onboarding paste-prompt **3×**. Restructured: the installer now **runs `onboarding.sh` directly** as Step 2 (right after the bundle download + completeness check), so SDK install + BigQuery/Drive sign-in happen *during* install — **zero paste-prompts** (onboarding is conditional → instant no-op on updates). Optional/reference prose (BigQuery troubleshooting, Sheets, Slack-MCP, Drive scope/recover) collapsed into a short **"Optional & troubleshooting" appendix**. New order: detect → download & verify → prerequisites (onboarding) → register → runs folder → confirm. Graceful: if onboarding can't finish, install still completes and the Step-0 runtime preflight re-prompts. Blast radius: `INSTALL.md`, `VERSION`, `CHANGELOG.md`, `SKILL.md` (this row). No script / engine / renderer / `compose.py` / sub-skill / contract change. |
 | m092 | 2026-06-23 | **Step-0 setup preflight — clear "run onboarding" instead of a cryptic mid-run failure (v2.56.1).** A GM who runs `/ce-rca` before completing the one-time `onboarding.sh` used to hit an opaque BigQuery error partway through. Step 0 now opens with **0-pre**: a 1-row `bq` check (`SELECT 1`) before resolving the CE or asking anything. `BQ_OK` → continue (optionally probe Drive via `drive_sync.py --recover` and note it'll skip if unset — Drive is non-blocking). `BQ_MISSING` → **stop immediately** and hand the user the exact copy-paste setup prompt (run `bash ~/.ce-rca/scripts/onboarding.sh`), then end the turn — no half-run. The skill does **not** run onboarding itself (it needs the user's interactive browser sign-in); it points them to the prompt, which is a no-op if already set up. Blast radius: `SKILL.md` (Step 0 + this row), `CHANGELOG.md`, `VERSION`. No script / engine / renderer / `compose.py` / sub-skill / contract change. |

@@ -1,8 +1,8 @@
-# CE-RCA Skill Installer
+# CE-RCA — Install / Update (one command)
 
-You are Claude. A user has asked you to install or update the CE-RCA master skill
-from this file. **Execute every step below in order, narrating each action as you go.
-Do not ask for confirmation between steps — just do it and report.**
+You are Claude. A user pasted this file to set up CE-RCA. **The same command installs OR
+updates** — this file auto-detects which at Step 0 and follows the matching path. Execute in
+order, narrate each action, and don't ask for confirmation between steps.
 
 CE-RCA is a **self-contained bundle**: it orchestrates four sub-skills (CE Health, CE
 Context, CVR-RCA, perf-audit) vendored inside it under `skills/`. You install **one
@@ -10,7 +10,7 @@ thing** and everything is there — no separate companion installs, no path conf
 
 ---
 
-## Step 0 — Detect: fresh install or update?
+## Step 0 — Detect: fresh install or already installed?
 
 ```bash
 if [ -d "$HOME/.ce-rca" ]; then
@@ -20,10 +20,44 @@ else
 fi
 ```
 
-- Fresh → "No existing install found. Installing CE-RCA now…"
-- Update → "Found CE-RCA v`<version>`. Updating to latest…"
+- **`existing:<version>`** → this is an **update**. Say "Found CE-RCA v`<version>`. Updating…",
+  then do **§ Update** below and **STOP — do not run the Fresh-install steps.**
+- **`fresh`** → say "No existing install found. Installing CE-RCA now…" and go to
+  **§ Fresh install (Steps 1–5)**.
 
 ---
+
+## § Update (existing install) — version-bump + sanity check only
+
+An update must **not** re-run the whole install. Bring the bundle to the latest version, then
+only fix a prerequisite if it's actually broken.
+
+**U1 — Update the version (whole bundle, from the repo).** Run folders under
+`~/Documents/CE RCA Runs/` are never touched.
+```bash
+bash ~/.ce-rca/scripts/update_guard.sh
+```
+- **`UPDATED <old> <new>`** → "CE-RCA updated v`<old>` → v`<new>`."
+- **`CURRENT <v>`** → "Already on the latest version (v`<v>`)."
+- **`OFFLINE <v>`** → "Couldn't reach GitHub (3s timeout); you're on v`<v>`. Try again later."
+> If `scripts/update_guard.sh` is missing (a pre-guard install), run the Fresh-install **Step 1**
+> download once to refresh the bundle, then continue here.
+
+**U2 — Sanity-check prerequisites (only fix what's broken).**
+```bash
+bq query --use_legacy_sql=false --project_id=headout-analytics --format=none 'SELECT 1' </dev/null >/dev/null 2>&1 && echo "BQ_OK" || echo "BQ_FAIL"
+for c in ce-rca ce-context cvr-rca perf-audit ce-health; do [ -f "$HOME/.claude/commands/$c.md" ] && echo "✓ $c" || echo "✗ $c"; done
+```
+- **`BQ_FAIL`** → a prerequisite regressed. Re-run the idempotent setup `bash ~/.ce-rca/scripts/onboarding.sh`, then re-run the smoke query. **`BQ_OK`** → skip onboarding.
+- Any command **`✗`** → re-run the Fresh-install **Step 3** registration block (it rewrites all five command files). All **`✓`** → skip.
+
+**U3 — Confirm.** `cat ~/.ce-rca/VERSION`, then give the user **one line** with only what
+changed (e.g. *"Updated v2.56.3 → v2.57.0; prerequisites and commands already in place."*). Do
+**not** print the full "how to use" brief on an update. **Done — STOP here; skip everything below.**
+
+---
+
+## § Fresh install (Steps 1–5) — run these only when Step 0 said `fresh`
 
 ## Step 1 — Download & verify the bundle
 

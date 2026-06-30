@@ -492,6 +492,21 @@ def main():
     output.write_text(html, encoding="utf-8")
     print(f"Composite report written → {output}")
 
+    # Deterministic archival: every composed report is mirrored to the team Shared
+    # Drive automatically, so it never depends on the orchestrator remembering a step.
+    # Idempotent (a re-compose reuses the same per-run folder) and graceful — if Drive
+    # isn't set up it's a silent no-op and the local report is unaffected.
+    try:
+        import os
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from drive_sync import auto_archive
+        url = auto_archive(str(output.parent))
+        print(f"Archived to Drive → {url}" if url
+              else "Drive archival skipped (not configured, opted out, or no report).")
+    except Exception as e:  # noqa: BLE001 — archival must never break the report
+        print(f"Drive archival skipped: {e}")
+
 
 if __name__ == "__main__":
     main()

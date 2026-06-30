@@ -14,15 +14,17 @@ description: >
 
 ## Before you begin
 
-Derive the skill directory from the path of this SKILL.md file you just read.
-For example, if you read it from `~/.cvr-rca/SKILL.md`, then:
+Derive the skill directory from the path of this SKILL.md you just read. This is the
+copy **vendored inside the CE-RCA bundle**, so it lives at `<bundle>/skills/cvr-rca/`
+(e.g. `~/.ce-rca/skills/cvr-rca/`):
 
 ```bash
-SKILL_DIR=~/.cvr-rca
+SKILL_DIR="<absolute dir this SKILL.md was read from>"   # e.g. ~/.ce-rca/skills/cvr-rca
 ```
 
-If the user has a custom install location, use that path instead. The variable
-must point to the directory that contains this file.
+The variable must point to the directory that contains this file. CVR-RCA is **not a
+separate install** — the shared engines, renderers and references live at the bundle root,
+reached via `$SKILL_DIR/../../scripts/` and `$SKILL_DIR/../../references/`.
 
 **Reference files are loaded per phase, not upfront.** When a phase reads a
 reference, it reads the **whole file** — splitting into per-section reads
@@ -37,29 +39,24 @@ Per-phase reads:
   `references/report_structure.md`, both fully.
 - **Quality evaluation** (on-demand, not part of the run) — read `evals/evaluator.md`.
 
-### Version check
+### Stay on the latest version — do this first
 
-Run this before proceeding:
+CVR-RCA ships **inside the CE-RCA bundle** and is never updated on its own — running it
+refreshes the **whole** bundle from the `ce-rca-skill` repo. Run the shared guard (two levels
+up). It self-guards: only the canonical `~/.ce-rca` install is ever rewritten; a dev checkout
+or an umbrella-dispatched run is a no-op.
 
 ```bash
-INSTALLED=$(cat "$SKILL_DIR/VERSION" 2>/dev/null || echo "0.0.0")
-LATEST=$(curl -s --max-time 3 \
-  https://raw.githubusercontent.com/satvikdhumaleheadout/cvr-rca-skill/main/VERSION \
-  2>/dev/null || echo "unknown")
-MIN=$(curl -s --max-time 3 \
-  https://raw.githubusercontent.com/satvikdhumaleheadout/cvr-rca-skill/main/MIN_VERSION \
-  2>/dev/null || echo "unknown")
+bash "$SKILL_DIR/../../scripts/update_guard.sh" "<run_dir if you were dispatched by /ce-rca, else omit>"
 ```
 
-- If `LATEST` or `MIN` is `unknown` (no internet): continue silently.
-- If `INSTALLED` < `MIN`: **stop**. Tell the user:
-  > "Your CVR-RCA skill (v`INSTALLED`) is below the minimum required version
-  > (v`MIN`). Please update before running: see `~/.cvr-rca/INSTALL.md`."
-- If `INSTALLED` < `LATEST` (but ≥ `MIN`): continue, then append a soft note at
-  the end of Step 1 output:
-  > "A newer version of CVR-RCA (v`LATEST`) is available. Run the update steps
-  > in `~/.cvr-rca/INSTALL.md` when convenient."
-- If `INSTALLED` = `LATEST`: continue silently.
+Read the single-word result:
+- **`UPDATED <old> <new>`** — the bundle was refreshed in place (run folders under
+  `~/Documents/CE RCA Runs/` are untouched). Tell the user one line ("CE-RCA updated
+  v`<old>` → v`<new>`") and **re-read this skill's freshly-installed file**
+  (`~/.ce-rca/skills/cvr-rca/SKILL.md`), continuing from the top.
+- **`CURRENT` / `OFFLINE` / `SKIPPED …`** — proceed on the installed version. Never block on
+  the network (3-second timeout).
 
 Each file owns a distinct concern:
 

@@ -11,6 +11,10 @@ scripts/__pycache__/
 # Temp output from the skill
 /tmp/
 
+# Local CE-RCA run outputs (may contain CE data) — never commit
+CE RCA Runs/
+runs/
+
 # Internal planning (not for distribution)
 thoughts/
 

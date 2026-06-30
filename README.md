@@ -62,10 +62,18 @@ Claude runs the installer: downloads the bundle to `~/.ce-rca/`, registers the
 `/ce-rca` command, checks prerequisites (`bq`, Python 3.9+), and creates the runs
 folder. Then `/ce-rca <CE>`.
 
-**Always-latest, automatically.** At the start of every run the skill checks the
-published `VERSION` and, if the local bundle is behind, **silently re-downloads the
-latest and continues** — you never run a stale version, and there's no minimum-version
-gate. Offline runs proceed on the installed bundle.
+**Always-latest, automatically.** At the start of **every** run — the `/ce-rca` umbrella
+**and** any standalone sub-skill (`/ce-context`, `/cvr-rca`, `/perf-audit`, `/ce-health`) —
+the skill checks the published `VERSION` and, if the local bundle is behind, **silently
+re-downloads the whole bundle and continues**. Running any single piece updates the **entire**
+CE-RCA, so you can never run a stale version from a sub-skill. No minimum-version gate; offline
+runs proceed on the installed bundle.
+
+**One command for install *and* update.** To update manually, paste the **same** command as
+install (above) — `INSTALL.md` auto-detects: if CE-RCA is already installed it does a lean
+**update only** (bumps the version, and re-runs sign-in / command registration *only if a
+sanity check finds them missing*); if it's a fresh machine it does the full install. No
+separate update command to remember.
 
 ## Bundled sub-skills
 

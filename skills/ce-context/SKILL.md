@@ -39,8 +39,24 @@ Set `SKILL_DIR` to the absolute directory **this** SKILL.md was read from — ev
 `$SKILL_DIR/...` reference (the vendored guides, the renderer) depends on it.
 
 ```bash
-SKILL_DIR="<absolute dir this SKILL.md was read from>"
+SKILL_DIR="<absolute dir this SKILL.md was read from>"   # e.g. ~/.ce-rca/skills/ce-context
 ```
+
+### Stay on the latest version — do this first
+
+CE Context ships **inside the CE-RCA bundle** and is never updated on its own — running it
+refreshes the **whole** bundle from the `ce-rca-skill` repo. Run the shared guard (two levels
+up); it self-guards (canonical `~/.ce-rca` install only; dev checkouts and umbrella-dispatched
+runs are a no-op):
+
+```bash
+bash "$SKILL_DIR/../../scripts/update_guard.sh" "<run_dir if you were dispatched by /ce-rca, else omit>"
+```
+
+- **`UPDATED <old> <new>`** — bundle refreshed in place (run folders untouched). Tell the user
+  one line ("CE-RCA updated v`<old>` → v`<new>`") and **re-read `~/.ce-rca/skills/ce-context/SKILL.md`**,
+  continuing from the top.
+- **`CURRENT` / `OFFLINE` / `SKIPPED …`** — proceed on the installed version.
 
 The renderer lives at the **CE-RCA bundle** `scripts/render_ce_context.py`. When
 dispatched by `/ce-rca`, that is `<ce-rca>/scripts/render_ce_context.py`; the

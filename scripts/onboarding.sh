@@ -34,13 +34,86 @@ fail() { printf '❌ %s\n' "$*"; }
 
 # ── State detectors (each is quiet; true = already working) ───────
 have_gcloud() { command -v gcloud >/dev/null 2>&1; }
-have_deps()   { python3 -c "import googleapiclient, google.auth" >/dev/null 2>&1; }
+# Engine deps include google-cloud-bigquery (CE Health imports google.cloud.bigquery).
+have_deps()   { python3 -c "import googleapiclient, google.auth, google.cloud.bigquery" >/dev/null 2>&1; }
 bq_ok()       { command -v bq >/dev/null 2>&1 && \
                 bq query --use_legacy_sql=false --project_id="$PROJECT" --format=none 'SELECT 1' \
                   </dev/null >/dev/null 2>&1; }
 drive_ok()    { python3 "$SCRIPT_DIR/drive_sync.py" --recover --run-name "__onboarding_check__" \
                   >/dev/null 2>&1; }
 adc_ok()      { gcloud auth application-default print-access-token >/dev/null 2>&1; }
+
+# ── Python self-heal helpers ──────────────────────────────────────
+# Recent gcloud needs Python ≥3.11; macOS often defaults python3 to 3.9, which makes
+# gcloud/bq fail. These find or install a compatible interpreter and point gcloud at it
+# AUTOMATICALLY — the user is never asked to set an env var or re-run anything.
+py_ver_ok() { "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)' >/dev/null 2>&1; }
+
+pick_python() {  # echo the path of the first Python ≥3.11 found; nothing if none
+  local c root
+  if [ -n "${CLOUDSDK_PYTHON:-}" ] && py_ver_ok "$CLOUDSDK_PYTHON"; then echo "$CLOUDSDK_PYTHON"; return; fi
+  for c in python3.14 python3.13 python3.12 python3.11; do
+    if command -v "$c" >/dev/null 2>&1 && py_ver_ok "$(command -v "$c")"; then command -v "$c"; return; fi
+  done
+  for c in /opt/homebrew/bin/python3.14 /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 \
+           /usr/local/bin/python3.14 /usr/local/bin/python3.13 /usr/local/bin/python3.12 /usr/local/bin/python3.11; do
+    if [ -x "$c" ] && py_ver_ok "$c"; then echo "$c"; return; fi
+  done
+  if command -v pyenv >/dev/null 2>&1; then
+    root="$(pyenv root 2>/dev/null)"
+    for c in "$root"/versions/3.1[1-9]*/bin/python3; do
+      [ -x "$c" ] && py_ver_ok "$c" && { echo "$c"; return; }
+    done
+  fi
+  for c in "$HOME"/google-cloud-sdk/platform/bundledpython*/bin/python3; do
+    [ -x "$c" ] && py_ver_ok "$c" && { echo "$c"; return; }
+  done
+}
+
+# Append a line to the user's shell rc files once (idempotent) so a fix survives into
+# future shells (Claude Code's Bash tool starts shells from the user's profile).
+persist_line() {
+  local line="$1" rc
+  for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    { [ -e "$rc" ] || touch "$rc" 2>/dev/null; } || continue
+    grep -qF "$line" "$rc" 2>/dev/null || printf '\n# added by CE-RCA onboarding\n%s\n' "$line" >> "$rc"
+  done
+}
+
+# Make gcloud start (needs Python ≥3.11): find one → else brew install → else gcloud's
+# bundled Python; set CLOUDSDK_PYTHON for this run AND persist it; re-check. Returns 1
+# only if no compatible Python could be found or installed.
+ensure_gcloud_python() {
+  gcloud version >/dev/null 2>&1 && return 0
+  say "→ gcloud needs Python ≥3.11 (default python3 is older). Resolving automatically…"
+  local py; py="$(pick_python)"
+  if [ -z "$py" ] && [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+    say "→ Installing Python 3.12 via Homebrew…"; brew install python@3.12 >/dev/null 2>&1 || true
+    py="$(pick_python)"
+  fi
+  if [ -z "$py" ]; then
+    say "→ Installing gcloud's bundled Python…"
+    [ -f /tmp/gcloud_install.sh ] || curl -sSL https://sdk.cloud.google.com -o /tmp/gcloud_install.sh 2>/dev/null || true
+    [ -f /tmp/gcloud_install.sh ] && bash /tmp/gcloud_install.sh --disable-prompts --install-dir="$HOME" >/dev/null 2>&1 || true
+    py="$(pick_python)"
+  fi
+  if [ -n "$py" ]; then
+    export CLOUDSDK_PYTHON="$py"
+    persist_line "export CLOUDSDK_PYTHON=\"$py\""
+    printf 'PYTHON_FIXED=%s\n' "$py"
+    gcloud version >/dev/null 2>&1 && { ok "gcloud now runs on Python ≥3.11 ($py)"; return 0; }
+  fi
+  return 1
+}
+
+# Install the engine's Python deps, PEP 668-safe (newer Python/Homebrew blocks plain pip).
+install_deps() {
+  local pkgs="google-api-python-client google-auth google-cloud-bigquery"
+  python3 -m pip install --quiet $pkgs >/dev/null 2>&1 && return 0
+  python3 -m pip install --quiet --user $pkgs >/dev/null 2>&1 && return 0
+  python3 -m pip install --quiet --break-system-packages $pkgs >/dev/null 2>&1 && return 0
+  return 1
+}
 
 say "──────────────────────────────────────────────────────────────"
 say "  CE-RCA onboarding (only fixes what's missing)"
@@ -78,14 +151,22 @@ else
   fi
 fi
 
-# ── 2. Python deps — only if missing ──────────────────────────────
+# gcloud is present — make sure it can actually START (it needs Python ≥3.11). This
+# self-heals the common "gcloud requires Python 3.x" failure without asking the user.
+ensure_gcloud_python || warn "gcloud still can't start — install Python ≥3.11 (e.g. 'brew install python@3.12') and re-run."
+# Persist the SDK PATH for future shells when installed under \$HOME (no-admin install).
+[ -d "$HOME/google-cloud-sdk/bin" ] && persist_line 'export PATH="$HOME/google-cloud-sdk/bin:$PATH"'
+
+# ── 2. Python deps (incl. google-cloud-bigquery for the CE Health engine) ──
 if have_deps; then
   ok "Python deps present"
 else
-  say "→ Installing Python deps (google-api-python-client, google-auth)…"
-  pip3 install --quiet google-api-python-client google-auth \
-    && ok "Python deps installed" \
-    || warn "pip install failed — run: pip3 install google-api-python-client google-auth"
+  say "→ Installing Python deps (google-api-python-client, google-auth, google-cloud-bigquery)…"
+  if install_deps && have_deps; then
+    ok "Python deps installed"
+  else
+    warn "Could not install Python deps automatically — run: python3 -m pip install --user google-api-python-client google-auth google-cloud-bigquery"
+  fi
 fi
 
 # ── 3a. Account sign-in (bq CLI + Drive) — only if bq OR Drive failing ──
@@ -112,12 +193,14 @@ fi
 gcloud config set project "$PROJECT" >/dev/null 2>&1 || true
 gcloud auth application-default set-quota-project "$PROJECT" >/dev/null 2>&1 || true
 
-# ── 5. Re-verify and report ───────────────────────────────────────
+# ── 5. Re-verify and report (machine-readable status lines for Claude) ────
 say "→ Verifying…"
-if bq_ok; then ok "BigQuery reachable — CE-RCA can run."
-else fail "BigQuery still failing — you likely lack access to '$PROJECT'. Request it, then re-run."; fi
+if bq_ok; then ok "BigQuery reachable — CE-RCA can run."; echo "BQ_OK"
+else fail "BigQuery still failing — you likely lack access to '$PROJECT'. Request access, then re-run."; echo "NEEDS_ACCESS"; fi
+if have_deps; then ok "Python engine deps present (incl. google-cloud-bigquery)."; echo "DEPS_OK"
+else warn "Python engine deps missing — CE Health may fail to import google.cloud.bigquery."; fi
 if drive_ok; then ok "Drive reachable — runs will archive to the team Shared Drive."
-else warn "Drive still failing — enable the Drive API on the project, or re-run and grant Drive at sign-in. (BigQuery still works; Drive archival just skips.)"; fi
+else warn "Drive still failing — re-run and grant Drive at sign-in. (BigQuery still works; Drive archival just skips.)"; fi
 
 say "──────────────────────────────────────────────────────────────"
 say "  Done. Open Claude Code and run, e.g.:  /ce-rca 243"

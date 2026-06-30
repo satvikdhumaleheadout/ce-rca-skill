@@ -44,6 +44,24 @@ pre = March). Only valid alongside `--start/--end`; both must be given together.
 
 ## Execution Steps
 
+### Step 0 (pre) — Stay on the latest version
+
+CE Health ships **inside the CE-RCA bundle** and is never updated on its own — running it
+refreshes the **whole** bundle from the `ce-rca-skill` repo. Set `SKILL_DIR` to the directory
+this SKILL.md was read from, then run the shared guard (two levels up). It self-guards: only
+the canonical `~/.ce-rca` install is ever rewritten; a dev checkout or an umbrella-dispatched
+run is a no-op.
+
+```bash
+SKILL_DIR="<absolute dir this SKILL.md was read from>"   # e.g. ~/.ce-rca/skills/ce-health
+bash "$SKILL_DIR/../../scripts/update_guard.sh" "<run_dir if you were dispatched by /ce-rca, else omit>"
+```
+
+- **`UPDATED <old> <new>`** — bundle refreshed in place (run folders untouched). Tell the user
+  one line ("CE-RCA updated v`<old>` → v`<new>`") and **re-read `~/.ce-rca/skills/ce-health/SKILL.md`**,
+  continuing from the top.
+- **`CURRENT` / `OFFLINE` / `SKIPPED …`** — proceed on the installed version (3-second timeout).
+
 ### Step 0 — Context intake (standalone only)
 
 Standalone, gather the analyst's context **up front** — it is what the per-section

@@ -1340,9 +1340,13 @@ def render_tgids_enriched(tgid_data, tgid_funnel, tgid_lt, w):
         else:
             rev_o, aov_o, cr_o, tr_o = _g(t, "rev_pri"), _g(t, "aov_pri"), _g(t, "cr_pri"), _g(t, "tr_pri")
             s2c_o, c2o_o, s2o_o = _g(f, "s2c_pri"), _g(f, "c2o_pri"), _g(f, "s2o_pri")
-        # RPC = S2O x AOV x TR (interim per select-view proxy; no revenue term).
-        rpc_cur = (s2o * aov_cur * tr_cur) if (s2o and aov_cur and tr_cur) else None
-        rpc_o = (s2o_o * aov_o * tr_o) if (s2o_o and aov_o and tr_o) else None
+        # RPC = S2O × CR × AOV × TR (net revenue per select-view). S2O counts GROSS
+        # orders (has_order_completed, before cancellations) and AOV is gross (gbv/orders),
+        # so multiply by CR (completion = completed/gross GBV) to net out cancellations
+        # before TR — matching the canonical net-revenue identity (traffic × cvr × aov ×
+        # completion × take_rate) used in the Shapley decomposition.
+        rpc_cur = (s2o * cr_cur * aov_cur * tr_cur) if (s2o and cr_cur and aov_cur and tr_cur) else None
+        rpc_o = (s2o_o * cr_o * aov_o * tr_o) if (s2o_o and cr_o and aov_o and tr_o) else None
         d_rev = dp(rev_cur, rev_o)
         d_rpc = dp(rpc_cur, rpc_o) if rpc_o else "\u2014"
         d_aov = dp(aov_cur, aov_o) if aov_o else "\u2014"

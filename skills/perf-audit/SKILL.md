@@ -14,6 +14,25 @@ Comprehensive paid-channel diagnostic for a CE. Python renders all BQ tables (in
 **Audience:** Growth analyst + GM + Perf team
 **Scope:** All paid channels. Non-paid issues detected and routed to `/ce-audit`.
 
+## Stay on the latest version — do this first
+
+Perf-Audit ships **inside the CE-RCA bundle** and is never updated on its own — running it
+refreshes the **whole** bundle from the `ce-rca-skill` repo. Set `SKILL_DIR` to the directory
+this SKILL.md was read from, then run the shared guard (two levels up). It self-guards: only
+the canonical `~/.ce-rca` install is ever rewritten; a dev checkout or an umbrella-dispatched
+run is a no-op.
+
+```bash
+SKILL_DIR="<absolute dir this SKILL.md was read from>"   # e.g. ~/.ce-rca/skills/perf-audit
+bash "$SKILL_DIR/../../scripts/update_guard.sh" "<run_dir if you were dispatched by /ce-rca, else omit>"
+```
+
+- **`UPDATED <old> <new>`** — bundle refreshed in place (run folders untouched). Tell the user
+  one line ("CE-RCA updated v`<old>` → v`<new>`") and **re-read `~/.ce-rca/skills/perf-audit/SKILL.md`**,
+  continuing from the top.
+- **`CURRENT` / `OFFLINE` / `SKIPPED …`** — proceed on the installed version (3-second timeout,
+  never blocks).
+
 ## When to Use
 
 - CE shows paid revenue decline or stagnation

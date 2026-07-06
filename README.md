@@ -92,3 +92,11 @@ tab — the run still completes.
 
 `/cvr-rca <CE>` and the perf-audit skill continue to run standalone exactly as
 before. CE-RCA is additive — the umbrella on top, not a replacement.
+
+## Maintenance: `/ce-rca-drive-sync`
+
+Runs are archived to the team Shared Drive automatically as each report is composed. If some
+older runs never synced (or you want to give feedback on past runs), run **`/ce-rca-drive-sync`**:
+it sweeps `~/Documents/CE RCA Runs/`, uploads any missing runs to Drive (each with a `reason.md`
+explaining the earlier miss), then walks you through feedback one run at a time. Idempotent and
+safe to re-run.

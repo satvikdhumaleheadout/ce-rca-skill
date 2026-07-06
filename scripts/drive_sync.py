@@ -279,6 +279,23 @@ def _refresh_report_in(svc, folder_id: str, report: str) -> None:
         ).execute()
 
 
+def find_existing_folder(svc, parent: str, basename: str):
+    """Return the Drive folder id of an already-archived run (its folder name starts
+    with the run's basename), else None — the authoritative 'is this run on Drive?'
+    check for backfill (a local sidecar may be absent on older runs)."""
+    safe = basename.replace("'", "")
+    resp = svc.files().list(
+        q=(f"'{parent}' in parents and mimeType='application/vnd.google-apps.folder' "
+           f"and trashed=false and name contains '{safe}'"),
+        fields="files(id,name)", pageSize=25,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute().get("files", [])
+    for f in resp:
+        if f["name"].startswith(basename):
+            return f["id"]
+    return None
+
+
 def auto_archive(run_dir: str, parent: str = None, max_zip_mb: float = 8.0):
     """Deterministic, idempotent archival — the importable side-effect compose.py runs
     after writing report.html. NEVER raises: on any failure (Drive not set up, auth

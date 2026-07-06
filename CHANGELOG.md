@@ -5,6 +5,20 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.59.0] — 2026-06-23 — New sub-skill `/ce-rca-drive-sync` (back-fill runs to Drive + collect feedback)
+
+**Summary:** A durable, on-demand maintenance skill for the two gaps left after v2.58.0 enforced archival: runs created **before** it that never reached the Shared Drive, and the fact that **no feedback** has been collected. Run **`/ce-rca-drive-sync`** (no CE needed):
+
+- **Phase 1 — back-fill (automated).** New `scripts/drive_backfill.py` sweeps `~/Documents/CE RCA Runs/` (override `$CE_RCA_RUNS_DIR`), **authoritatively checks Drive** per run (re-added `drive_sync.find_existing_folder()` — older runs have no sidecar), and for any run with a `report.html` not on Drive writes a **`reason.md`** (inferring the miss from `logs/_run_log.md` — skipped vs errored; the RCA transcript isn't consulted), archives it via `drive_sync.auto_archive()`, uploads `reason.md`, and writes `_backfill_summary.md`. `--dry-run` is read-only; classify-only + onboarding pointer if Drive isn't set up; never deletes.
+- **Phase 2 — feedback (interactive).** Walks runs with a `report.html` and no `feedback.md`, newest first, **one at a time** — a recall card (CE + window + headline + `file://` report link + Drive link) → chat reply → append + upload `feedback.md` into the run's Drive folder.
+
+Idempotent and safe to re-run (already-synced runs and runs with feedback are skipped). `disable-model-invocation` — explicit `/ce-rca-drive-sync` only.
+
+### Blast radius
+- **New:** `skills/ce-rca-drive-sync/SKILL.md`, `scripts/drive_backfill.py`. **Edited:** `scripts/drive_sync.py` (`find_existing_folder`), `INSTALL.md` (Step 3 command + Step 5 brief), `README.md`, `VERSION`, `CHANGELOG.md`, `SKILL.md` changelog row. No umbrella-flow / renderer / report-contract change. Plugin copy untouched.
+
+---
+
 ## [v2.58.0] — 2026-06-23 — Enforced Drive archival + self-healing onboarding (Python/gcloud)
 
 **Summary:** Two reliability fixes GMs were hitting.

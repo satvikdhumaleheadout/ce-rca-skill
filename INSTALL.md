@@ -178,9 +178,18 @@ CE the user names (write artifacts with the canonical `ce_health_report.{md,json
 into a run dir, then `~/.ce-rca/scripts/render_ce_health.py --run-dir <run_dir> --standalone`
 → report.html).
 EOF
+
+# CE-RCA Drive Sync — back-fill past runs to the team Drive + collect feedback (maintenance).
+cat > ~/.claude/commands/ce-rca-drive-sync.md << 'EOF'
+---
+description: Sync past CE-RCA runs to the team Google Drive (archive any that were missed, each with a reason) and collect feedback on them one at a time.
+---
+
+Read the skill file at: ~/.ce-rca/skills/ce-rca-drive-sync/SKILL.md and run it.
+EOF
 ```
 
-Tell the user: "Registered `/ce-rca` + the four sub-skill commands." Each points at its
+Tell the user: "Registered `/ce-rca` + the four sub-skill commands + `/ce-rca-drive-sync`." Each points at its
 vendored `SKILL.md`, so its `$SKILL_DIR/../../scripts/` references resolve to
 `~/.ce-rca/scripts/` — the shared renderers stay reachable.
 
@@ -217,6 +226,7 @@ Tell the user the installed version, then give them this **structured "how to us
 > - **`/cvr-rca <CE>`** — funnel / conversion-rate root-cause (where the funnel leaks). — e.g. `/cvr-rca 252`
 > - **`/perf-audit <CE>`** — paid-performance audit (spend, clicks, CPC, take rate, ROI). — e.g. `/perf-audit 252`
 > - **`/ce-health <CE>`** — vitals briefing (revenue, traffic, CVR, AOV, completion, take-rate, Shapley). — e.g. `/ce-health 252`
+> - **`/ce-rca-drive-sync`** — maintenance: sync any past runs that didn't reach the team Drive, and give feedback on runs one at a time. — no CE needed.
 >
 > `/ce-rca` is the umbrella (runs the other four and composes them); the rest are standalone and each
 > writes its own openable `report.html`. Default window is the last 30 days vs the prior 30.

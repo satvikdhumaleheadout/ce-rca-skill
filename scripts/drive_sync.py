@@ -296,6 +296,19 @@ def find_existing_folder(svc, parent: str, basename: str):
     return None
 
 
+def _folder_is_live(svc, folder_id: str) -> bool:
+    """True if folder_id still exists on Drive and isn't trashed. Used to guard
+    against a stale local sidecar pointing at a folder the user deleted manually —
+    without this check, auto_archive() would silently write into a trashed folder
+    and hand back a dead link instead of creating a fresh one."""
+    try:
+        meta = svc.files().get(fileId=folder_id, fields="id,trashed",
+                                supportsAllDrives=True).execute()
+        return not meta.get("trashed", False)
+    except Exception:  # noqa: BLE001 — 404 / no access / deleted → treat as not live
+        return False
+
+
 def auto_archive(run_dir: str, parent: str = None, max_zip_mb: float = 8.0):
     """Deterministic, idempotent archival — the importable side-effect compose.py runs
     after writing report.html. NEVER raises: on any failure (Drive not set up, auth
@@ -316,7 +329,7 @@ def auto_archive(run_dir: str, parent: str = None, max_zip_mb: float = 8.0):
     try:
         svc = _drive_service()
         prior = _read_sidecar(run_dir)
-        if prior:
+        if prior and _folder_is_live(svc, prior["DRIVE_RUN_ID"]):
             _refresh_report_in(svc, prior["DRIVE_RUN_ID"], report)
             return prior.get("folder_url")
         drive_run_id, view_url, _bytes, _excluded = _archive_full(svc, run_dir, parent, max_zip_mb)

@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.60.1] — 2026-07-07 — Fix stale Drive sidecar reuse in `auto_archive()`
+
+**Summary:** `/ce-rca-drive-sync`'s Phase 1 back-fill was silently writing `report.html` into **already-trashed** Drive folders instead of creating fresh ones. Root cause: `auto_archive()` trusted a run's local sidecar (`logs/_drive_run_id.json`) unconditionally — if the user manually deleted that run's Drive folder, the sidecar still pointed at the (now-trashed) folder id, `find_existing_folder()` correctly reported it missing (its query excludes trashed items), but `auto_archive()` then reused the stale sidecar anyway and handed back a dead link. Added `_folder_is_live()`, which calls `files().get(..., fields="trashed")` on the sidecar's folder id before reusing it; if trashed or gone, `auto_archive()` now falls through to creating a brand-new folder, same as a run with no sidecar at all.
+
+### Blast radius
+- **Edited:** `scripts/drive_sync.py` (new `_folder_is_live()`, guarded reuse in `auto_archive()`). No schema / report-contract change. Plugin copy untouched.
+
+---
+
 ## [v2.60.0] — 2026-06-23 — Slash commands register from one source of truth (new commands now propagate on update)
 
 **Summary:** Fixes the distribution gap where a **new** slash command (like v2.59.0's `/ce-rca-drive-sync`) shipped in the bundle but never registered for existing users — the per-run auto-update only re-downloaded files, and the update path only checked the *old* commands. Now there's a single **`scripts/register_commands.sh`** (source of truth that writes every `~/.claude/commands/*.md`), called at **install** (INSTALL.md Step 3 — replacing the 60-line inline block), on **explicit update** (INSTALL.md § Update, unconditionally), and by the **per-run auto-update** (`update_guard.sh` after a successful download, and the umbrella's in-run update block). Net effect: **add a command in `register_commands.sh` once and it lands on every user's next run automatically** — no re-install, no per-command bookkeeping. Idempotent.

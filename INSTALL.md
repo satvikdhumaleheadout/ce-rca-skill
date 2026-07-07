@@ -43,13 +43,13 @@ bash ~/.ce-rca/scripts/update_guard.sh
 > If `scripts/update_guard.sh` is missing (a pre-guard install), run the Fresh-install **Step 1**
 > download once to refresh the bundle, then continue here.
 
-**U2 — Sanity-check prerequisites (only fix what's broken).**
+**U2 — Sanity-check prerequisites + refresh commands.**
 ```bash
 bq query --use_legacy_sql=false --project_id=headout-analytics --format=none 'SELECT 1' </dev/null >/dev/null 2>&1 && echo "BQ_OK" || echo "BQ_FAIL"
-for c in ce-rca ce-context cvr-rca perf-audit ce-health; do [ -f "$HOME/.claude/commands/$c.md" ] && echo "✓ $c" || echo "✗ $c"; done
+bash ~/.ce-rca/scripts/register_commands.sh   # idempotent — (re)registers ALL commands, incl. any new in this version
 ```
 - **`BQ_FAIL`** → a prerequisite regressed. Re-run the idempotent setup `bash ~/.ce-rca/scripts/onboarding.sh`, then re-run the smoke query. **`BQ_OK`** → skip onboarding.
-- Any command **`✗`** → re-run the Fresh-install **Step 3** registration block (it rewrites all five command files). All **`✓`** → skip.
+- The command registration always runs (idempotent), so **new commands introduced by this update register automatically** — no per-command check needed.
 
 **U3 — Confirm.** `cat ~/.ce-rca/VERSION`, then give the user **one line** with only what
 changed (e.g. *"Updated v2.56.3 → v2.57.0; prerequisites and commands already in place."*). Do
@@ -119,78 +119,16 @@ BigQuery + Drive (both handled above) — there are no other MCPs or connectors 
 
 ## Step 3 — Register the commands (`/ce-rca` + the four sub-skills)
 
-The umbrella `/ce-rca` runs everything and composes the tabbed report. The four sub-skills
-are vendored inside the bundle and each can also be run **on its own** → its own openable
-`report.html`. Register a slash command for each:
+The umbrella `/ce-rca` runs everything and composes the tabbed report; the sub-skills each run
+standalone too. **All slash commands are registered by one script** — `scripts/register_commands.sh`,
+the single source of truth (add a new command there once and both install *and* update pick it up):
 
 ```bash
-mkdir -p ~/.claude/commands
-
-# Umbrella — runs CE Health → CE Context + CVR-RCA + perf-audit → one composite report.
-cat > ~/.claude/commands/ce-rca.md << 'EOF'
----
-description: CE-level Root Cause Analysis — runs CE Health, CE Context, CVR-RCA + perf-audit, composes one tabbed report.
----
-
-Read the skill file at: ~/.ce-rca/SKILL.md
-EOF
-
-# CE Context — standalone CE orientation brief (about / timeline / past RCAs / constraints / Slack).
-cat > ~/.claude/commands/ce-context.md << 'EOF'
----
-description: CE Context — standalone orientation brief for a CE (what it is, known constraints, prior RCAs, Slack). Produces its own report.html.
----
-
-Read the skill file at: ~/.ce-rca/skills/ce-context/SKILL.md and run it STANDALONE for
-the CE the user names (resolve the CE, confirm the window, and on render pass
-`--standalone` so an openable `report.html` lands in the run dir).
-EOF
-
-# CVR-RCA — standalone funnel/CVR root-cause analysis.
-cat > ~/.claude/commands/cvr-rca.md << 'EOF'
----
-description: CVR-RCA — standalone CVR / funnel root-cause analysis for a CE. Produces its own report.html.
----
-
-Read the skill file at: ~/.ce-rca/skills/cvr-rca/SKILL.md and run it STANDALONE for the
-CE the user names (it self-names a run dir and writes its own report.html).
-EOF
-
-# perf-audit — standalone paid performance audit.
-cat > ~/.claude/commands/perf-audit.md << 'EOF'
----
-description: Perf-Audit — standalone paid performance audit for a CE. Produces its own report.html.
----
-
-Read the skill file at: ~/.ce-rca/skills/perf-audit/SKILL.md and run it STANDALONE for
-the CE the user names (after the report markdown is final, render the HTML with
-`~/.ce-rca/scripts/render_perf_audit.py --run-dir <run_dir> --standalone` → report.html).
-EOF
-
-# CE Health — standalone CE briefing packet (vitals, channels, funnel, Shapley).
-cat > ~/.claude/commands/ce-health.md << 'EOF'
----
-description: CE Health — standalone CE briefing packet (vitals, channels, funnel, L12M, Shapley). Produces its own report.html.
----
-
-Read the skill file at: ~/.ce-rca/skills/ce-health/SKILL.md and run it STANDALONE for the
-CE the user names (write artifacts with the canonical `ce_health_report.{md,json}` names
-into a run dir, then `~/.ce-rca/scripts/render_ce_health.py --run-dir <run_dir> --standalone`
-→ report.html).
-EOF
-
-# CE-RCA Drive Sync — back-fill past runs to the team Drive + collect feedback (maintenance).
-cat > ~/.claude/commands/ce-rca-drive-sync.md << 'EOF'
----
-description: Sync past CE-RCA runs to the team Google Drive (archive any that were missed, each with a reason) and collect feedback on them one at a time.
----
-
-Read the skill file at: ~/.ce-rca/skills/ce-rca-drive-sync/SKILL.md and run it.
-EOF
+bash ~/.ce-rca/scripts/register_commands.sh
 ```
 
-Tell the user: "Registered `/ce-rca` + the four sub-skill commands + `/ce-rca-drive-sync`." Each points at its
-vendored `SKILL.md`, so its `$SKILL_DIR/../../scripts/` references resolve to
+Tell the user: "Registered `/ce-rca` + the four sub-skill commands + `/ce-rca-drive-sync`." Each
+command points at its vendored `SKILL.md`, so its `$SKILL_DIR/../../scripts/` references resolve to
 `~/.ce-rca/scripts/` — the shared renderers stay reachable.
 
 ---

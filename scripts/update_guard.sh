@@ -63,6 +63,9 @@ if curl -sL --max-time 60 "$ZIP_URL" -o "$TMP/bundle.zip" 2>/dev/null \
    && unzip -q -o "$TMP/bundle.zip" -d "$TMP" 2>/dev/null \
    && [ -d "$TMP/ce-rca-skill-main" ]; then
   rm -rf "$CANON" && mv "$TMP/ce-rca-skill-main" "$CANON"; rm -rf "$TMP"
+  # Re-register slash commands from the freshly-downloaded bundle so NEW commands added
+  # in this version appear automatically on the user's next run (idempotent).
+  [ -f "$CANON/scripts/register_commands.sh" ] && bash "$CANON/scripts/register_commands.sh" >/dev/null 2>&1 || true
   echo "UPDATED $INSTALLED $(cat "$CANON/VERSION" 2>/dev/null || echo "$LATEST")"
 else
   rm -rf "$TMP"; echo "OFFLINE $INSTALLED"

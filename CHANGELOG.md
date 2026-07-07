@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.60.0] — 2026-06-23 — Slash commands register from one source of truth (new commands now propagate on update)
+
+**Summary:** Fixes the distribution gap where a **new** slash command (like v2.59.0's `/ce-rca-drive-sync`) shipped in the bundle but never registered for existing users — the per-run auto-update only re-downloaded files, and the update path only checked the *old* commands. Now there's a single **`scripts/register_commands.sh`** (source of truth that writes every `~/.claude/commands/*.md`), called at **install** (INSTALL.md Step 3 — replacing the 60-line inline block), on **explicit update** (INSTALL.md § Update, unconditionally), and by the **per-run auto-update** (`update_guard.sh` after a successful download, and the umbrella's in-run update block). Net effect: **add a command in `register_commands.sh` once and it lands on every user's next run automatically** — no re-install, no per-command bookkeeping. Idempotent.
+
+### Blast radius
+- **New:** `scripts/register_commands.sh`. **Edited:** `INSTALL.md` (Step 3 → one call; § Update U2 → unconditional registration), `scripts/update_guard.sh` (register after update), `SKILL.md` (umbrella update block registers + this changelog row), `VERSION`, `CHANGELOG.md`. No umbrella-flow / renderer / report-contract change. Plugin copy untouched.
+
+---
+
 ## [v2.59.0] — 2026-06-23 — New sub-skill `/ce-rca-drive-sync` (back-fill runs to Drive + collect feedback)
 
 **Summary:** A durable, on-demand maintenance skill for the two gaps left after v2.58.0 enforced archival: runs created **before** it that never reached the Shared Drive, and the fact that **no feedback** has been collected. Run **`/ce-rca-drive-sync`** (no CE needed):

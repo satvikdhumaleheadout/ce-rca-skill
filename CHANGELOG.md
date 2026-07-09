@@ -5,6 +5,15 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.60.2] — 2026-07-09 — Harden gcloud installer download (no stale/planted /tmp file)
+
+**Summary:** `scripts/onboarding.sh` downloaded the Google Cloud SDK installer to a fixed, world-writable path (`/tmp/gcloud_install.sh`), and the bundled-Python fallback even **reused a pre-existing file** (`[ -f … ] || curl`) — so a stale file left by an interrupted run, or one planted by another local user on a shared machine, could be executed as-is (a TOCTOU / local code-execution vector, flagged in review). Both install paths now download to a **fresh unique `mktemp` file**, execute that, and delete it. No behavior change for a normal run. (We deliberately did **not** add ZIP checksums/GPG or move off the personal GitHub repo — a same-repo checksum doesn't defend the stated threat, and org migration is a separate hosting decision.)
+
+### Blast radius
+- `scripts/onboarding.sh` (both gcloud-install blocks), `VERSION`, `CHANGELOG.md`, `SKILL.md` (changelog row). No engine / renderer / report-contract change; plugin copy untouched.
+
+---
+
 ## [v2.60.1] — 2026-07-07 — Fix stale Drive sidecar reuse in `auto_archive()`
 
 **Summary:** `/ce-rca-drive-sync`'s Phase 1 back-fill was silently writing `report.html` into **already-trashed** Drive folders instead of creating fresh ones. Root cause: `auto_archive()` trusted a run's local sidecar (`logs/_drive_run_id.json`) unconditionally — if the user manually deleted that run's Drive folder, the sidecar still pointed at the (now-trashed) folder id, `find_existing_folder()` correctly reported it missing (its query excludes trashed items), but `auto_archive()` then reused the stale sidecar anyway and handed back a dead link. Added `_folder_is_live()`, which calls `files().get(..., fields="trashed")` on the sidecar's folder id before reusing it; if trashed or gone, `auto_archive()` now falls through to creating a brand-new folder, same as a run with no sidecar at all.

@@ -93,8 +93,12 @@ ensure_gcloud_python() {
   fi
   if [ -z "$py" ]; then
     say "→ Installing gcloud's bundled Python…"
-    [ -f /tmp/gcloud_install.sh ] || curl -sSL https://sdk.cloud.google.com -o /tmp/gcloud_install.sh 2>/dev/null || true
-    [ -f /tmp/gcloud_install.sh ] && bash /tmp/gcloud_install.sh --disable-prompts --install-dir="$HOME" >/dev/null 2>&1 || true
+    # Download to a fresh, unique temp file and execute THAT — never reuse a
+    # pre-existing /tmp path (world-writable → a stale or planted file must not run).
+    local _tmp; _tmp="$(mktemp "${TMPDIR:-/tmp}/gcloud_install_XXXXXX.sh")"
+    curl -sSL https://sdk.cloud.google.com -o "$_tmp" 2>/dev/null \
+      && bash "$_tmp" --disable-prompts --install-dir="$HOME" >/dev/null 2>&1 || true
+    rm -f "$_tmp"
     py="$(pick_python)"
   fi
   if [ -n "$py" ]; then
@@ -136,8 +140,11 @@ else
     brew install --cask google-cloud-sdk || true
   fi
   if ! have_gcloud; then
-    curl -sSL https://sdk.cloud.google.com -o /tmp/gcloud_install.sh \
-      && bash /tmp/gcloud_install.sh --disable-prompts --install-dir="$HOME" >/dev/null 2>&1 || true
+    # Fresh unique temp file (not a fixed world-writable /tmp path), download then run.
+    _tmp="$(mktemp "${TMPDIR:-/tmp}/gcloud_install_XXXXXX.sh")"
+    curl -sSL https://sdk.cloud.google.com -o "$_tmp" \
+      && bash "$_tmp" --disable-prompts --install-dir="$HOME" >/dev/null 2>&1 || true
+    rm -f "$_tmp"
     [ -f "$HOME/google-cloud-sdk/path.bash.inc" ] && . "$HOME/google-cloud-sdk/path.bash.inc"
     export PATH="$HOME/google-cloud-sdk/bin:$PATH"
   fi

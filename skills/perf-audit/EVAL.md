@@ -4,7 +4,7 @@
 
 You just completed a paid performance audit. Now step back and grade your own work honestly.
 
-This is not a formality. The purpose is to surface where the analysis fell short of what a sharp analyst would have done — not to ratify the choices made. Be harder on yourself than the perf team would be. If you claimed "no Bing campaigns" without checking fct_orders, say so. If you ran 600 lines for a HEALTHY CE that needed 200, name it. If a section rehashed dashboard data without adding insight, flag it.
+This is not a formality. The purpose is to surface where the analysis fell short of what a sharp analyst would have done — not to ratify the choices made. Be harder on yourself than the perf team would be. If you claimed "no Bing campaigns" without checking fct_orders_lambda, say so. If you ran 600 lines for a HEALTHY CE that needed 200, name it. If a section rehashed dashboard data without adding insight, flag it.
 
 ---
 
@@ -18,7 +18,7 @@ Before scoring, read five things in this order:
 2. **The report you wrote** — read it as if you've never seen this CE before. Does it hold together? Would you trust the conclusions?
 3. **Your investigation transcript** — recall what data you queried, what you skipped, what you decided at each fork. The reasoning matters as much as the conclusion.
 4. **The BQ script output, CSV uploads, and Ahrefs/Slack results** — check that claims in the report are grounded in actual data, not inferences from partial data.
-5. **The fct_orders channel breakdown** — this is the ground truth for "which channels exist." Cross-check Table 3 (Channel Breakdown) against it. This single check would have caught the Antelope Canyon Bing/PMax error.
+5. **The fct_orders_lambda channel breakdown** — this is the ground truth for "which channels exist." Cross-check Table 3 (Channel Breakdown) against it. This single check would have caught the Antelope Canyon Bing/PMax error.
 
 Reading the skill files first is what makes the failure mode classification (Section 4) possible. You cannot say "the instruction was missing" unless you have actually looked.
 
@@ -64,10 +64,10 @@ Never assign a tag without citing the source. The citation format depends on the
 > "Searched SKILL.md, DIAGNOSTICS.md — no instruction found for [behavior]."
 
 **`[AMBIGUOUS_INSTRUCTION]`** — quote the instruction that exists, then state what it was missing:
-> "SKILL.md Section 1 Table 3 says 'show ALL paid channels at macro level using BQ attribution data.' Instruction says to use BQ but doesn't explicitly say 'query fct_orders for all channels before concluding which channels exist' — Claude used GAds MCP campaign list instead."
+> "SKILL.md Section 1 Table 3 says 'show ALL paid channels at macro level using BQ attribution data.' Instruction says to use BQ but doesn't explicitly say 'query fct_orders_lambda for all channels before concluding which channels exist' — Claude used GAds MCP campaign list instead."
 
 **`[EXEC_ERROR]`** — name the file + section, show the instruction was clear, then state what went wrong:
-> "SKILL.md Section 1 Table 3 Channel Taxonomy lists 'Bing' as a required channel. BQ fct_orders returned $20.4K Bing revenue. Report stated 'No Bing campaigns identified.' The data was available; the report ignored it."
+> "SKILL.md Section 1 Table 3 Channel Taxonomy lists 'Bing' as a required channel. BQ fct_orders_lambda returned $20.4K Bing revenue. Report stated 'No Bing campaigns identified.' The data was available; the report ignored it."
 
 **`[DATA_LIMIT]`** — name the instruction that required the data, and explain why it was unavailable:
 > "SKILL.md 6b requires LY search terms (Q3). Q3 was not run for this CE due to context limits. Report correctly noted 'LY search term data not available at term level.'"
@@ -131,7 +131,7 @@ Score low if:
 This is the hardest theme to score honestly. Factual errors aren't "minor gaps" — they make the entire report untrustworthy. A single wrong channel identification ("No Bing campaigns" when Bing is generating $20K/month) is worse than a verbose exec summary.
 
 Score high if:
-- All channels are correctly identified — every channel with >$500 L4W revenue in fct_orders appears in Table 3 (Channel Breakdown)
+- All channels are correctly identified — every channel with >$500 L4W revenue in fct_orders_lambda appears in Table 3 (Channel Breakdown)
 - Campaign names, statuses, and bid strategies match what GAds MCP returned
 - Numbers are internally consistent (CE Snapshot matches Channel Overview matches Appendix)
 - Source attributions are correct (BQ vs GAds, revenue vs conv_value)
@@ -146,7 +146,7 @@ Score low if:
 - The wrong revenue column was used (GMV instead of net revenue)
 
 **Post-audit cross-check (run this before scoring Theme 2):**
-1. Query `fct_orders` for this CE's L4W revenue by channel — does Table 3 (Channel Breakdown) match?
+1. Query `fct_orders_lambda` for this CE's L4W revenue by channel — does Table 3 (Channel Breakdown) match?
 2. Sum all campaign spend in Section 4a — does it match the CE Snapshot spend total?
 3. For each action: does the thing you're recommending NOT already exist?
 
@@ -296,8 +296,8 @@ Present each theme with its score, justification, and gap + Why for each gap. Fo
 Example of a correctly-written gap block:
 
 ```
-**Gap:** Section 1 Table 3 stated "No Bing campaigns identified" when fct_orders showed $20.4K Bing revenue (EN $9.0K + OL $10.2K + Spanish $0.5K).
-**Why:** [EXEC_ERROR] — SKILL.md Section 1 Table 3 Channel Taxonomy lists "Bing" as a required channel row. Step 1 runs the BQ script which outputs channel breakdown including Bing. The data existed in fct_orders but was not queried before writing Section 1 Table 3 — the channel list was inferred from GAds MCP (which only returns Google campaigns). Fix: add explicit instruction in Step 1 to "query fct_orders for ALL channels before writing Section 1 Table 3."
+**Gap:** Section 1 Table 3 stated "No Bing campaigns identified" when fct_orders_lambda showed $20.4K Bing revenue (EN $9.0K + OL $10.2K + Spanish $0.5K).
+**Why:** [EXEC_ERROR] — SKILL.md Section 1 Table 3 Channel Taxonomy lists "Bing" as a required channel row. Step 1 runs the BQ script which outputs channel breakdown including Bing. The data existed in fct_orders_lambda but was not queried before writing Section 1 Table 3 — the channel list was inferred from GAds MCP (which only returns Google campaigns). Fix: add explicit instruction in Step 1 to "query fct_orders_lambda for ALL channels before writing Section 1 Table 3."
 ```
 
 ### 3. Top 2-3 improvements for the next run
@@ -348,7 +348,7 @@ Before submitting the evaluation, ask yourself:
 3. **Did I identify at least one real weakness, even if the overall quality was high?**
 4. **For every `[MISSING_INSTRUCTION]` tag: did I actually check SKILL.md and DIAGNOSTICS.md, or did I assume?**
 5. **For every `[EXEC_ERROR]` tag: was the data actually available, or am I retroactively blaming myself for something I couldn't have known?**
-6. **Did I run the Theme 2 cross-check** (fct_orders channel query, spend reconciliation, action existence check)?
+6. **Did I run the Theme 2 cross-check** (fct_orders_lambda channel query, spend reconciliation, action existence check)?
 7. **Does every row in the Section 4 table map to a concrete edit in a named file?**
 
 An evaluation where every theme scores 4 or 5 with no improvements identified is almost certainly not honest. An evaluation where failure mode tags appear without citations is not grounded — recheck those before submitting.
@@ -360,10 +360,10 @@ An evaluation where every theme scores 4 or 5 with no improvements identified is
 These are pass/fail gates. If any fails, fix before scoring.
 
 1. Read the exec summary aloud. Can you explain the CE's paid health in 3 sentences? If not, rewrite.
-2. Query `fct_orders` for this CE — does every channel with >$500 L4W revenue appear in Table 3 (Channel Breakdown)?
+2. Query `fct_orders_lambda` for this CE — does every channel with >$500 L4W revenue appear in Table 3 (Channel Breakdown)?
 3. Point to any cell in the campaign cohort table — does it have an inline delta? If not, fix.
 4. For each action — does it say WHO does WHAT by WHEN for HOW MUCH? If any element is missing, fix.
-5. For each action — does the thing you're recommending NOT already exist? Check fct_orders and GAds campaign list.
+5. For each action — does the thing you're recommending NOT already exist? Check fct_orders_lambda and GAds campaign list.
 6. Delete every sentence that starts with "Note:" or "ROI is defined as" or "Source:". Does the report still make sense? If yes, those sentences were unnecessary.
 7. Is the report length proportional? HEALTHY with 0-1 flags: <200 lines. WARNING with 2-4 flags: 200-400 lines. FULL with 5+ flags: 400-700 lines. Over 700 lines for any CE status = too verbose.
 8. **Coverage gate (hard fail).** The coverage gate is now a **backend HTML comment** at §9 (not rendered in the report) — the visible §9 is only the ranked **Red Flags** table. Inside that comment, every row in BOTH tables (HIGH "Material movers" + "Also enumerated") has a Disposition — CONFIRMED / RULED OUT / DATA GAP — and **no `_(dispose)_` placeholder remains**. Every CONFIRMED signal appears in the visible Red Flags table. Calibration still applies: HIGH rows get reasoned dispositions; "Also enumerated" rows get **one line each**. If any signal is undisposed → report **FAILS**; if minor signals are over-narrated → fix before scoring. (To check: read the §9 comment block in the source, not the rendered output.)
@@ -376,7 +376,7 @@ These are pass/fail gates. If any fails, fix before scoring.
 
 The Antelope Canyon report scored 4.72 on the old checklist EVAL but would have scored lower on this evaluator:
 
-- **T2 (Factual Correctness): 2** — Section 1 Table 3 initially stated "No Bing campaigns" and "No PMax" when Bing was generating $20.4K and PMax $26.1K. This is a credibility-destroying error. `[EXEC_ERROR]`: SKILL.md Section 1 Table 3 requires BQ attribution data; fct_orders had the data; report used GAds MCP campaign list instead.
+- **T2 (Factual Correctness): 2** — Section 1 Table 3 initially stated "No Bing campaigns" and "No PMax" when Bing was generating $20.4K and PMax $26.1K. This is a credibility-destroying error. `[EXEC_ERROR]`: SKILL.md Section 1 Table 3 requires BQ attribution data; fct_orders_lambda had the data; report used GAds MCP campaign list instead.
 - **T5 (Investigation Adaptivity): 3** — 600+ lines for a HEALTHY CE with 2 optimization levers (LP routing + Spanish scaling). SKILL.md Step 8 says "0-1 flags = SHORT (~1 page)" — this CE arguably warranted STANDARD, not FULL.
 - **T6 (Action Specificity): 3** — Action #5 recommended "Launch Bing" when Bing was already live and growing +1,594% YoY. Recommending something that already exists is worse than a vague action — it shows the analyst didn't check.
 

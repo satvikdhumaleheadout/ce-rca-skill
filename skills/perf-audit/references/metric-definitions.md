@@ -55,7 +55,7 @@ CVR = conversions / clicks * 100
 RPC = revenue / clicks
 ```
 - Revenue source depends on context:
-  - fct_orders for channel/cohort tables
+  - fct_orders_lambda for channel/cohort tables
   - ads_campaign_stats offline/calculated for Table 2
 
 ### Paid ROI
@@ -98,9 +98,9 @@ SIS = SUM(impressions) / SUM(eligible_searches) * 100
 
 | Metric | Table 1 (CE) | Table 2 (Paid) | Table 3 (Channel) |
 |--------|-------------|---------------|-------------------|
-| Revenue | `sum_revenue_predicted` | Offline/calculated from ads_campaign_stats | `amount_revenue_usd` from fct_orders |
+| Revenue | `sum_revenue_predicted` | Offline/calculated from ads_campaign_stats | `amount_revenue_usd` from fct_orders_lambda |
 | ROI | ROI(1) = (rev - costs) / GMC | CM1 / (spend + coupon_wallet) | Same as Paid ROI per channel |
-| Source | combined_entity_stats | ads_campaign_stats + pmax_asset_stats | fct_orders + ads_campaign_stats |
+| Source | combined_entity_stats | ads_campaign_stats + pmax_asset_stats | fct_orders_lambda + ads_campaign_stats |
 
 ---
 

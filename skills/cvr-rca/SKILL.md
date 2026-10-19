@@ -1268,8 +1268,8 @@ rather than adding more loops within the skill.
 ## Backlogs
 
 **Parked for later:**
-- Payment gateway error breakdown for A2O (`order_attempted_events_v2`:
-  `payment_gateway`, `payment_method`, `fraud_evaluation_result_origin`,
+- Payment gateway error breakdown for A2O (`order_attempted_events_lambda`:
+  `payment_gateway`, `payment_method`, `fraud_engine_evaluation_result_origin`,
   `failure_reason`)
 - LP2S price vs LY baseline
 - Bootstrap confidence intervals on Shapley values

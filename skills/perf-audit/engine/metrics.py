@@ -88,7 +88,7 @@ def cvr(conversions, clicks):
 
 def rpc(revenue, clicks):
     """Revenue Per Click = revenue / clicks.
-    Revenue source depends on context: fct_orders for channel/cohort,
+    Revenue source depends on context: fct_orders_lambda for channel/cohort,
     ads_campaign_stats offline/calculated for Table 2.
     """
     if not clicks:

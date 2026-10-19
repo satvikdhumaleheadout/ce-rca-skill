@@ -215,7 +215,7 @@ CVR-RCA provides the full diagnostic: Shapley decomposition (which step), mix ca
 - Action: Don't fix CVR. Fix coverage (dormant cohorts).
 
 **Assortment change (product/experience contribution shift)**
-- Check: the **Product Mix — Top Experiences (TGID) table in Section 4** (rendered by the engine from `fct_orders.experience_id`). Read the **Δ Share** column directly — no ad-hoc query needed.
+- Check: the **Product Mix — Top Experiences (TGID) table in Section 4** (rendered by the engine from `fct_orders_lambda.experience_id`). Read the **Δ Share** column directly — no ad-hoc query needed.
 - Confirmed if: any TGID with |Δ Share| > 5pp — a product that was a meaningful share of revenue LY is now near-zero (⚠️ / decayed), OR a new TGID (🆕) accounts for >5pp of revenue that didn't exist LY.
 - Meaning: product mix shifted — CVR/RPC change is a side effect of different products converting and pricing differently, not a change in traffic quality or funnel performance. The table's AOV / CR / TR / Net Rev/Order / CM1/Order columns show *how* the economics differ between the gaining and losing products (Net Rev/Order = AOV × CR × TR; CM1/Order subtracts direct costs).
 - **Tie to the Paid Value Shapley:** a mix shift toward a lower-AOV or lower-TR product mechanically drags blended Avg CM1 → this shows up as the Avg CM1 driver in the Section 4 Shapley. If the Shapley's Avg CM1 contribution is material and the TGID table shows a mix shift, they are the same story — state it once, with the product named.

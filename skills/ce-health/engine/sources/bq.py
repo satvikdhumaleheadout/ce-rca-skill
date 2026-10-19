@@ -2,11 +2,11 @@
 BigQuery source module for perf_audit_v3.
 
 Phase 1 adds per-campaign CM1/ROI by joining spend from google_ads_campaign_stats
-with last-touch attributed revenue from fct_orders.touchpoints.
+with last-touch attributed revenue from fct_orders_lambda.touchpoints.
 
 Column-name reconciliation (departs from plan's SQL to match live schema):
     The plan's SQL used `o.sum_revenue`, `o.sum_direct_costs`, `o.sum_coupon_discount`,
-    `o.sum_wallet_credits`, `o.completed_date`. The live fct_orders table uses:
+    `o.sum_wallet_credits`, `o.completed_date`. The live fct_orders_lambda table uses:
         amount_revenue_usd, amount_direct_costs_usd, amount_coupon_discount_usd,
         wallet_credits_usd, created_at (timestamp, not a date)
     These match the columns combined_entity_stats.sql aggregates from (verified
@@ -32,7 +32,7 @@ Reconciliation note (documented here because it's load-bearing for future QA):
     across all ad_platforms minus FULL CE-level direct costs -- it is a
     pre-attributed, CE-anchored aggregation.
 
-    `fct_orders.touchpoints` is PER-ORDER last-touch: each order contributes
+    `fct_orders_lambda.touchpoints` is PER-ORDER last-touch: each order contributes
     its revenue/direct_costs/coupons/wallet to the touchpoint with
     touchpoint_rank_reversed = 1. Orders with no paid touchpoint (organic /
     offline) are excluded entirely. Spend comes from google_ads_campaign_stats
@@ -111,7 +111,7 @@ def fetch_campaign_level_cm1_roi(
 
     Computes, per campaign_id in this CE's scope:
         - spend, clicks, impressions, online_conv (from google_ads_campaign_stats)
-        - revenue, direct_costs, coupons, wallet_credits (from fct_orders via
+        - revenue, direct_costs, coupons, wallet_credits (from fct_orders_lambda via
           last-touch touchpoint attribution)
         - cm1 = offline_contribution_margin (post-2025-09-01) or calculated_contribution_margin (fallback), from google_ads_campaign_stats — matches Omni definition
         - roi = cm1 / spend
@@ -150,7 +150,7 @@ def _fetch_window(ce_id, start, end):
             SUM(o.amount_direct_costs_usd) AS direct_costs,
             SUM(COALESCE(o.amount_coupon_discount_usd, 0)) AS coupons,
             SUM(COALESCE(o.wallet_credits_usd, 0)) AS wallet_credits
-        FROM `{project}.{dataset}.fct_orders` o,
+        FROM `{project}.{dataset}.fct_orders_lambda` o,
              UNNEST(o.touchpoints) t
         WHERE t.touchpoint_rank_reversed = 1
             AND DATE(o.created_at) BETWEEN '{start}' AND '{end}'
@@ -364,7 +364,7 @@ def fetch_channel_breakdown(
     # type: (...) -> Dict[str, List[Dict[str, Any]]]
     """Channel-level revenue + paid metrics for CE Snapshot Table 3.
 
-    Revenue/orders from fct_orders (ground truth attribution).
+    Revenue/orders from fct_orders_lambda (ground truth attribution).
     Paid metrics (spend, clicks, CVR, CM1, ROI) from ads_campaign_stats +
     google_ads_pmax_asset_stats. Merged by channel name.
 
@@ -591,10 +591,10 @@ def _shape_monthly_matrix(rows, months=13):
 
 def fetch_monthly_revenue_by_channel(ce_id):
     # type: (int) -> Dict[str, Any]
-    """Last 13 complete months of fct_orders revenue, grouped by month × channel.
+    """Last 13 complete months of fct_orders_lambda revenue, grouped by month × channel.
 
     Reuses the channel-classification CASE from _fetch_channel_window_v2 verbatim
-    and the same revenue source (fct_orders.amount_revenue_usd). Returns a
+    and the same revenue source (fct_orders_lambda.amount_revenue_usd). Returns a
     top-10-by-total matrix via _shape_monthly_matrix.
     """
     query = """
@@ -639,7 +639,7 @@ def fetch_monthly_revenue_by_channel(ce_id):
                 ELSE 'Other'
             END AS channel,
             amount_revenue_usd AS revenue
-        FROM `{project}.{dataset}.fct_orders`
+        FROM `{project}.{dataset}.fct_orders_lambda`
         WHERE combined_entity_id = '{ce_id}'
             AND DATE(created_at) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 13 MONTH)
             AND DATE(created_at) <= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
@@ -670,9 +670,9 @@ def fetch_monthly_revenue_by_channel(ce_id):
 
 def fetch_monthly_revenue_by_landing_page(ce_id):
     # type: (int) -> Dict[str, Any]
-    """Last 13 complete months of fct_orders revenue, grouped by month × landing_page.
+    """Last 13 complete months of fct_orders_lambda revenue, grouped by month × landing_page.
 
-    Same revenue source (fct_orders.amount_revenue_usd) and filters used by the
+    Same revenue source (fct_orders_lambda.amount_revenue_usd) and filters used by the
     landing-page snapshot. Returns a top-10-by-total matrix via _shape_monthly_matrix.
     """
     query = """
@@ -680,7 +680,7 @@ def fetch_monthly_revenue_by_landing_page(ce_id):
         SUBSTR(CAST(DATE(created_at) AS STRING), 1, 7) AS month,
         landing_page AS dim,
         ROUND(SUM(amount_revenue_usd), 2) AS revenue
-    FROM `{project}.{dataset}.fct_orders`
+    FROM `{project}.{dataset}.fct_orders_lambda`
     WHERE combined_entity_id = '{ce_id}'
         AND DATE(created_at) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 13 MONTH)
         AND DATE(created_at) <= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
@@ -707,7 +707,7 @@ def fetch_monthly_revenue_by_landing_page(ce_id):
 
 def _fetch_channel_window_v2(ce_id, start, end):
     # type: (int, date, date) -> List[Dict[str, Any]]
-    """Revenue (fct_orders) + paid metrics (ads_campaign_stats + pmax_asset_stats).
+    """Revenue (fct_orders_lambda) + paid metrics (ads_campaign_stats + pmax_asset_stats).
 
     Channel taxonomy v6.1 — clearer names than v6:
         Google Same Cat -> Google Search
@@ -716,7 +716,7 @@ def _fetch_channel_window_v2(ce_id, start, end):
         Bing Others     -> Bing Cross-sell
     Handles Bing misclassification (channel_name='Google Ads' + campaign '1 - ').
     """
-    # ── Part 1: Revenue from fct_orders ──
+    # ── Part 1: Revenue from fct_orders_lambda ──
     rev_query = """
     WITH classified AS (
         SELECT
@@ -761,7 +761,7 @@ def _fetch_channel_window_v2(ce_id, start, end):
             order_value_usd AS order_value,
             order_value_completed_usd AS order_value_completed,
             1 AS order_count
-        FROM `{project}.{dataset}.fct_orders`
+        FROM `{project}.{dataset}.fct_orders_lambda`
         WHERE combined_entity_id = '{ce_id}'
             AND DATE(created_at) BETWEEN '{start}' AND '{end}'
             AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
@@ -897,7 +897,7 @@ def _fetch_channel_window_v2(ce_id, start, end):
             "cvr": conv / clicks * 100 if clicks else None,
             "cm1": cm1,
             "roi": cm1 / spend * 100 if spend else None,
-            "rpc": None,  # RPC uses fct_orders revenue, set below
+            "rpc": None,  # RPC uses fct_orders_lambda revenue, set below
         }
 
     # ── Merge revenue + paid metrics ──
@@ -936,12 +936,12 @@ def _fetch_channel_window_v2(ce_id, start, end):
 
 
 # ============================================================================
-# VENDOR BREAKDOWN (supply / sales landscape — fct_orders by vendor)
+# VENDOR BREAKDOWN (supply / sales landscape — fct_orders_lambda by vendor)
 # ============================================================================
 
 def _fetch_vendor_window(ce_id, start, end):
     # type: (int, date, date) -> List[Dict[str, Any]]
-    """Vendor-level revenue + order economics from fct_orders for one window.
+    """Vendor-level revenue + order economics from fct_orders_lambda for one window.
 
     Net revenue = amount_revenue_usd; AOV/CR/TR mirror _fetch_channel_window_v2.
     vendor_name + fulfilment_type joined from dim_vendors. Lean by design: one
@@ -951,12 +951,14 @@ def _fetch_vendor_window(ce_id, start, end):
     WITH order_vendor AS (
         -- vendor_id is booking-grain; attribute each order to its PRIMARY booking's
         -- vendor (lowest booking_id) so order-level revenue isn't fan-out double-counted.
+        -- fct_bookings_lambda has no combined_entity_id; the CE filter comes from the
+        -- inner join to `orders` below.
         SELECT order_id, vendor_id FROM (
             SELECT order_id, vendor_id,
                    ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY booking_id) AS rn
-            FROM `{project}.{dataset}.fct_bookings_v2`
-            WHERE combined_entity_id = '{ce_id}'
-                AND DATE(created_at) BETWEEN '{start}' AND '{end}'
+            FROM `{project}.{dataset}.fct_bookings_lambda`
+            WHERE DATE(created_at) BETWEEN '{start}' AND '{end}'
+                AND booking_status NOT IN ('Uncaptured', 'Dummy')
         ) WHERE rn = 1
     ),
     orders AS (
@@ -964,7 +966,7 @@ def _fetch_vendor_window(ce_id, start, end):
             amount_revenue_usd AS revenue,
             order_value_usd AS order_value,
             order_value_completed_usd AS order_value_completed
-        FROM `{project}.{dataset}.fct_orders`
+        FROM `{project}.{dataset}.fct_orders_lambda`
         WHERE combined_entity_id = '{ce_id}'
             AND DATE(created_at) BETWEEN '{start}' AND '{end}'
             AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
@@ -1190,13 +1192,13 @@ def _fetch_cohort_monthly(ce_id):
 
 def _fetch_cohort_window(ce_id, start, end):
     # type: (int, date, date) -> List[Dict[str, Any]]
-    """Language cohort data from fct_orders (revenue) + google_ads_campaign_stats (paid metrics).
+    """Language cohort data from fct_orders_lambda (revenue) + google_ads_campaign_stats (paid metrics).
 
-    v6.1: Uses fct_orders direct classification (campaign_name) instead of touchpoint
+    v6.1: Uses fct_orders_lambda direct classification (campaign_name) instead of touchpoint
     attribution. This ensures Cohort TOTAL = Table 3 Google Search row (same source,
     same classification logic). Language extracted from campaign_name pattern.
     """
-    # ── Revenue side: fct_orders direct, grouped by language ──
+    # ── Revenue side: fct_orders_lambda direct, grouped by language ──
     rev_query = """
     SELECT
         CASE
@@ -1218,7 +1220,7 @@ def _fetch_cohort_window(ce_id, start, end):
         SUM(order_value_usd) AS order_value,
         SUM(order_value_completed_usd) AS order_value_completed,
         SUM(amount_direct_costs_usd) AS direct_costs
-    FROM `{project}.{dataset}.fct_orders`
+    FROM `{project}.{dataset}.fct_orders_lambda`
     WHERE combined_entity_id = '{ce_id}'
         AND DATE(created_at) BETWEEN '{start}' AND '{end}'
         AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
@@ -1274,7 +1276,7 @@ def _fetch_cohort_window(ce_id, start, end):
         )
         return []
 
-    # Map campaign_language codes to fct_orders language names
+    # Map campaign_language codes to fct_orders_lambda language names
     lang_map = {
         "EN": "English", "ES": "Spanish", "OL": "Other Languages",
         "FR": "French", "DE": "German", "IT": "Italian",
@@ -1364,7 +1366,7 @@ def _fetch_cohort_window(ce_id, start, end):
 
 def fetch_customer_country_distribution(ce_id, tw_start, tw_end):
     # type: (int, date, date) -> List[Dict[str, Any]]
-    """Customer country distribution from fct_orders.
+    """Customer country distribution from fct_orders_lambda.
 
     Used in Section 4a geo gap analysis: compare where customers come from
     vs where ads serve to flag under-served feeder markets.
@@ -1375,7 +1377,7 @@ def fetch_customer_country_distribution(ce_id, tw_start, tw_end):
         card_issuing_country AS customer_country,
         COUNT(DISTINCT order_id) AS orders,
         SUM(amount_revenue_usd) AS revenue
-    FROM `{project}.{dataset}.fct_orders`
+    FROM `{project}.{dataset}.fct_orders_lambda`
     WHERE combined_entity_id = '{ce_id}'
         AND DATE(created_at) BETWEEN '{start}' AND '{end}'
         AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
@@ -1430,7 +1432,7 @@ def fetch_all_paid_metrics(
     Combines:
     - combined_entity_stats: count_ad_clicks, count_ad_impressions,
       sum_google_ads_spend + sum_microsoft_ads_spend + sum_pmax_ads_spend
-    - fct_orders WHERE channel_grouping = 'Paid': paid orders + paid revenue
+    - fct_orders_lambda WHERE channel_grouping = 'Paid': paid orders + paid revenue
 
     Returns dict with keys 'tw', 'p4w', 'ly', each containing:
       paid_clicks, paid_impressions, paid_spend, paid_orders, paid_revenue,
@@ -1468,7 +1470,7 @@ def fetch_all_paid_metrics(
         SELECT
             COUNT(*) AS paid_orders,
             ROUND(SUM(amount_revenue_usd), 0) AS paid_revenue
-        FROM `{project}.{dataset}.fct_orders`
+        FROM `{project}.{dataset}.fct_orders_lambda`
         WHERE combined_entity_id = '{ce_id}'
             AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
             AND user_type = 'Customer'

@@ -15,7 +15,7 @@ Three-layer pipeline:
 |---------|---------|--------|
 | 1. Executive Summary | Status + causal story + actions | Claude (written LAST) |
 | 2. CE Overview | Revenue, ROI(1), TR, CR, AOV | Engine (combined_entity_stats) |
-| 3. Channel Breakdown | All channels by revenue | Engine (fct_orders) |
+| 3. Channel Breakdown | All channels by revenue | Engine (fct_orders_lambda) |
 | 4. Paid Deep Dive | Search + PMax + Bing metrics, landing pages | Engine (ads_campaign_stats + pmax) |
 | 5. Coverage | Campaign cohorts, budget/bidding, geo | Engine (google_ads_campaign_stats) |
 | 6. External Dynamics | Demand, competition, money on table | Claude + Ahrefs MCP |

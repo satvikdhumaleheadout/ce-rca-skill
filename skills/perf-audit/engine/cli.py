@@ -63,7 +63,7 @@ def build_data_parser():
     p_shap = sub.add_parser("paid-shapley", help="Section 4: Paid value Shapley (Clicks x CVR x Avg CM1)")
     add_3w_dates(p_shap)
 
-    p5 = sub.add_parser("customer-country", help="Customer country distribution from fct_orders")
+    p5 = sub.add_parser("customer-country", help="Customer country distribution from fct_orders_lambda")
     add_single_dates(p5)
 
     p6 = sub.add_parser("geo-coverage", help="Geographic ad coverage from google_ads_ad_group_geo_stats")

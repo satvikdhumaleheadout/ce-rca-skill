@@ -360,7 +360,7 @@ def fetch_top_tgids(ce_id, cur, pri, ly_cur, ly_pri, top_n=10):
             -- LY Prior window
             SUM(CASE WHEN DATE(ord.created_at) BETWEEN '{lyp_s}' AND '{lyp_e}'
                 THEN ord.amount_revenue_usd ELSE 0 END) AS rev_ly_pri
-        FROM `{project}.{dataset}.fct_orders` ord
+        FROM `{project}.{dataset}.fct_orders_lambda` ord
         JOIN `{project}.{dataset}.dim_experiences` dex
             ON ord.experience_id = dex.experience_id
         WHERE ord.combined_entity_id = '{ce_id}'
@@ -417,7 +417,7 @@ def fetch_top_tgids(ce_id, cur, pri, ly_cur, ly_pri, top_n=10):
 
 def fetch_top_landing_pages(ce_id, cur, pri, ly_cur, ly_pri, top_n=10):
     # type: (int, Tuple[date,date], Tuple[date,date], Tuple[date,date], Tuple[date,date], int) -> List[Dict[str, Any]]
-    # Near-clone of fetch_top_tgids but grouped on fct_orders.landing_page
+    # Near-clone of fetch_top_tgids but grouped on fct_orders_lambda.landing_page
     # instead of experience_id/experience_name. Same metrics, filters, ranking.
     query = """
     WITH lp_data AS (
@@ -456,7 +456,7 @@ def fetch_top_landing_pages(ce_id, cur, pri, ly_cur, ly_pri, top_n=10):
             -- LY Prior window
             SUM(CASE WHEN DATE(ord.created_at) BETWEEN '{lyp_s}' AND '{lyp_e}'
                 THEN ord.amount_revenue_usd ELSE 0 END) AS rev_ly_pri
-        FROM `{project}.{dataset}.fct_orders` ord
+        FROM `{project}.{dataset}.fct_orders_lambda` ord
         WHERE ord.combined_entity_id = '{ce_id}'
             AND DATE(ord.created_at) >= '{lyp_s}'
             AND DATE(ord.created_at) <= '{c_e}'
@@ -625,11 +625,13 @@ def fetch_tgid_lead_time(ce_id, cur, ly_cur):
                 ELSE 'unknown'
             END AS lt_band,
             b.booking_id
-        FROM `{project}.{dataset}.fct_bookings` b
+        FROM `{project}.{dataset}.fct_bookings_lambda` b
         JOIN `{project}.{dataset}.dim_experiences` dex
             ON CAST(b.experience_id AS STRING) = CAST(dex.experience_id AS STRING)
         WHERE dex.combined_entity_id = '{ce_id}'
-            AND DATE(b.date_created_at_et) BETWEEN '{c_s}' AND '{c_e}'
+            AND DATE(b.created_at, 'America/New_York') BETWEEN '{c_s}' AND '{c_e}'
+            -- fct_bookings_lambda includes Uncaptured bookings (legacy fct_bookings did not); exclude them + Dummy
+            AND b.booking_status NOT IN ('Uncaptured', 'Dummy')
             AND b.lead_time_days IS NOT NULL AND b.lead_time_days >= 0
     ),
     tgid_totals AS (
@@ -663,18 +665,20 @@ def fetch_lead_time_cohorts(ce_id, cur, ly_cur):
                 ELSE 'unknown'
             END AS lead_time_band,
             CASE
-                WHEN DATE(b.date_created_at_et) BETWEEN '{c_s}' AND '{c_e}' THEN 'cur'
-                WHEN DATE(b.date_created_at_et) BETWEEN '{ly_s}' AND '{ly_e}' THEN 'ly'
+                WHEN DATE(b.created_at, 'America/New_York') BETWEEN '{c_s}' AND '{c_e}' THEN 'cur'
+                WHEN DATE(b.created_at, 'America/New_York') BETWEEN '{ly_s}' AND '{ly_e}' THEN 'ly'
             END AS period,
             b.booking_id,
             b.price_net_usd AS revenue,
             b.price_payable_usd AS order_value
-        FROM `{project}.{dataset}.fct_bookings` b
+        FROM `{project}.{dataset}.fct_bookings_lambda` b
         JOIN `{project}.{dataset}.dim_experiences` dex
             ON CAST(b.experience_id AS STRING) = CAST(dex.experience_id AS STRING)
         WHERE dex.combined_entity_id = '{ce_id}'
-            AND (DATE(b.date_created_at_et) BETWEEN '{c_s}' AND '{c_e}'
-                 OR DATE(b.date_created_at_et) BETWEEN '{ly_s}' AND '{ly_e}')
+            AND (DATE(b.created_at, 'America/New_York') BETWEEN '{c_s}' AND '{c_e}'
+                 OR DATE(b.created_at, 'America/New_York') BETWEEN '{ly_s}' AND '{ly_e}')
+            -- fct_bookings_lambda includes Uncaptured bookings (legacy fct_bookings did not); exclude them + Dummy
+            AND b.booking_status NOT IN ('Uncaptured', 'Dummy')
             AND b.lead_time_days IS NOT NULL
             AND b.lead_time_days >= 0
     )
@@ -1385,9 +1389,9 @@ def render_tgids_enriched(tgid_data, tgid_funnel, tgid_lt, w):
 def render_top_landing_pages(lp_sales, w):
     # type: (List[Dict], Dict) -> str
     # Revenue / order-metrics matrix at landing-page grain, straight from
-    # fct_orders (the TGID sales columns at a different grain). Deliberately NO
+    # fct_orders_lambda (the TGID sales columns at a different grain). Deliberately NO
     # funnel merge: the per-landing-page funnel already lives in its own section
-    # (§10 Landing Pages, fed into the Funnel block) and joining fct_orders.
+    # (§10 Landing Pages, fed into the Funnel block) and joining fct_orders_lambda.
     # landing_page (full URL) to mixpanel page_url (root, language-collapsed) is
     # not reliable enough to trust per-row. Keeping the two tables separate avoids
     # a fragile join and an extra fetch dependency.

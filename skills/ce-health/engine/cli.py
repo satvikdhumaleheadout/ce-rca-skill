@@ -53,7 +53,7 @@ def build_data_parser():
     p4 = sub.add_parser("cohorts", help="Section 4a: Campaign cohorts by language")
     add_3w_dates(p4)
 
-    p5 = sub.add_parser("customer-country", help="Customer country distribution from fct_orders")
+    p5 = sub.add_parser("customer-country", help="Customer country distribution from fct_orders_lambda")
     add_single_dates(p5)
 
     p6 = sub.add_parser("geo-coverage", help="Geographic ad coverage from google_ads_ad_group_geo_stats")

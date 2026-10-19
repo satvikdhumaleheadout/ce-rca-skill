@@ -5,6 +5,24 @@ is written for stakeholder consumption — what changed, why it matters.
 
 ---
 
+## [v2.61.0] — 2026-10-19 — Migrate all warehouse queries to the realtime `*_lambda` tables
+
+**Summary:** Data Platform's Realtime Orders migration (guide: "Realtime Tables Migration Guide", #data thread 2026-08-13) replaces the legacy order/booking models with near-real-time `*_lambda` views and is dropping the legacy tables (announced for 15 Oct 2026; they are now frozen CLONEs). Every CE-RCA query and every instruction that told Claude which table to read now points at the new models:
+- `fct_orders` → **`fct_orders_lambda`** (CE Health TGID / landing-page / channel / trajectory / cohort / country / vendor queries; all perf-audit engine queries; perf-audit `SKILL.md`, `EVAL.md`, `DIAGNOSTICS.md`, `schema-guide.md`, `sql-reference.md`, `metric-definitions.md`, renderer source notes). No column used by the skill was dropped or renamed — `fct_orders_lambda` only drops `tour_*`, `category_*`, `sub_category_*`, `name`, `phone_*`, `updated_at` and the `bookings` array, none of which we read. Sep-2026 parity vs legacy: Customer non-Dummy/non-Fraudulent orders, revenue, GBV and completed GBV match to within ~$100 on ~$14.2M revenue (live-data drift).
+- `fct_bookings` → **`fct_bookings_lambda`** (CE Health lead-time cohorts + TGID lead-time mix). `date_created_at_et` no longer exists → `DATE(created_at, 'America/New_York')` (identical on 100% of Sep-2026 legacy rows). **`fct_bookings_lambda` now includes `Uncaptured` bookings** (~141K in Sep-2026, ≈ +30% rows), so both queries add `booking_status NOT IN ('Uncaptured', 'Dummy')` per the migration owner's guidance.
+- `fct_bookings_v2` → **`fct_bookings_lambda`** (CE Health vendor breakdown). `fct_bookings_v2` was a **stale June-2026 clone**, so vendor tables for any window after ~mid-June were silently empty/partial — this is also a bug fix. `fct_bookings_lambda` has no `combined_entity_id`; the CE filter now comes from the existing inner join to `fct_orders_lambda`. Same Uncaptured/Dummy exclusion.
+- `order_attempted_events_v2` → **`order_attempted_events_lambda`** in the CVR-RCA A2O guidance (`SKILL.md` backlog, `hypothesis.md`, `actions.md` DATA-GAP template), with the renamed column `fraud_evaluation_result_origin` → **`fraud_engine_evaluation_result_origin`**.
+
+### Verification
+Ran CE Health (`--ce-id 167 --start 2026-09-01 --end 2026-09-30`) and perf-audit (`render`, L4W Sep 3–30) on `origin/main` vs this branch with every BigQuery statement logged: the new code issues **zero** queries against legacy tables (CE Health: 13× `fct_orders_lambda`, 5× `fct_bookings_lambda`; perf-audit: 23× `fct_orders_lambda`). The CE Health JSON was identical. Markdown differences were limited to: the vendor table, which now renders (it read "No vendor data available" before); lead-time counts that changed by ≤15 bookings (Dummy rows now excluded); historical trajectory cells that changed by ≤0.4% (lambda restatements); and the source-label text.
+
+### Blast radius
+- **Edited (SQL):** `skills/ce-health/ce_health.py`, `skills/ce-health/engine/sources/bq.py`, `skills/perf-audit/engine/sources/bq.py`.
+- **Edited (instructions / docs / source notes):** `skills/perf-audit/{SKILL,EVAL,DIAGNOSTICS,README}.md`, `skills/perf-audit/references/{schema-guide,sql-reference,metric-definitions}.md`, `skills/cvr-rca/SKILL.md`, `skills/cvr-rca/references/{hypothesis,actions}.md`, both engines' `cli.py` / `metrics.py` / `render/audit_skeleton.py`, `scripts/render_ce_health.py`.
+- Historical changelog rows are left as written. CVR-RCA's own SQL (`q0`–`q7`) reads only Mixpanel / dim tables and is unaffected. Plugin copy and `cerca-cowork` untouched.
+
+---
+
 ## [v2.60.2] — 2026-07-09 — Harden gcloud installer download (no stale/planted /tmp file)
 
 **Summary:** `scripts/onboarding.sh` downloaded the Google Cloud SDK installer to a fixed, world-writable path (`/tmp/gcloud_install.sh`), and the bundled-Python fallback even **reused a pre-existing file** (`[ -f … ] || curl`) — so a stale file left by an interrupted run, or one planted by another local user on a shared machine, could be executed as-is (a TOCTOU / local code-execution vector, flagged in review). Both install paths now download to a **fresh unique `mktemp` file**, execute that, and delete it. No behavior change for a normal run. (We deliberately did **not** add ZIP checksums/GPG or move off the personal GitHub repo — a same-repo checksum doesn't defend the stated threat, and org migration is a separate hosting decision.)

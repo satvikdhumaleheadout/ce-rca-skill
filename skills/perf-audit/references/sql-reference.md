@@ -18,7 +18,7 @@ All SQL queries extracted from `engine/sources/bq.py` for standalone use (runnin
 - Same boundary applies to revenue: `sum_conversion_value_offline_revenue` vs `sum_conversion_value_calculated_revenue`
 
 ### Attribution Semantics
-- `fct_orders.touchpoints` is an `ARRAY<STRUCT<campaign_id STRING, touchpoint_rank INT64, touchpoint_rank_reversed INT64, ...>>`
+- `fct_orders_lambda.touchpoints` is an `ARRAY<STRUCT<campaign_id STRING, touchpoint_rank INT64, touchpoint_rank_reversed INT64, ...>>`
 - `touchpoint_rank = 1` = **first touch** (earliest attribution_timestamp)
 - `touchpoint_rank_reversed = 1` = **last touch** (the one this engine uses)
 - `touchpoint.campaign_id` is formatted as `"1 - <numeric_id>"` -- strip the prefix with `REGEXP_EXTRACT(r'\d+$')` before casting to INT64
@@ -37,7 +37,7 @@ All SQL queries extracted from `engine/sources/bq.py` for standalone use (runnin
 ### CE ID Column Name Varies by Table
 | Table | CE ID Column |
 |-------|-------------|
-| `fct_orders` | `combined_entity_id` |
+| `fct_orders_lambda` | `combined_entity_id` |
 | `combined_entity_stats` | `combined_entity_id` |
 | `ads_campaign_stats` | `campaign_target_combined_entity_id` |
 | `google_ads_campaign_stats` | `campaign_target_combined_entity_id` |
@@ -53,7 +53,7 @@ All SQL queries extracted from `engine/sources/bq.py` for standalone use (runnin
 | `dim_combined_entities` | `combined_entity_id` |
 
 ### Channel Taxonomy (v6.1)
-The engine classifies `fct_orders` rows into channels using `channel_name`, `campaign_name`, and `channel_grouping`:
+The engine classifies `fct_orders_lambda` rows into channels using `channel_name`, `campaign_name`, and `channel_grouping`:
 
 | Channel | Classification Logic |
 |---------|---------------------|
@@ -125,9 +125,9 @@ WHERE combined_entity_id = '{ce_id}'
 
 Called via `_fetch_channel_window_v2` for 3 windows (TW, LY, Prior 4W) + `_fetch_monthly_summary` for L12M trajectory.
 
-### Sub-query 1: Revenue from fct_orders
+### Sub-query 1: Revenue from fct_orders_lambda
 
-**Table:** `fct_orders`
+**Table:** `fct_orders_lambda`
 **Purpose:** Revenue side of channel breakdown. Classifies orders into channels using the taxonomy above.
 
 ```sql
@@ -174,7 +174,7 @@ WITH classified AS (
         order_value_usd AS order_value,
         order_value_completed_usd AS order_value_completed,
         1 AS order_count
-    FROM `headout-analytics.analytics_reporting.fct_orders`
+    FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
     WHERE combined_entity_id = '{ce_id}'
         AND DATE(created_at) BETWEEN '{start}' AND '{end}'
         AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
@@ -268,7 +268,7 @@ WHERE combined_entity_id = '{ce_id}'
 
 ### Python Merge Logic (Channel Breakdown)
 
-Revenue rows (fct_orders) are the primary set. For each revenue row, paid metrics are looked up by channel name and merged:
+Revenue rows (fct_orders_lambda) are the primary set. For each revenue row, paid metrics are looked up by channel name and merged:
 - `cpc = spend / clicks`
 - `cvr = conversions / clicks * 100`
 - `cm1 = cm1` (from paid query)
@@ -414,8 +414,8 @@ WHERE combined_entity_id = '{ce_id}'
 
 ## Section 4: All-Paid Metrics (CE Snapshot Table 1 supplement) -- `fetch_all_paid_metrics`
 
-**Tables:** `combined_entity_stats` + `fct_orders`
-**Purpose:** Paid-specific metrics for the CE Snapshot. Uses combined_entity_stats for clicks/impressions/spend and fct_orders for paid orders/revenue.
+**Tables:** `combined_entity_stats` + `fct_orders_lambda`
+**Purpose:** Paid-specific metrics for the CE Snapshot. Uses combined_entity_stats for clicks/impressions/spend and fct_orders_lambda for paid orders/revenue.
 **Windows:** Called 3x (TW, P4W, LY).
 
 ### Ads sub-query (from combined_entity_stats)
@@ -434,13 +434,13 @@ WHERE combined_entity_id = '{ce_id}'
     AND report_date BETWEEN '{start}' AND '{end}'
 ```
 
-### Orders sub-query (from fct_orders)
+### Orders sub-query (from fct_orders_lambda)
 
 ```sql
 SELECT
     COUNT(*) AS paid_orders,
     ROUND(SUM(amount_revenue_usd), 0) AS paid_revenue
-FROM `headout-analytics.analytics_reporting.fct_orders`
+FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
 WHERE combined_entity_id = '{ce_id}'
     AND order_status = 'Completed'
     AND channel_grouping = 'Paid'
@@ -451,7 +451,7 @@ WHERE combined_entity_id = '{ce_id}'
 - `paid_cpc = spend / clicks`
 - `paid_cvr = paid_orders / clicks`
 
-**Gotcha:** This function filters fct_orders to `order_status = 'Completed'` AND `channel_grouping = 'Paid'`, which is stricter than the channel breakdown query.
+**Gotcha:** This function filters fct_orders_lambda to `order_status = 'Completed'` AND `channel_grouping = 'Paid'`, which is stricter than the channel breakdown query.
 
 ---
 
@@ -459,9 +459,9 @@ WHERE combined_entity_id = '{ce_id}'
 
 Called for 3 windows (TW, LY, Prior 4W) via `_fetch_cohort_window` + L12M monthly via `_fetch_cohort_monthly`.
 
-### Revenue sub-query (from fct_orders, grouped by language)
+### Revenue sub-query (from fct_orders_lambda, grouped by language)
 
-**Table:** `fct_orders`
+**Table:** `fct_orders_lambda`
 **Purpose:** Revenue side of campaign cohorts. Classifies by language extracted from campaign_name.
 
 ```sql
@@ -485,7 +485,7 @@ SELECT
     SUM(order_value_usd) AS order_value,
     SUM(order_value_completed_usd) AS order_value_completed,
     SUM(amount_direct_costs_usd) AS direct_costs
-FROM `headout-analytics.analytics_reporting.fct_orders`
+FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
 WHERE combined_entity_id = '{ce_id}'
     AND DATE(created_at) BETWEEN '{start}' AND '{end}'
     AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
@@ -650,7 +650,7 @@ LIMIT 15
 
 ## Section 5: Customer Country Distribution -- `fetch_customer_country_distribution`
 
-**Table:** `fct_orders`
+**Table:** `fct_orders_lambda`
 **Purpose:** Where customers come from (card issuing country) for geo gap analysis.
 **Windows:** Called 2x (L4W, LY) via `fetch_customer_country_3w`.
 
@@ -659,7 +659,7 @@ SELECT
     card_issuing_country AS customer_country,
     COUNT(DISTINCT order_id) AS orders,
     SUM(amount_revenue_usd) AS revenue
-FROM `headout-analytics.analytics_reporting.fct_orders`
+FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
 WHERE combined_entity_id = '{ce_id}'
     AND DATE(created_at) BETWEEN '{start}' AND '{end}'
     AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
@@ -961,8 +961,8 @@ ORDER BY spend DESC
 
 ## Campaign-level CM1/ROI -- `fetch_campaign_level_cm1_roi`
 
-**Tables:** `fct_orders` (touchpoint attribution) + `google_ads_campaign_stats`
-**Purpose:** Per-campaign CM1 and ROI using last-touch attribution from fct_orders touchpoints. Called for TW and LY windows.
+**Tables:** `fct_orders_lambda` (touchpoint attribution) + `google_ads_campaign_stats`
+**Purpose:** Per-campaign CM1 and ROI using last-touch attribution from fct_orders_lambda touchpoints. Called for TW and LY windows.
 
 ```sql
 WITH orders_attr AS (
@@ -972,7 +972,7 @@ WITH orders_attr AS (
         SUM(o.amount_direct_costs_usd) AS direct_costs,
         SUM(COALESCE(o.amount_coupon_discount_usd, 0)) AS coupons,
         SUM(COALESCE(o.wallet_credits_usd, 0)) AS wallet_credits
-    FROM `headout-analytics.analytics_reporting.fct_orders` o,
+    FROM `headout-analytics.analytics_reporting.fct_orders_lambda` o,
          UNNEST(o.touchpoints) t
     WHERE t.touchpoint_rank_reversed = 1
         AND DATE(o.created_at) BETWEEN '{start}' AND '{end}'
@@ -1050,7 +1050,7 @@ ORDER BY s.spend DESC
 
 | Table | Schema | Used In |
 |-------|--------|---------|
-| `fct_orders` | analytics_reporting | Channel Breakdown, Campaign Cohorts, Customer Country, All-Paid Metrics, Campaign-level CM1 |
+| `fct_orders_lambda` | analytics_reporting | Channel Breakdown, Campaign Cohorts, Customer Country, All-Paid Metrics, Campaign-level CM1 |
 | `combined_entity_stats` | analytics_reporting | CE Health, Monthly Summary, All-Paid Metrics, Market Benchmarks |
 | `ads_campaign_stats` | analytics_reporting | Channel Breakdown, Monthly Summary, Paid Performance, Monthly Cohort, Market Benchmarks |
 | `google_ads_campaign_stats` | analytics_reporting | Campaign Cohorts, Budget/Bidding, Landing Pages (subquery), Campaign-level CM1 |

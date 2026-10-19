@@ -1432,10 +1432,10 @@ def _landing_groups(hdr):
 
 def build_landing_main(hdr, rows):
     """Build the Top-Landing-Pages SALES table — revenue / order metrics straight from
-    fct_orders, single 'Landing Page' identity column. 80%-revenue concentration green
+    fct_orders_lambda, single 'Landing Page' identity column. 80%-revenue concentration green
     (sorted by Share), CR<80% red, blue group dividers, full-URL hover. No funnel
     columns or colour scale: the per-page funnel lives in its own section (§10), and
-    fct_orders.landing_page ↔ mixpanel page_url is not a reliable per-row join."""
+    fct_orders_lambda.landing_page ↔ mixpanel page_url is not a reliable per-row join."""
     nhdr = list(hdr)
     nrows = [list(r) for r in rows]
 

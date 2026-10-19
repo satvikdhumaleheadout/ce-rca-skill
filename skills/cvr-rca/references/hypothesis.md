@@ -282,9 +282,9 @@ market — distinct from a pax or UX problem.
 Three hypotheses to run in parallel:
 1. **Payment gateway failure** — elevated decline rate from a specific gateway
    or card network. Check if `payment_gateway` or `failure_reason` in
-   `order_attempted_events_v2` shows a spike for a specific payment method.
+   `order_attempted_events_lambda` shows a spike for a specific payment method.
 2. **Fraud rule tightening** — a rule change or new fraud model version is
-   blocking more legitimate transactions. `fraud_evaluation_result_origin` would
+   blocking more legitimate transactions. `fraud_engine_evaluation_result_origin` would
    show a change in classification rate.
 3. **Live inventory failure** — the experience slot was available when the user
    reached checkout but sold out between checkout start and payment confirmation
@@ -342,7 +342,7 @@ Check `c2o_sub` from `summary.json` first. C2O = C2A × A2O — both can lift in
 
 **If A2O improved** (more attempted orders completing):
 1. **Payment gateway stabilised** — gateway timeout/error rate fell after a fix; specific failure-code rate dropped.
-2. **Fraud rule loosened** — a rule rollback or model update reduced false-positive blocks. Check fraud block rate by `fraud_evaluation_result_origin`.
+2. **Fraud rule loosened** — a rule rollback or model update reduced false-positive blocks. Check fraud block rate by `fraud_engine_evaluation_result_origin`.
 3. **Live inventory sync improved** — fewer slot-sold-out failures at the order-attempt step.
 
 **If C2O improved via catalogue mix shift** (one TGID gained checkout share at the expense of others, and the gaining TGID has higher native C2O):

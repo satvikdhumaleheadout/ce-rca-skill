@@ -25,7 +25,7 @@ Campaign-level daily paid metrics across Google Ads and Microsoft Ads.
 - **SIS columns**: `count_eligible_searches`, `count_rank_lost_searches`, `count_budget_lost_searches`
 - **Used in**: Table 2 (Paid Performance), Table 3 (Channel paid metrics), Cohorts, Budget, Appendix A2-A3
 
-### fct_orders
+### fct_orders_lambda
 Order-level transaction data. Ground truth for revenue attribution.
 - **CE ID column**: `combined_entity_id` (STRING)
 - **Date column**: `created_at` (TIMESTAMP — use `DATE(created_at)`)
@@ -125,7 +125,7 @@ Device-segmented campaign metrics.
 |-------|-------------|
 | combined_entity_stats | `combined_entity_id` |
 | ads_campaign_stats | `campaign_target_combined_entity_id` |
-| fct_orders | `combined_entity_id` |
+| fct_orders_lambda | `combined_entity_id` |
 | google_ads_campaign_stats | `campaign_target_combined_entity_id` |
 | google_ads_pmax_asset_stats | `combined_entity_id` |
 | google_ads_ad_group_geo_stats | `campaign_target_combined_entity_id` |

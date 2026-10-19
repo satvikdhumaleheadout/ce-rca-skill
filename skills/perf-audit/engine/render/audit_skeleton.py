@@ -800,7 +800,7 @@ def render_tgid_table(tgid):
         f"Δ Share = L4W share − LY share (the assortment-shift signal). "
         f"Net Rev/Ord = net revenue per order (AOV × CR × TR, Headout's take); "
         f"CM1/Ord = (net revenue − direct costs) / order (true per-order margin). "
-        f"Source: `fct_orders.experience_id`, net revenue.*"
+        f"Source: `fct_orders_lambda.experience_id`, net revenue.*"
     )
     return "\n".join(out) + footer
 
@@ -841,7 +841,7 @@ def render_campaign_product_mix(campaign_product, top_n=15):
         f"\n*Top {len(rows)} paid (campaign × product) pairs by L4W net revenue "
         f"({n_all} pairs total — full matrix in Google Sheet Tab 7). "
         f"Paid scope only (Google/Bing campaign-attributed orders). "
-        f"Margin from `fct_orders`: TR = net rev / GMV-completed; CM1/Ord = "
+        f"Margin from `fct_orders_lambda`: TR = net rev / GMV-completed; CM1/Ord = "
         f"(net rev − direct costs) / order. Spend is campaign-level only, so ROI "
         f"can't split by product — TR/CM1 are the per-product margin read.*"
     )
@@ -1101,7 +1101,7 @@ def render_ad_group_audit(ad_group_audit):
         f"({fm(ad_group_audit.get('leak_spend'))} spend). Spend and ROI carry the **MoM \u0394 inline** "
         f"(vs P4W) \u2014 a worsening Leak reads differently from a recovering one; full MoM columns in Tab 8. "
         f"No YoY (ad-group names churn across the consolidation). Ad group \u00d7 product (experience_id) is not "
-        f"available \u2014 fct_orders has no ad_group_id; the Type column is the product-intent proxy.*"
+        f"available \u2014 fct_orders_lambda has no ad_group_id; the Type column is the product-intent proxy.*"
     )
     return "\n".join(out) + footer
 
@@ -1227,7 +1227,7 @@ def render_data_sources():
 | combined_entity_stats | Section 2 (CE Overview), Appendix A1 |
 | ads_campaign_stats | Section 4 (Paid Deep Dive), cohorts, Appendix A2-A3 |
 | google_ads_pmax_asset_stats | Section 4 PMax metrics, Paid Value Shapley |
-| fct_orders | Section 3 (Channel Breakdown), cohorts revenue, Section 4 Product Mix (TGID) |
+| fct_orders_lambda | Section 3 (Channel Breakdown), cohorts revenue, Section 4 Product Mix (TGID) |
 | google_ads_campaign_stats | Section 5 Budget/Bidding, Cohort paid |
 | google_ads_campaign_budget_stats | Section 5 Budget |
 | google_ads_ad_group_geo_stats | Section 5 Geography |
@@ -1371,7 +1371,7 @@ def render_audit(
         s.append("\n<!-- NARRATIVE: the ad-group-level audit (the type-level coverage above is the rollup). "
                  "Lead with the opportunity: name the **Scale** ad groups (ROI well above target = the algorithm is under-bidding a profitable group — Perf can raise budget / lower tROAS to capture volume; you set the magnitude) and the **Leak** ad groups (ROI <130% at material spend — say the $ at risk and route to LP/quality/match-type or trim). "
                  "Cross-check Leaks against the §4 Campaign × Product read (a low-TR product can explain a low-ROI ad group — that's a Product call, not a paid one). "
-                 "If no Scale/Leak flags, say 'ad groups are on-target' and move on. Note: ad group × product isn't available (no ad_group_id on fct_orders) — use the Type column as the intent proxy. -->\n")
+                 "If no Scale/Leak flags, say 'ad groups are on-target' and move on. Note: ad group × product isn't available (no ad_group_id on fct_orders_lambda) — use the Type column as the intent proxy. -->\n")
     s.append("\n### Search Term Clusters\n")
     s.append("<!-- If search terms CSV uploaded:\n"
              "Cluster analysis — map search terms to clusters. Cross-reference with ad group types above.\n"

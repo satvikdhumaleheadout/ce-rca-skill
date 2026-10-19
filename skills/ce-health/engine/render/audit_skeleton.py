@@ -954,7 +954,7 @@ def render_data_sources():
 | combined_entity_stats | Section 2 (CE Overview), Appendix A1 |
 | ads_campaign_stats | Section 4 (Paid Deep Dive), cohorts, Appendix A2-A3 |
 | google_ads_pmax_asset_stats | Section 4 PMax metrics |
-| fct_orders | Section 3 (Channel Breakdown), cohorts revenue |
+| fct_orders_lambda | Section 3 (Channel Breakdown), cohorts revenue |
 | google_ads_campaign_stats | Section 5 Budget/Bidding, Cohort paid |
 | google_ads_campaign_budget_stats | Section 5 Budget |
 | google_ads_ad_group_geo_stats | Section 5 Geography |
